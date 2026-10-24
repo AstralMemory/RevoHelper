@@ -1,0 +1,15 @@
+.vs/
+.idea/
+.worktrees/
+.tools/
+**/bin/
+**/obj/
+TestResults/
+coverage/
+artifacts/
+*.user
+*.suo
+*.nupkg
+*.snupkg
+*.log
+probe-output/

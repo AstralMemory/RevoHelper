@@ -67,7 +67,9 @@
 
 本项目采用 **Vibe Coding** 开发方式：代码主要由 AI 辅助编写，开发者负责产品逻辑、方案与改动审批、UI 设计、实际测试和迭代维护。
 
-程序免费使用。源码计划采用 **MIT** 协议公开，具体进度以仓库公告为准；当前仓库文件及 GitHub 自动生成的 “Source code” 压缩包，不等同于完整应用源码。第三方组件遵循各自许可证。
+程序免费使用。V1.0.0 应用源码已在本仓库公开，自有代码采用 [MIT 许可证](./LICENSE)，第三方组件遵循各自许可证，详见 [第三方声明](./THIRD_PARTY_NOTICES.md)。
+
+开发者可直接浏览 [应用源码](./src)，构建、测试与目录说明见 [BUILDING.md](./BUILDING.md)。普通用户请下载 Release 中的 `RevoHelper-v1.0.0.zip` 运行包；`RevoHelper-v1.0.0-source.zip` 及正式版下 GitHub 自动生成的 “Source code” 压缩包用于获取源码，不是运行包。
 
 ## 反馈与交流
 

@@ -1,0 +1,655 @@
+using System.IO;
+using System.Windows;
+using RevoHelper.App.Presentation;
+using RevoHelper.App.Settings;
+using RevoHelper.App.Lifecycle;
+using RevoHelper.App.SystemControl;
+using RevoHelper.App.Monitoring;
+using RevoHelper.Core.Control;
+using RevoHelper.Core.Control.DynamicPower;
+using RevoHelper.Core.Dashboard;
+using RevoHelper.Core.Discovery;
+using RevoHelper.Core.Hardware;
+using RevoHelper.Hardware.Windows.Discovery;
+using RevoHelper.Hardware.Windows.Telemetry;
+using RevoHelper.Hardware.Windows.OemStatus;
+using RevoHelper.Hardware.Windows.OemProfiles;
+using RevoHelper.Hardware.Windows.OemControl;
+using RevoHelper.Hardware.Windows.PowerPolicy;
+using RevoHelper.Hardware.Windows.CpuPower;
+using RevoHelper.Hardware.Windows.Display;
+using Microsoft.Win32;
+
+namespace RevoHelper.App;
+
+public partial class App : Application
+{
+    private IHardwareTelemetrySource? telemetrySource;
+    private CancellationTokenSource? telemetryCancellation;
+    private Task? telemetryTask;
+    private IOemStatusSource? oemStatusSource;
+    private CancellationTokenSource? oemStatusCancellation;
+    private Task? oemStatusTask;
+    private SystemTrayController? systemTrayController;
+    private MainWindowViewModel? mainViewModel;
+    private ApplicationInstanceGuard? instanceGuard;
+    private MachineIdentity? capabilityIdentity;
+    private OemControlInventory? capabilityInventory;
+    private IReadOnlyList<CpuBackendCapability> capabilityCpuBackends = [];
+    private OemRuntimeEvidence capabilityOemEvidence = OemRuntimeEvidence.None;
+    private IGpuOutputModeController? capabilityGpuOutputController;
+    private Task? capabilityProbeTask;
+    private SwitchableCpuPolicyController? directCpuPolicyController;
+    private PlatformAwareCpuPolicyController? platformAwareCpuPolicyController;
+    private ExperimentalControlsViewModel? experiments;
+    private WindowsProcessorFrequencyLimitController? processorFrequencyLimitController;
+    private WindowsProcessorBoostController? processorBoostController;
+    private PerformanceMonitorController? performanceMonitor;
+    private bool previewOnly;
+    private System.Windows.Forms.PowerLineStatus lastPowerLineStatus;
+    private readonly WindowsDisplayController displayController = new();
+
+    protected override void OnStartup(StartupEventArgs e)
+    {
+        base.OnStartup(e);
+        if (e.Args is ["--snapshot-preview", var outputDirectory])
+        {
+            previewOnly = true;
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            SnapshotPreview.Render(outputDirectory);
+            Shutdown();
+            return;
+        }
+        var launchedFromWindowsStartup = StartupCommand.IsStartupLaunch(e.Args);
+        var settingsPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "RevoHelper", "settings.json");
+        var settingsStore = new JsonApplicationSettingsStore(settingsPath);
+        var settings = settingsStore.Load();
+        var english = LocalizedUiCopy.NormalizeLanguageCode(settings.UiLanguageCode) == "en-US";
+
+        instanceGuard = new ApplicationInstanceGuard();
+        if (!instanceGuard.TryAcquire())
+        {
+            MessageBox.Show(
+                english ? "RevoHelper is already running. Exit the old instance from the system tray before starting this version.\n\nRevoHelper will not stop GCU, XTU, or other vendor services." : "检测到另一个 RevoHelper 正在运行。请先从系统托盘退出旧实例，再启动新版测试程序。\n\nRevoHelper 不会结束 GCU、XTU 或其他厂商服务。",
+                english ? "RevoHelper is already running" : "RevoHelper 已在运行",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            Shutdown();
+            return;
+        }
+
+        var controlConflictDetector = new ControlConflictDetector();
+        var controlConflicts = controlConflictDetector.Detect();
+        if (controlConflicts.Count > 0 && !launchedFromWindowsStartup)
+        {
+            var conflictList = string.Join("\n", controlConflicts.Select(conflict => $"• {conflict.DisplayName}"));
+            MessageBox.Show(
+                english ? $"These apps may also change performance, power, fan, or lighting settings:\n\n{conflictList}\n\nRevoHelper can coexist with the official control center. It will not stop or disable it."
+                    : $"检测到以下也可能写入性能、功耗、风扇或灯光设置的控制程序：\n\n{conflictList}\n\n" +
+                    "RevoHelper可以与官方控制台共存，不会停用或禁用它们",
+                english ? "Other control apps" : "OEM 前台会话提醒",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+
+        var dashboard = HomeDashboardFactory.Create(
+            new MachineIdentity(
+                "MECHREVO",
+                "正在识别设备",
+                string.Empty,
+                "正在识别处理器",
+                string.Empty),
+            []);
+        var startupRegistration = new WindowsStartupRegistration(
+            Environment.ProcessPath ?? "RevoHelper.exe");
+
+        try
+        {
+            settings = settings with
+            {
+                StartWithWindows = StartupRegistrationSynchronizer.Synchronize(startupRegistration)
+            };
+        }
+        catch (Exception exception)
+        {
+            // Keep the saved UI state if Windows startup registration cannot be queried or migrated.
+            RuntimeDiagnosticLog.Write("startup-registration", $"{exception.GetType().Name}: {exception.Message}");
+        }
+
+        var gcuStatusSource = new GcuMqttStatusSource();
+        oemStatusSource = gcuStatusSource;
+        var gpuOutputController = new GcuGpuOutputModeController(
+            gcuStatusSource,
+            new WindowsGpuOutputModeCapabilitySource());
+        var platformModeController = new GcuPlatformModeController(gcuStatusSource);
+        directCpuPolicyController = new SwitchableCpuPolicyController();
+        platformAwareCpuPolicyController = new PlatformAwareCpuPolicyController(
+            platformModeController,
+            new GcuCpuPowerLimitController(gcuStatusSource),
+            directCpuPolicyController);
+        var settingsDirectory = Path.GetDirectoryName(settingsPath)!;
+        processorBoostController = new WindowsProcessorBoostController(
+            new PowrProfPowerProfileApi(),
+            new JsonProcessorBoostCompatibilityLeaseStore(Path.Combine(settingsDirectory, "boost-compatibility-lease.json")));
+        var dynamicPowerController = new DynamicPowerController(
+            new WindowsDynamicFrequencyBackend(new PowrProfPowerProfileApi()),
+            new JsonDynamicPowerLeaseStore(Path.Combine(settingsDirectory, "dynamic-power-lease.json")));
+        processorFrequencyLimitController = new WindowsProcessorFrequencyLimitController(
+            new PowrProfPowerProfileApi(),
+            new JsonProcessorFrequencyLimitLeaseStore(
+                Path.Combine(settingsDirectory, "manual-frequency-lease.json")));
+
+        // Recover both frequency writers before any profile initialization can read or
+        // reapply stale state. The durable journals remain intact if recovery times out.
+        using (var recoveryTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(3)))
+        {
+            BoundedShutdown.Run(async () =>
+            {
+                await processorBoostController.RecoverAsync(recoveryTimeout.Token).ConfigureAwait(false);
+                await dynamicPowerController.RecoverAsync(recoveryTimeout.Token).ConfigureAwait(false);
+                if (dynamicPowerController.Status.HasRecoveryPending)
+                {
+                    return;
+                }
+
+                var recovered = await processorFrequencyLimitController
+                    .RecoverAsync(recoveryTimeout.Token).ConfigureAwait(false);
+                if (recovered.Succeeded)
+                {
+                    await LegacyFrequencyLimitMigration.RunAsync(
+                        settingsStore,
+                        processorFrequencyLimitController,
+                        recoveryTimeout.Token).ConfigureAwait(false);
+                }
+            }, TimeSpan.FromSeconds(3));
+        }
+        settings = settingsStore.Load();
+        try
+        {
+            settings = settings with
+            {
+                StartWithWindows = StartupRegistrationSynchronizer.Synchronize(startupRegistration)
+            };
+        }
+        catch (Exception exception)
+        {
+            // Keep the saved UI state if task readback is temporarily unavailable.
+            RuntimeDiagnosticLog.Write("startup-registration", $"{exception.GetType().Name}: {exception.Message}");
+        }
+
+        experiments = new ExperimentalControlsViewModel(
+            dynamicPowerController,
+            new BootWaterTaskManager(new WindowsBootWaterTaskPlatform(), WindowsBootWaterTaskPlatform.InstalledPath),
+            action => { if (!Dispatcher.HasShutdownStarted) Dispatcher.BeginInvoke(
+                System.Windows.Threading.DispatcherPriority.Background, action); });
+        var viewModel = new MainWindowViewModel(
+            dashboard,
+            settings,
+            settingsStore,
+            startupRegistration,
+            platformAwareCpuPolicyController,
+            processorBoostController,
+            platformModeController,
+            gpuOutputController,
+            processorFrequencyLimitController,
+            conflictServiceManager: new WindowsConflictServiceManager(),
+            quickControlsController: new GcuQuickControlsController(gcuStatusSource),
+            displayController: displayController,
+            officialConsoleRunningProbe: controlConflictDetector.IsOfficialConsoleRunning,
+            customPerformanceController: new GcuCustomPerformanceController(gcuStatusSource,
+                readMode: platformModeController.ReadPlatformModeAsync,
+                readEnforcedGpuPowerLimit: NvidiaGpuPowerLimitReader.ReadAsync,
+                powerBudget: new GpuPowerBudgetController(gcuStatusSource,
+                    platformModeController.ReadPlatformModeAsync, NvidiaGpuPowerLimitReader.ReadAsync,
+                    new JsonGpuPowerBudgetStore(Path.Combine(settingsDirectory, "gpu-power-budgets.json")))),
+            lightingProfileStore: new JsonLightingProfileStore(JsonLightingProfileStore.DefaultPath),
+            fanController: new GcuFanController(gcuStatusSource, readMode: platformModeController.ReadPlatformModeAsync),
+            experiments: experiments,
+            fanBoostController: new GcuFanBoostController(gcuStatusSource),
+            shutdownScheduler: new WindowsShutdownScheduler());
+        var window = new MainWindow(viewModel);
+        mainViewModel = viewModel;
+
+        MainWindow = window;
+        performanceMonitor = new PerformanceMonitorController(Path.Combine(settingsDirectory, "performance-monitor.json"), viewModel.Monitor);
+        performanceMonitor.SettingsRequested += () => ShowPerformanceMonitorSettings(window);
+        capabilityIdentity = dashboard.Identity;
+        capabilityInventory = UnprobedOemInventory();
+        capabilityCpuBackends = new WindowsCpuBackendProbe().Probe(dashboard.Identity.Cpu);
+        RefreshRuntimeCapabilities(viewModel);
+        window.Show();
+        performanceMonitor.Initialize();
+        _ = ApplyAutomaticRefreshRateForCurrentPowerSourceAsync(viewModel);
+        StartConflictServiceDetection(viewModel);
+        StartDeferredHardwareDiscovery(viewModel);
+        systemTrayController = new(window, viewModel);
+        if (launchedFromWindowsStartup)
+        {
+            window.Hide();
+        }
+        lastPowerLineStatus = System.Windows.Forms.SystemInformation.PowerStatus.PowerLineStatus;
+        SystemEvents.PowerModeChanged += SystemEvents_PowerModeChanged;
+
+        StartTelemetry(viewModel);
+        StartOemStatus(viewModel);
+        _ = viewModel.TryAutoConnectLiquidCoolingAsync(CancellationToken.None);
+        StartRuntimeCapabilityProbe(gcuStatusSource, gpuOutputController, viewModel);
+        _ = InitializePlatformModeWhenReadyAsync(viewModel);
+        _ = InitializePerformancePolicyWhenReadyAsync(viewModel);
+        _ = SynchronizeScheduleWhenReadyAsync(viewModel);
+    }
+
+    private void StartConflictServiceDetection(MainWindowViewModel viewModel)
+    {
+        _ = viewModel.RefreshConflictServicesAsync(CancellationToken.None);
+    }
+
+    private static Task ApplyAutomaticRefreshRateForCurrentPowerSourceAsync(
+        MainWindowViewModel viewModel)
+    {
+        var status = System.Windows.Forms.SystemInformation.PowerStatus.PowerLineStatus;
+        if (status == System.Windows.Forms.PowerLineStatus.Unknown) return Task.CompletedTask;
+        return viewModel.ApplyAutomaticRefreshRateForPowerSourceAsync(
+            status == System.Windows.Forms.PowerLineStatus.Online, CancellationToken.None);
+    }
+
+    private void StartDeferredHardwareDiscovery(MainWindowViewModel viewModel)
+    {
+        _ = Task.Run(async () =>
+        {
+            IWmiQuery query = new RetryingWmiQuery(
+                new SystemManagementWmiQuery(),
+                maxAttempts: 3,
+                delay: TimeSpan.FromMilliseconds(200));
+            var identity = ReadIdentity(query);
+            var dashboard = HomeDashboardFactory.Create(
+                identity,
+                ReadDisplayAdapters(query));
+            OemControlInventory inventory;
+            try
+            {
+                inventory = new OemControlInventoryReader(new WindowsOemEnvironmentProbe(query)).Read();
+            }
+            catch (Exception exception)
+            {
+                inventory = new([], false, $"OEM control-chain probe failed: {exception.GetType().Name}");
+            }
+            var cpuBackends = new WindowsCpuBackendProbe().Probe(identity.Cpu);
+            var directProbe = await new DirectCpuPolicyBackendProbe().ProbeAsync(
+                identity.Cpu,
+                AppContext.BaseDirectory,
+                CancellationToken.None).ConfigureAwait(false);
+            cpuBackends = MergeDirectCpuCapability(cpuBackends, directProbe.Capability);
+            IReadOnlyList<RevoHelper.Core.Control.CpuPowerLimitProfile> powerProfiles;
+            try
+            {
+                powerProfiles = new OemCpuPowerLimitProfileReader(
+                    OemCpuPowerLimitProfileReader.DefaultProfileDirectory).Read();
+            }
+            catch (Exception)
+            {
+                powerProfiles = [];
+            }
+
+            _ = Dispatcher.BeginInvoke(() =>
+            {
+                if (directProbe.Controller is not null)
+                {
+                    directCpuPolicyController?.SetController(directProbe.Controller);
+                }
+                viewModel.UpdateDashboard(dashboard);
+                viewModel.ApplyCpuPowerLimitProfiles(powerProfiles);
+                capabilityIdentity = identity;
+                capabilityInventory = inventory;
+                capabilityCpuBackends = cpuBackends;
+                capabilityOemEvidence = MergeEvidence(
+                    capabilityOemEvidence,
+                    OemCpuPowerLimitProfileCapabilityMapper.Map(powerProfiles));
+                RefreshRuntimeCapabilities(viewModel);
+                _ = InitializePerformancePolicyWhenReadyAsync(viewModel);
+            });
+        });
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        if (previewOnly) { base.OnExit(e); return; }
+        performanceMonitor?.CloseWindows();
+        mainViewModel?.BeginShutdown();
+        systemTrayController?.Dispose();
+        SystemEvents.PowerModeChanged -= SystemEvents_PowerModeChanged;
+        using (var displayTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(3)))
+            BoundedShutdown.Run(() => displayController.StopAndRestoreAsync(displayTimeout.Token).AsTask(),
+                TimeSpan.FromSeconds(3));
+        if (experiments is not null)
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            BoundedShutdown.Run(() => experiments.ShutdownAsync(timeout.Token), TimeSpan.FromSeconds(3));
+            experiments.Dispose();
+        }
+        if (platformAwareCpuPolicyController is not null)
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            BoundedShutdown.Run(() => platformAwareCpuPolicyController.RestoreActivePresetBaselineAsync(timeout.Token).AsTask(),
+                TimeSpan.FromSeconds(3));
+        }
+        if (processorFrequencyLimitController is not null)
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            BoundedShutdown.Run(
+                () => processorFrequencyLimitController.RecoverAsync(timeout.Token).AsTask(),
+                TimeSpan.FromSeconds(3));
+        }
+        if (processorBoostController is not null)
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            BoundedShutdown.Run(() => processorBoostController.RecoverAsync(timeout.Token).AsTask(), TimeSpan.FromSeconds(3));
+        }
+        if (performanceMonitor is not null)
+            BoundedShutdown.Run(() => performanceMonitor.DisposeAsync().AsTask(), TimeSpan.FromSeconds(3));
+        // Even a synchronous native read/dispose must not hold the UI shutdown forever.
+        // On timeout the process exits; a frequency lease remains available on next launch.
+        BoundedShutdown.Run(async () =>
+        {
+            if (telemetryCancellation is not null) await telemetryCancellation.CancelAsync().ConfigureAwait(false);
+            if (oemStatusCancellation is not null) await oemStatusCancellation.CancelAsync().ConfigureAwait(false);
+            try { if (telemetryTask is not null) await telemetryTask.ConfigureAwait(false); } catch (Exception) { }
+            if (telemetrySource is not null)
+                try { await telemetrySource.DisposeAsync().ConfigureAwait(false); } catch (Exception) { }
+            try { if (oemStatusTask is not null) await oemStatusTask.ConfigureAwait(false); } catch (Exception) { }
+            if (oemStatusSource is not null)
+                try { await oemStatusSource.DisposeAsync().ConfigureAwait(false); } catch (Exception) { }
+            telemetryCancellation?.Dispose();
+            oemStatusCancellation?.Dispose();
+            directCpuPolicyController?.Dispose();
+        }, TimeSpan.FromSeconds(1));
+        instanceGuard?.Dispose();
+        base.OnExit(e);
+    }
+
+    private void StartTelemetry(MainWindowViewModel viewModel)
+    {
+        var displayUpdates = new LatestValueDispatcher<RevoHelper.Core.Telemetry.HardwareTelemetrySnapshot>(
+            action => Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, action),
+            viewModel.ApplyTelemetry);
+        if (MainWindow is { } window)
+        {
+            void UpdateVisibility() => displayUpdates.SetPresentationEnabled(
+                window.IsVisible && window.WindowState != WindowState.Minimized);
+            window.IsVisibleChanged += (_, _) => UpdateVisibility();
+            window.StateChanged += (_, _) => UpdateVisibility();
+            UpdateVisibility();
+        }
+        telemetrySource = new LibreHardwareTelemetrySource();
+        telemetryCancellation = new CancellationTokenSource();
+        var pump = new TelemetryPump(telemetrySource, TimeSpan.FromSeconds(1));
+        telemetryTask = pump.RunAsync(
+            snapshot =>
+            {
+                performanceMonitor?.Publish(snapshot);
+                displayUpdates.Publish(snapshot);
+                _ = experiments?.ObserveAsync(snapshot);
+                return ValueTask.CompletedTask;
+            },
+            exception =>
+            {
+                Dispatcher.BeginInvoke(() => viewModel.ReportTelemetryUnavailable(exception.Message));
+                _ = experiments?.PauseAutomaticallyAsync("遥测不可用，动态节能已暂停。");
+                return ValueTask.CompletedTask;
+            },
+            telemetryCancellation.Token);
+    }
+
+    public void ShowPerformanceMonitorSettings(Window owner)
+    {
+        if (owner is not MainWindow window) return;
+        if (!window.IsVisible) window.Show();
+        if (window.WindowState == WindowState.Minimized) window.WindowState = WindowState.Normal;
+        window.ShowPerformanceMonitorSettings();
+        window.Activate();
+    }
+
+    private void StartOemStatus(MainWindowViewModel viewModel)
+    {
+        oemStatusSource ??= new GcuMqttStatusSource();
+        oemStatusCancellation = new CancellationTokenSource();
+        oemStatusTask = oemStatusSource.RunAsync(
+            update =>
+            {
+                if (update is OemCpuStatusUpdate cpuSample)
+                    performanceMonitor?.PublishOemCpuTemperature(cpuSample.Status.TemperatureC);
+                if (update is OemConnectionStateUpdate connection)
+                    RuntimeDiagnosticLog.Write("gcu-connection", $"{connection.State}: {connection.Message}");
+                Dispatcher.BeginInvoke(() =>
+                {
+                    switch (update)
+                    {
+                        case OemCpuStatusUpdate cpu:
+                            viewModel.ApplyOemCpuStatus(cpu.Status,
+                                MainWindow is { IsVisible: true, WindowState: not WindowState.Minimized });
+                            break;
+                        case OemFanTableUpdate fan:
+                            viewModel.ApplyFanTable(fan.Table);
+                            capabilityOemEvidence = capabilityOemEvidence with { HasFanCurves = true };
+                            RefreshRuntimeCapabilities(viewModel);
+                            break;
+                        case OemPlatformModeUpdate platform:
+                            _ = viewModel.ObservePlatformModeAsync(platform.Selection, CancellationToken.None);
+                            break;
+                        case OemLightingZoneUpdate lighting:
+                            viewModel.ApplyLightingZoneState(lighting.Zone, lighting.State);
+                            break;
+                        case OemControlSessionUpdate:
+                            if (oemStatusSource is GcuMqttStatusSource source && capabilityGpuOutputController is { } gpu)
+                                StartRuntimeCapabilityProbe(source, gpu, viewModel);
+                            _ = viewModel.SynchronizeControlSessionAsync(CancellationToken.None);
+                            break;
+                        case OemConnectionStateUpdate connectionState:
+                            viewModel.ReportOemConnectionState(connectionState.Message);
+                            break;
+                    }
+                });
+                return ValueTask.CompletedTask;
+            },
+            exception =>
+            {
+                RuntimeDiagnosticLog.Write("gcu-error", $"{exception.GetType().Name}: {exception.Message}");
+                Dispatcher.BeginInvoke(() => viewModel.ReportOemStatusUnavailable(exception.Message));
+                return ValueTask.CompletedTask;
+            },
+            oemStatusCancellation.Token);
+    }
+
+    private void StartRuntimeCapabilityProbe(GcuMqttStatusSource source,
+        IGpuOutputModeController gpu, MainWindowViewModel viewModel)
+    {
+        capabilityGpuOutputController = gpu;
+        if (capabilityProbeTask is { IsCompleted: false }) return;
+        capabilityProbeTask = ProbeRuntimeCapabilitiesWhenReadyAsync(source, gpu, viewModel);
+    }
+
+    private async Task ProbeRuntimeCapabilitiesWhenReadyAsync(
+        GcuMqttStatusSource gcuStatusSource,
+        IGpuOutputModeController gpuOutputController,
+        MainWindowViewModel viewModel)
+    {
+        for (var attempt = 0; attempt < 12; attempt++)
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(500));
+                var status = await gcuStatusSource.ReadStatusAsync(CancellationToken.None);
+                var evidence = GcuRuntimeCapabilityMapper.Map(status);
+                GpuOutputModeState? gpuState = null;
+                try
+                {
+                    gpuState = await gpuOutputController.ReadStateAsync(CancellationToken.None);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    // GPU output mode is an independent optional capability.
+                }
+
+                evidence = evidence with
+                {
+                    HasGpuOutputModes = gpuState is not null && HasAnyGpuOutputMode(gpuState.Capabilities)
+                };
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    capabilityOemEvidence = MergeEvidence(capabilityOemEvidence, evidence);
+                    if (gpuState is not null) viewModel.ApplyGpuOutputState(gpuState);
+                    RefreshRuntimeCapabilities(viewModel);
+                    _ = viewModel.SynchronizeControlSessionAsync(CancellationToken.None);
+                });
+                return;
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                // The GCU observer owns reconnection. Each new session restarts a bounded probe.
+            }
+        }
+    }
+
+    private void RefreshRuntimeCapabilities(MainWindowViewModel viewModel)
+    {
+        var identity = capabilityIdentity ?? viewModel.Dashboard.Identity;
+        var inventory = capabilityInventory ?? UnprobedOemInventory();
+        viewModel.ApplyRuntimeCapabilities(RuntimeCapabilityFactory.Create(
+            identity,
+            inventory,
+            capabilityOemEvidence,
+            capabilityCpuBackends));
+    }
+
+    private static OemRuntimeEvidence MergeEvidence(
+        OemRuntimeEvidence current,
+        OemRuntimeEvidence update) => new(
+            new HashSet<PlatformMode>(current.SupportedPlatformModes.Concat(update.SupportedPlatformModes)),
+            current.HasCpuPowerLimits || update.HasCpuPowerLimits,
+            current.HasFanCurves || update.HasFanCurves,
+            current.HasGpuOutputModes || update.HasGpuOutputModes,
+            current.HasLighting || update.HasLighting,
+            current.HasLiquidCooling || update.HasLiquidCooling);
+
+    private static bool HasAnyGpuOutputMode(GpuOutputModeCapabilities capabilities) =>
+        capabilities.SupportsHybrid || capabilities.SupportsDiscrete || capabilities.SupportsIntegrated;
+
+    private static OemControlInventory UnprobedOemInventory() =>
+        new([], false, "OEM control chain has not been probed yet.");
+
+    private static IReadOnlyList<CpuBackendCapability> MergeDirectCpuCapability(
+        IReadOnlyList<CpuBackendCapability> capabilities,
+        CpuBackendCapability? directCapability)
+    {
+        if (directCapability is null)
+        {
+            return capabilities;
+        }
+
+        var merged = capabilities
+            .Where(item => item.Backend != directCapability.Backend)
+            .ToList();
+        merged.Add(directCapability);
+        return merged;
+    }
+
+    private void SystemEvents_PowerModeChanged(object sender, PowerModeChangedEventArgs e)
+    {
+        if (mainViewModel is null) return;
+        var powerLineStatus = System.Windows.Forms.SystemInformation.PowerStatus.PowerLineStatus;
+        var sourceChanged = powerLineStatus != lastPowerLineStatus;
+        if (e.Mode is PowerModes.Suspend or PowerModes.Resume || powerLineStatus != lastPowerLineStatus)
+            _ = experiments?.PauseAutomaticallyAsync("供电或睡眠状态发生变化，动态节能已暂停。");
+        lastPowerLineStatus = powerLineStatus;
+        if (e.Mode is PowerModes.Resume)
+        {
+            Dispatcher.BeginInvoke(() =>
+                _ = mainViewModel.SynchronizeControlSessionAsync(CancellationToken.None));
+            Dispatcher.BeginInvoke(() =>
+                _ = mainViewModel.TryAutoConnectLiquidCoolingAsync(CancellationToken.None));
+        }
+        if (e.Mode is PowerModes.Resume || (e.Mode is PowerModes.StatusChange && sourceChanged))
+        {
+            Dispatcher.BeginInvoke(() =>
+                _ = ApplyAutomaticRefreshRateForCurrentPowerSourceAsync(mainViewModel));
+        }
+    }
+
+    private async Task InitializePerformancePolicyWhenReadyAsync(MainWindowViewModel viewModel)
+    {
+        for (var attempt = 0; attempt < 10; attempt++)
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(500));
+                await viewModel.InitializePerformancePolicyAsync(CancellationToken.None);
+                if (!viewModel.PerformanceReadbackText.Contains("暂未读取", StringComparison.Ordinal))
+                {
+                    return;
+                }
+            }
+            catch (Exception)
+            {
+                // The GCU observer owns reconnection; this warm-up only populates initial UI values.
+            }
+        }
+    }
+
+    private async Task InitializePlatformModeWhenReadyAsync(MainWindowViewModel viewModel)
+    {
+        for (var attempt = 0; attempt < 10; attempt++)
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(500));
+                if (await viewModel.InitializePlatformModeAsync(CancellationToken.None)) return;
+            }
+            catch (Exception)
+            {
+                // The shared GCU observer owns reconnection; retry startup mode read briefly.
+            }
+        }
+    }
+
+    private static async Task SynchronizeScheduleWhenReadyAsync(MainWindowViewModel viewModel)
+    {
+        for (var attempt = 0; attempt < 12; attempt++)
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(750));
+                if (await viewModel.SynchronizeControlSessionAsync(CancellationToken.None)) return;
+            }
+            catch (Exception)
+            {
+                // The status source owns reconnects; retry only during the short startup window.
+            }
+        }
+    }
+
+    private static MachineIdentity ReadIdentity(IWmiQuery query)
+    {
+        try
+        {
+            return new WindowsMachineIdentityReader(query).Read();
+        }
+        catch (Exception)
+        {
+            return new("UNKNOWN", "设备识别暂不可用", string.Empty, "处理器识别暂不可用", string.Empty);
+        }
+    }
+
+    private static IReadOnlyList<string> ReadDisplayAdapters(IWmiQuery query)
+    {
+        try
+        {
+            return new WindowsDisplayAdapterReader(query).ReadNames();
+        }
+        catch (Exception)
+        {
+            return [];
+        }
+    }
+}

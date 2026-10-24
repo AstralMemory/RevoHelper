@@ -1,0 +1,29 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\RevoHelper.Core\RevoHelper.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.6" />
+    <PackageReference Include="MQTTnet" Version="5.2.0.1603" />
+    <PackageReference Include="System.Management" Version="10.0.10" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\packaging\PresentMon\PresentMon-2.6.0-x64.exe"
+                      LogicalName="RevoHelper.Resources.PresentMon.PresentMon-2.6.0-x64.exe" />
+    <EmbeddedResource Include="Resources\PawnIo\IntelMSR-0.2.10.bin"
+                      LogicalName="RevoHelper.Resources.PawnIo.IntelMSR-0.2.10.bin" />
+    <EmbeddedResource Include="Resources\PawnIo\IntelMCHBAR-0.2.10.bin"
+                      LogicalName="RevoHelper.Resources.PawnIo.IntelMCHBAR-0.2.10.bin" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+</Project>
