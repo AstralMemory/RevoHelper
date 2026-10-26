@@ -31,7 +31,7 @@ public sealed class IntelRaplCpuPolicyControllerTests
         Assert.False(result.Succeeded);
         Assert.Contains("恢复", result.Reason, StringComparison.Ordinal);
         Assert.Equal(original, msr.PackagePowerLimit);
-        Assert.Equal(2, msr.Writes.Count);
+        Assert.Single(msr.Writes); // The original fields are already intact; no restore write is needed.
     }
 
     [Fact]
@@ -66,6 +66,48 @@ public sealed class IntelRaplCpuPolicyControllerTests
         Assert.Equal(original, msr.PackagePowerLimit);
     }
 
+    [Fact]
+    public async Task RestorePoint_RestoresDisabledEnableBitsAndFractionalPowerEncoding()
+    {
+        var original = 361UL | (523UL << 32);
+        var msr = new FakeMsrAccess(3, original);
+        var controller = new IntelRaplCpuPolicyController(msr);
+        var baseline = await CpuPolicyRestorePoint.CaptureAsync(controller, default);
+
+        Assert.True((await controller.ApplyCpuPolicyAsync(new(35, 45, null), default)).Succeeded);
+        Assert.True((await baseline!.RestoreAsync(default)).Succeeded);
+        Assert.Equal(original, msr.PackagePowerLimit);
+    }
+
+    [Fact]
+    public async Task RestorePoint_KeepsCurrentUncontrolledBits()
+    {
+        var original = 360UL | (520UL << 32);
+        var msr = new FakeMsrAccess(3, original);
+        var controller = new IntelRaplCpuPolicyController(msr);
+        var baseline = await CpuPolicyRestorePoint.CaptureAsync(controller, default);
+        Assert.True((await controller.ApplyCpuPolicyAsync(new(35, 45, null), default)).Succeeded);
+        msr.SetExternal(msr.PackagePowerLimit | (1UL << 17));
+
+        Assert.True((await baseline!.RestoreAsync(default)).Succeeded);
+        Assert.Equal(original | (1UL << 17), msr.PackagePowerLimit);
+    }
+
+    [Fact]
+    public async Task RestorePoint_ExternalPowerChangeIsPreserved()
+    {
+        var msr = new FakeMsrAccess(3, 360UL | (520UL << 32));
+        var controller = new IntelRaplCpuPolicyController(msr);
+        var baseline = await CpuPolicyRestorePoint.CaptureAsync(controller, default);
+        Assert.True((await controller.ApplyCpuPolicyAsync(new(35, 45, null), default)).Succeeded);
+        var external = IntelRaplPowerLimitCodec.Encode(3, msr.PackagePowerLimit, 40, 50);
+        msr.SetExternal(external);
+
+        Assert.False((await baseline!.RestoreAsync(default)).Succeeded);
+        Assert.Equal(external, msr.PackagePowerLimit);
+        Assert.Single(msr.Writes);
+    }
+
     private sealed class FakeMsrAccess(ulong powerUnit, ulong packagePowerLimit) : IMsrAccess
     {
         private int writeCount;
@@ -74,6 +116,7 @@ public sealed class IntelRaplCpuPolicyControllerTests
         public bool IgnoreFirstWrite { get; init; }
         public ulong PackagePowerLimit { get; private set; } = packagePowerLimit;
         public List<(uint Register, ulong Value)> Writes { get; } = [];
+        public void SetExternal(ulong value) => PackagePowerLimit = value;
 
         public bool TryRead(uint register, out ulong value)
         {

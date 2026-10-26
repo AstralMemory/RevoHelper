@@ -1,11 +1,23 @@
-using System.Text.RegularExpressions;
 using RevoHelper.Core.Control;
+using RevoHelper.Core.Discovery;
+using RevoHelper.Hardware.Windows.Discovery;
 
 namespace RevoHelper.Hardware.Windows.OemProfiles;
 
-public sealed partial class OemCpuPowerLimitProfileReader(string profileDirectory)
+public sealed class OemCpuPowerLimitProfileReader(string profileDirectory)
 {
     public const string DefaultProfileDirectory = @"C:\Program Files\OEM\机械革命控制中心\AiStoneService\MyControlCenter\UserPofiles";
+
+    public static string ResolveProfileDirectory(OemControlInventory inventory)
+    {
+        var discovered = inventory.Components.FirstOrDefault(component => component.Name == "OEM profile store")?.Path;
+        if (!string.IsNullOrWhiteSpace(discovered) && Path.IsPathFullyQualified(discovered)) return discovered;
+        var service = inventory.Components.FirstOrDefault(component => component.Name == "GCUBridge" && component.Present);
+        var controlRoot = OemControlPathResolver.ResolveFromServiceImagePath(service?.Path);
+        // A known installation owns its profile directory even when that directory
+        // is empty; do not mix it with files left by a different installation.
+        return controlRoot is not null ? Path.Combine(controlRoot, "UserPofiles") : DefaultProfileDirectory;
+    }
 
     public IReadOnlyList<CpuPowerLimitProfile> Read()
     {
@@ -17,15 +29,13 @@ public sealed partial class OemCpuPowerLimitProfileReader(string profileDirector
         var profiles = new List<CpuPowerLimitProfile>();
         foreach (var path in Directory.EnumerateFiles(profileDirectory, "Mode*_Profile*.json"))
         {
-            var match = ProfileNamePattern().Match(Path.GetFileName(path));
-            if (!match.Success || !TryMapMode(match.Groups["mode"].Value, out var mode))
+            if (!OemProfileFileName.TryParse(path, out var key, out _))
             {
                 continue;
             }
 
             try
             {
-                var key = $"{mode}:{match.Groups["profile"].Value}";
                 var profile = OemCpuPowerLimitProfileParser.Parse(key, File.ReadAllText(path));
                 if (profile is not null)
                 {
@@ -41,19 +51,4 @@ public sealed partial class OemCpuPowerLimitProfileReader(string profileDirector
         return profiles.OrderBy(profile => profile.Key, StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
-    private static bool TryMapMode(string mode, out string mapped)
-    {
-        mapped = mode switch
-        {
-            "1" => "balanced",
-            "2" => "office",
-            "3" => "turbo",
-            "4" => "custom",
-            _ => string.Empty
-        };
-        return mapped.Length > 0;
-    }
-
-    [GeneratedRegex(@"^Mode(?<mode>\d+)_Profile(?<profile>\d+)\.json$", RegexOptions.IgnoreCase)]
-    private static partial Regex ProfileNamePattern();
 }

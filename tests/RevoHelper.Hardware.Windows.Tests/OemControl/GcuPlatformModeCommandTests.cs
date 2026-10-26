@@ -38,6 +38,34 @@ public sealed class GcuPlatformModeCommandTests
         Assert.Equal(expected, GcuPlatformModeCommand.CompanionMode(mode));
 
     [Fact]
+    public void MapStatus_MissingCustomIndex_DoesNotInventProfileOne()
+    {
+        var status = GcuCpuPolicyStatusParser.Parse("""{"OperatingMode":3}""")!;
+
+        Assert.Null(GcuPlatformModeStatusMapper.Map(status));
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(5)]
+    public void MapStatus_InvalidCustomIndex_IsNotARestoreBaseline(int index)
+    {
+        var status = new GcuCpuPolicyStatus(0, 0, 0, 0, 0, 0,
+            OperatingMode: 3, CustomProfileIndex: index);
+
+        Assert.Null(GcuPlatformModeStatusMapper.Map(status));
+    }
+
+    [Fact]
+    public void MapStatus_SingleTurboStrategyField_RepresentsBasicTurbo()
+    {
+        var status = new GcuCpuPolicyStatus(0, 0, 0, 0, 0, 0,
+            OperatingMode: 2, TurboProfileIndex: 0, Extreme: 1);
+
+        Assert.Equal(new PlatformModeSelection(PlatformMode.TurboQuiet), GcuPlatformModeStatusMapper.Map(status));
+    }
+
+    [Fact]
     public void MapStatus_ConvertsFirmwareCustomIndexToUserFacingProfileNumber()
     {
         var status = new GcuCpuPolicyStatus(

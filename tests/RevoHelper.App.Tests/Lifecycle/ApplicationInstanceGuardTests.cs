@@ -5,17 +5,23 @@ namespace RevoHelper.App.Tests.Lifecycle;
 public sealed class ApplicationInstanceGuardTests
 {
     [Fact]
-    public void TryAcquire_WhenAnotherRevoHelperProcessExists_RejectsLaunch()
+    public void TryAcquire_WhenTwoCurrentLaunchesSeeEachOther_OnlyMutexWinnerContinues()
     {
-        using var guard = new ApplicationInstanceGuard(
-            "revohelper-test-" + Guid.NewGuid().ToString("N"),
+        var mutexName = "revohelper-test-" + Guid.NewGuid().ToString("N");
+        ProcessIdentity[] snapshot = [new(20, "RevoHelper"), new(10, "RevoHelper"), new(30, "GCUService")];
+        using var first = new ApplicationInstanceGuard(
+            mutexName,
             currentProcessId: 20,
-            processSnapshot: () => [
-                new(20, "RevoHelper"),
-                new(10, "RevoHelper"),
-                new(30, "GCUService")]);
+            processSnapshot: () => snapshot);
+        using var second = new ApplicationInstanceGuard(
+            mutexName,
+            currentProcessId: 10,
+            processSnapshot: () => snapshot);
 
-        Assert.False(guard.TryAcquire());
+        Assert.True(first.TryAcquire());
+        Assert.False(second.TryAcquire());
+        first.Dispose();
+        Assert.True(second.TryAcquire());
     }
 
     [Fact]
@@ -30,6 +36,19 @@ public sealed class ApplicationInstanceGuardTests
                 new(30, "GCUService")]);
 
         Assert.False(guard.TryAcquire());
+    }
+
+    [Fact]
+    public void TryAcquire_WhenLegacyPreviewRejectsLaunch_ReleasesMutexForNextAttempt()
+    {
+        var mutexName = "revohelper-test-" + Guid.NewGuid().ToString("N");
+        using var blocked = new ApplicationInstanceGuard(mutexName, 20,
+            () => [new(20, "RevoHelper"), new(10, "RevoHelper-Preview-20260812")]);
+        Assert.False(blocked.TryAcquire());
+
+        using var next = new ApplicationInstanceGuard(mutexName, 30,
+            () => [new(30, "RevoHelper")]);
+        Assert.True(next.TryAcquire());
     }
 
     [Fact]

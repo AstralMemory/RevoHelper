@@ -70,6 +70,8 @@ public partial class MainWindow : Window
 
     private MainWindowViewModel ViewModel => (MainWindowViewModel)DataContext;
 
+    private void CapabilityRecheck_Click(object sender, RoutedEventArgs e) => ViewModel.RequestCapabilityRecheck();
+
     private void Window_Loaded(object sender, RoutedEventArgs e)
     {
         ApplyWindowGeometry();

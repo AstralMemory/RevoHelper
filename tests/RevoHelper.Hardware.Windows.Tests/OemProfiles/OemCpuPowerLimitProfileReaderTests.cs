@@ -24,6 +24,21 @@ public sealed class OemCpuPowerLimitProfileReaderTests : IDisposable
     }
 
     [Fact]
+    public void Read_InvalidValueTypeInOneFile_DoesNotDiscardOtherProfiles()
+    {
+        Directory.CreateDirectory(directory);
+        WriteProfile("Mode1_Profile1.json", 45, 65);
+        File.WriteAllText(Path.Combine(directory, "Mode2_Profile1.json"), """{"CPU":{"PL1":{},"PL2":35}}""");
+        WriteProfile("Mode3_Profile1.json", 80, 100);
+
+        var profiles = new OemCpuPowerLimitProfileReader(directory).Read();
+
+        Assert.Equal(2, profiles.Count);
+        Assert.Contains(profiles, profile => profile.Key == "balanced:1");
+        Assert.Contains(profiles, profile => profile.Key == "turbo:1");
+    }
+
+    [Fact]
     public void Read_MissingDirectory_ReturnsEmptyList()
     {
         Assert.Empty(new OemCpuPowerLimitProfileReader(directory).Read());

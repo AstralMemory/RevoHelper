@@ -15,4 +15,11 @@ public sealed record GcuCpuPolicyStatus(
     int? Extreme = null,
     int? Silent = null,
     int? BatteryChargingLimitPercent = null,
-    int? FanBoostEnable = null);
+    int? FanBoostEnable = null)
+{
+    // True only when this response carried all six CPU power values. Display
+    // values retained from earlier updates must never become a fresh write baseline.
+    public bool HasCpuPowerLimitSnapshot { get; init; } = true;
+
+    public bool SupportsTurboStrategies => Extreme is 0 or 1 && Silent is 0 or 1;
+}

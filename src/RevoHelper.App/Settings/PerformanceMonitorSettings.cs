@@ -24,7 +24,9 @@ public sealed record PerformanceMonitorSettings(
     string[]? ExcludedProcesses = null,
     int SchemaVersion = 2,
     MonitorPositionPreset PositionPreset = MonitorPositionPreset.TopCenter,
-    bool IsPositionLocked = false)
+    bool IsPositionLocked = false,
+    bool IsAutomatic = true,
+    string? SelectedProgramId = null)
 {
     public PerformanceMonitorSettings Normalize() => this with
     {
@@ -34,6 +36,8 @@ public sealed record PerformanceMonitorSettings(
         BackgroundOpacity = double.IsFinite(BackgroundOpacity) ? Math.Clamp(BackgroundOpacity, 0, 1) : 0.5,
         Left = Left is double x && double.IsFinite(x) ? x : null,
         Top = Top is double y && double.IsFinite(y) ? y : null,
+        SelectedProgramId = !string.IsNullOrWhiteSpace(SelectedProgramId) && SelectedProgramId.Length <= 64 &&
+            !SelectedProgramId.Any(char.IsControl) ? SelectedProgramId : null,
         ExcludedProcesses = (ExcludedProcesses ?? []).Where(name => !string.IsNullOrWhiteSpace(name))
             .Select(name => name.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).Take(64).ToArray()
     };

@@ -5,6 +5,20 @@ namespace RevoHelper.Hardware.Windows.Tests.OemProfiles;
 public sealed class OemCpuPowerLimitProfileParserTests
 {
     [Fact]
+    public void Parse_IntegerStringsPreservePowerAndDoNotEnableDisabledLimits()
+    {
+        var profile = OemCpuPowerLimitProfileParser.Parse("office:1", """
+            {"CPU":{"PL1":"25","PL2":"35","PL1_Enabled":false,"PL2_Enabled":false}}
+            """);
+
+        Assert.NotNull(profile);
+        Assert.Equal(25, profile.Pl1Watts);
+        Assert.Equal(35, profile.Pl2Watts);
+        Assert.False(profile.Pl1Enabled);
+        Assert.False(profile.Pl2Enabled);
+    }
+
+    [Fact]
     public void Parse_ReadsPowerLimitsAndEnableFlagsWithoutWritingSource()
     {
         const string json = """
@@ -36,6 +50,13 @@ public sealed class OemCpuPowerLimitProfileParserTests
     [Theory]
     [InlineData("not json")]
     [InlineData("{\"Name\":\"x\"}")]
+    [InlineData("[]")]
+    [InlineData("null")]
+    [InlineData("{\"CPU\":null}")]
+    [InlineData("{\"CPU\":[]}")]
+    [InlineData("{\"CPU\":{\"PL1\":{},\"PL2\":35}}")]
+    [InlineData("{\"CPU\":{\"PL1\":\"bad\",\"PL2\":35}}")]
+    [InlineData("{\"CPU\":{\"PL1\":\"25.5\",\"PL2\":35}}")]
     public void Parse_InvalidOrMissingCpuData_ReturnsNull(string json)
     {
         Assert.Null(OemCpuPowerLimitProfileParser.Parse("balanced:1", json));

@@ -1,5 +1,6 @@
 using RevoHelper.Core.Fans;
 using RevoHelper.Core.Control;
+using RevoHelper.Core.Hardware;
 using RevoHelper.Hardware.Windows.OemControl;
 
 namespace RevoHelper.Hardware.Windows.OemStatus;
@@ -11,6 +12,8 @@ public sealed record OemCpuStatusUpdate(OemCpuStatus Status) : OemStatusUpdate;
 public sealed record OemFanTableUpdate(FanCurveTable Table) : OemStatusUpdate;
 
 public sealed record OemPlatformModeUpdate(PlatformModeSelection Selection) : OemStatusUpdate;
+
+public sealed record OemRuntimeCapabilitiesUpdate(OemRuntimeEvidence Evidence) : OemStatusUpdate;
 
 public sealed record OemControlSessionUpdate : OemStatusUpdate;
 

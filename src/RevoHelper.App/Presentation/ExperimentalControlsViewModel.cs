@@ -139,8 +139,13 @@ public sealed class ExperimentalControlsViewModel : INotifyPropertyChanged, IDis
         finally { Interlocked.Exchange(ref pausingForTelemetry, 0); }
     }
 
-    public Task ShutdownAsync(CancellationToken token)
-    { stopping = true; watchdog?.Dispose(); return PauseAsync("程序退出，恢复原始频率限制。", token); }
+    public async Task<bool> ShutdownAsync(CancellationToken token)
+    {
+        stopping = true;
+        watchdog?.Dispose();
+        await PauseAsync("程序退出，恢复原始频率限制。", token).ConfigureAwait(false);
+        return operationError is null && !HasRecoveryPending && dynamicPower?.Status.IsLimited != true;
+    }
 
     private void Notify()
     {

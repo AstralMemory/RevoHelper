@@ -230,7 +230,8 @@ public sealed class HomeVisualMarkupTests
         Assert.Contains(document.Descendants(), element =>
             element.Name.LocalName == "RadioButton" &&
             (string?)element.Attribute("Tag") == "balanced" &&
-            (string?)element.Attribute("ToolTip") == "{Binding BalancedModeDescription}");
+            (string?)element.Attribute("ToolTip") == "{Binding BalancedModeTooltip}" &&
+            (string?)element.Attribute("AutomationProperties.HelpText") == "{Binding BalancedModeDescription}");
 
         var description = FindNamedElement(document, "ProfileDescription");
         Assert.Equal("{DynamicResource ProfileDescriptionBrush}", (string?)description.Attribute("Foreground"));
@@ -262,7 +263,8 @@ public sealed class HomeVisualMarkupTests
             Assert.Equal("{StaticResource CustomPlanRadioStyle}", (string?)pill.Attribute("Style")));
         var customProfile = document.Descendants().Single(element =>
             element.Name.LocalName == "RadioButton" && (string?)element.Attribute("Tag") == "custom");
-        Assert.Equal("{Binding UiCopy.CustomDescription}", (string?)customProfile.Attribute("ToolTip"));
+        Assert.Equal("{Binding CustomModeTooltip}", (string?)customProfile.Attribute("ToolTip"));
+        Assert.Equal("{Binding UiCopy.CustomDescription}", (string?)customProfile.Attribute("AutomationProperties.HelpText"));
         Assert.DoesNotContain(document.Descendants(), element =>
             (string?)element.Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml")) ==
             "CustomProfileSettingsButton");

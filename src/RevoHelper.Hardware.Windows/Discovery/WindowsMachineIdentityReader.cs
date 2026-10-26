@@ -4,16 +4,25 @@ namespace RevoHelper.Hardware.Windows.Discovery;
 
 public sealed class WindowsMachineIdentityReader(
     IWmiQuery query,
-    ICpuIdReader? cpuIdReader = null)
+    ICpuIdReader? cpuIdReader = null,
+    Action<string, Exception>? reportQueryFailure = null)
 {
     public MachineIdentity Read()
     {
-        var computer = query.ReadFirst("Win32_ComputerSystem");
-        var processor = query.ReadFirst("Win32_Processor");
-        var bios = query.ReadFirst("Win32_BIOS");
-        var baseboard = query.ReadFirst("Win32_BaseBoard");
+        var computer = ReadFields("Win32_ComputerSystem");
+        var processor = ReadFields("Win32_Processor");
+        var bios = ReadFields("Win32_BIOS");
+        var baseboard = ReadFields("Win32_BaseBoard");
 
-        var cpuId = (cpuIdReader ?? new X86CpuIdReader()).Read();
+        CpuIdSignature? cpuId = null;
+        try
+        {
+            cpuId = (cpuIdReader ?? new X86CpuIdReader()).Read();
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            reportQueryFailure?.Invoke("CPUID", exception);
+        }
         var vendorId = cpuId?.VendorId ?? Value(processor, "Manufacturer");
         var cpuIdentity = new CpuIdentity(
             CpuIdDecoder.Vendor(vendorId),
@@ -32,6 +41,21 @@ public sealed class WindowsMachineIdentityReader(
             Number(processor, "NumberOfCores"),
             Number(processor, "NumberOfLogicalProcessors"),
             cpuIdentity);
+    }
+
+    private IReadOnlyDictionary<string, string> ReadFields(string className)
+    {
+        try
+        {
+            return query.ReadFirst(className);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // An unavailable optional WMI class must not erase a confirmed manufacturer.
+            // A failed computer query remains unknown; never infer a brand from the CPU.
+            reportQueryFailure?.Invoke(className, exception);
+            return new Dictionary<string, string>();
+        }
     }
 
     private static string Value(IReadOnlyDictionary<string, string> values, string key) =>

@@ -23,10 +23,12 @@ public sealed class PerformanceMonitorPanelViewModelTests
         var panel = new PerformanceMonitorPanelViewModel();
         var events = 0;
         panel.PreferencesChanged += _ => events++;
-        panel.ApplyPreferences(new(Enabled: true, SizePreset: 4, IsPositionLocked: true));
+        panel.SourceModeChanged += _ => events++;
+        panel.ApplyPreferences(new(Enabled: true, SizePreset: 4, IsPositionLocked: true, IsAutomatic: false));
         Assert.True(panel.IsEnabled);
         Assert.Equal(4, panel.SelectedSizePreset);
         Assert.Contains("🔒", panel.PositionLockText);
+        Assert.True(panel.IsManual);
         Assert.Equal(0, events);
     }
 

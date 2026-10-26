@@ -7,6 +7,21 @@ namespace RevoHelper.Core.Tests.Hardware;
 public sealed class RuntimeCapabilityFactoryTests
 {
     [Fact]
+    public void ConfirmedFanEvidenceDoesNotDependOnModeList()
+    {
+        var identity = new MachineIdentity("MECHREVO", "Test", "", "CPU", "");
+        var evidence = OemRuntimeEvidence.None with { HasFanCurves = true };
+        var snapshot = RuntimeCapabilityFactory.Create(identity, Inventory(true), evidence, []);
+
+        Assert.True(snapshot.Supports(HardwareFeature.OemFanCurves));
+        Assert.False(snapshot.Supports(HardwareFeature.OemPlatformModes));
+        Assert.Empty(snapshot.SupportedPlatformModes);
+        Assert.False(snapshot.Supports(HardwareFeature.OemCpuPowerLimits));
+        Assert.False(RuntimeCapabilityFactory.Create(identity, Inventory(false), evidence, [])
+            .Supports(HardwareFeature.OemFanCurves));
+    }
+
+    [Fact]
     public void Create_UnknownMechrevoModel_WithPositiveRuntimeEvidence_EnablesOnlyConfirmedFeatures()
     {
         var identity = new MachineIdentity(

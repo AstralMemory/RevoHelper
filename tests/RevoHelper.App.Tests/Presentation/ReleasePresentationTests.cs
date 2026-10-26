@@ -105,7 +105,7 @@ public sealed class ReleasePresentationTests
         Assert.Equal("{Binding AppVersionText}", (string?)Named(window, "HomeVersionFooter").Attribute("Text"));
         Assert.Equal("Collapsed", (string?)Named(window, "HomeVersionFooter").Attribute("Visibility"));
         var source = File.ReadAllText(Locate("src", "RevoHelper.App", "Presentation", "MainWindowViewModel.cs"));
-        Assert.Contains("public string ReleaseVersionText => \"V1.0.0\";", source, StringComparison.Ordinal);
+        Assert.Contains("public string ReleaseVersionText => \"V1.0.1\";", source, StringComparison.Ordinal);
         Assert.Contains("public string AppVersionText => $\"RevoHelper {ReleaseVersionText} · {UiCopy.OpenSourceAndFree}\";", source, StringComparison.Ordinal);
         foreach (var old in new[] { "BETA · V1", "Beta v1 ·", "Beta v0.0.1", "界面预览 v23" })
         {
@@ -127,22 +127,19 @@ public sealed class ReleasePresentationTests
     }
 
     [Fact]
-    public void HomeSwitchDelayNotice_UsesRedCopyBetweenSensorsAndQuickControlsAndKeepsItsSpace()
+    public void HomeSwitchDelayNotice_IsAboveReadOnlySensorStatusAndOnlyAppearsWhileSwitching()
     {
         var window = LoadWindow();
-        var sensors = Named(window, "DeviceSensorsPanel");
         var notice = Named(window, "PlatformSwitchDelayNotice");
-        var quickControls = Named(window, "HomeQuickControlsPanel");
-        Assert.Same(sensors.Parent, notice.Parent);
-        Assert.Same(notice.Parent, quickControls.Parent);
+        var sensorStatus = Named(window, "HomeTelemetryStatusText");
+        Assert.Same(sensorStatus.Parent, notice.Parent);
         var siblings = notice.Parent!.Elements().ToList();
-        Assert.True(siblings.IndexOf(sensors) < siblings.IndexOf(notice));
-        Assert.True(siblings.IndexOf(notice) < siblings.IndexOf(quickControls));
+        Assert.True(siblings.IndexOf(notice) < siblings.IndexOf(sensorStatus));
         Assert.Equal("可能有1-2秒的切换延迟", (string?)notice.Attribute("Text"));
         Assert.Equal("#D9363E", (string?)notice.Attribute("Foreground"));
         Assert.Equal("16", (string?)notice.Attribute("Height"));
         var style = notice.Elements().Single(e => e.Name.LocalName == "TextBlock.Style").Elements().Single();
-        Assert.Contains(style.Elements(), e => (string?)e.Attribute("Property") == "Visibility" && (string?)e.Attribute("Value") == "Hidden");
+        Assert.Contains(style.Elements(), e => (string?)e.Attribute("Property") == "Visibility" && (string?)e.Attribute("Value") == "Collapsed");
         var pending = style.Descendants().Single(e => e.Name.LocalName == "DataTrigger");
         Assert.Equal("{Binding IsPlatformSwitchPending}", (string?)pending.Attribute("Binding"));
         Assert.Equal("True", (string?)pending.Attribute("Value"));
@@ -162,13 +159,13 @@ public sealed class ReleasePresentationTests
     }
 
     [Fact]
-    public void ReleaseMetadata_UsesStable100AndCurrentReleaseDocuments()
+    public void ReleaseMetadata_Uses101()
     {
         var project = XDocument.Load(Locate("src", "RevoHelper.App", "RevoHelper.App.csproj"));
-        Assert.Equal("1.0.0", project.Descendants("Version").Single().Value);
-        Assert.Equal("1.0.0.0", project.Descendants("AssemblyVersion").Single().Value);
-        Assert.Equal("1.0.0.38", project.Descendants("FileVersion").Single().Value);
-        Assert.Equal("1.0.0+20261025", project.Descendants("InformationalVersion").Single().Value);
+        Assert.Equal("1.0.1", project.Descendants("Version").Single().Value);
+        Assert.Equal("1.0.1.0", project.Descendants("AssemblyVersion").Single().Value);
+        Assert.Equal("1.0.1.2", project.Descendants("FileVersion").Single().Value);
+        Assert.Equal("1.0.1+20261026", project.Descendants("InformationalVersion").Single().Value);
         Assert.Empty(project.Descendants("Content"));
     }
 
@@ -176,8 +173,8 @@ public sealed class ReleasePresentationTests
     public void SharedBuildMetadata_UsesTheSameReleaseForCurrentAssemblies()
     {
         var defaults = XDocument.Load(Locate("Directory.Build.props"));
-        Assert.Equal("1.0.0", defaults.Descendants("Version").Single().Value);
-        Assert.Equal("1.0.0+20261025", defaults.Descendants("InformationalVersion").Single().Value);
+        Assert.Equal("1.0.1", defaults.Descendants("Version").Single().Value);
+        Assert.Equal("1.0.1+20261026", defaults.Descendants("InformationalVersion").Single().Value);
         Assert.Equal("Astral Memory", defaults.Descendants("Authors").Single().Value);
     }
 

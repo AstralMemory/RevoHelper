@@ -22,7 +22,6 @@ public static class OemCpuPowerLimitProfileCapabilityMapper
                     break;
                 case "turbo":
                     modes.Add(PlatformMode.TurboQuiet);
-                    modes.Add(PlatformMode.TurboHigh);
                     break;
                 case "custom":
                     modes.Add(PlatformMode.Custom);

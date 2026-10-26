@@ -174,6 +174,8 @@ public sealed class GpuPowerBudgetController(IGcuCustomPerformanceChannel channe
         // Preflight the entire owned set before restoring any dependency. For example, an
         // external TGP edit also owns its enabled state; restoring only our old OFF switch
         // would otherwise invalidate the newer target even if its watts were left alone.
+        // A mismatched readback may be another writer, not firmware clamping our request.
+        // LastObserved is diagnostic only and must never grant restoration ownership.
         foreach (var mutation in mutations)
         {
             try
@@ -181,7 +183,7 @@ public sealed class GpuPowerBudgetController(IGcuCustomPerformanceChannel channe
                 var payload = await ReadForSelectionAsync(selection, CancellationToken.None).ConfigureAwait(false);
                 var current = ReadField(payload, mutation.Setting);
                 if (current is null ||
-                    (current != mutation.Before && current != (mutation.LastObserved ?? mutation.Requested)))
+                    (current != mutation.Before && current != mutation.Requested))
                     return notRestored;
             }
             catch (Exception) { return notRestored; }
@@ -196,7 +198,7 @@ public sealed class GpuPowerBudgetController(IGcuCustomPerformanceChannel channe
                 if (current == mutation.Before) continue;
                 // A later external edit must never be overwritten by restoration. If a
                 // publish failed before readback, only our exact requested value is owned.
-                if (current is null || current != (mutation.LastObserved ?? mutation.Requested))
+                if (current is null || current != mutation.Requested)
                     return notRestored;
                 await WriteFieldAsync(selection, mutation.Setting, current.Value, mutation.Before, [],
                     CancellationToken.None).ConfigureAwait(false);

@@ -18,20 +18,25 @@ public sealed class GcuPlatformModeController(IGcuPlatformModeChannel channel) :
 
         await operationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         PlatformModeSelection? baseline = null;
+        var hasTurboStrategies = false;
         try
         {
-            baseline = GcuPlatformModeStatusMapper.Map(await channel.ReadStatusAsync(cancellationToken).ConfigureAwait(false));
+            var status = await channel.ReadStatusAsync(cancellationToken).ConfigureAwait(false);
+            baseline = GcuPlatformModeStatusMapper.Map(status);
             if (baseline is null) return ControlResult.Rejected("GCU 未返回可识别的当前整机档位。");
+            hasTurboStrategies = status.SupportsTurboStrategies;
+            if (selection.Mode == PlatformMode.TurboHigh && !hasTurboStrategies)
+                return ControlResult.Rejected("当前 GCU 尚未确认支持狂暴模式的高能/静音子策略。");
 
-            await ApplyAndVerifyAsync(selection, cancellationToken).ConfigureAwait(false);
-            return new ControlResult(true, $"整机档位已应用并回读：{Label(selection.Mode)}");
+            await ApplyAndVerifyAsync(selection, hasTurboStrategies, cancellationToken).ConfigureAwait(false);
+            return new ControlResult(true, $"整机档位已应用并回读：{Label(selection.Mode, hasTurboStrategies)}");
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             if (baseline is null) return ControlResult.Rejected($"整机档位切换失败：{exception.Message}");
             try
             {
-                await ApplyAndVerifyAsync(baseline, cancellationToken).ConfigureAwait(false);
+                await ApplyAndVerifyAsync(baseline, hasTurboStrategies, cancellationToken).ConfigureAwait(false);
                 return ControlResult.Rejected($"整机档位切换失败，已恢复原档位：{exception.Message}");
             }
             catch (Exception rollbackException) when (rollbackException is not OperationCanceledException)
@@ -48,6 +53,7 @@ public sealed class GcuPlatformModeController(IGcuPlatformModeChannel channel) :
 
     private async Task ApplyAndVerifyAsync(
         PlatformModeSelection selection,
+        bool hasTurboStrategies,
         CancellationToken cancellationToken)
     {
         await channel.WriteModeAsync(selection, cancellationToken).ConfigureAwait(false);
@@ -55,7 +61,7 @@ public sealed class GcuPlatformModeController(IGcuPlatformModeChannel channel) :
             .ConfigureAwait(false);
         await channel.WriteCompanionModeAsync(selection.Mode, cancellationToken).ConfigureAwait(false);
 
-        if (selection.Mode is PlatformMode.TurboQuiet or PlatformMode.TurboHigh)
+        if (hasTurboStrategies && (selection.Mode is PlatformMode.TurboQuiet or PlatformMode.TurboHigh))
         {
             await channel.WriteTurboStrategyAsync(selection.Mode, cancellationToken).ConfigureAwait(false);
             await WaitForAsync(status => TurboStrategyMatches(status, selection.Mode),
@@ -80,12 +86,17 @@ public sealed class GcuPlatformModeController(IGcuPlatformModeChannel channel) :
     private static bool ModeMatches(GcuCpuPolicyStatus status, PlatformModeSelection selection) =>
         status.OperatingMode == ModeNumber(selection.Mode) && selection.Mode switch
         {
-            PlatformMode.Office => status.OfficeProfileIndex == selection.ProfileIndex,
-            PlatformMode.Balanced => status.GamingProfileIndex == selection.ProfileIndex,
-            PlatformMode.TurboQuiet or PlatformMode.TurboHigh => status.TurboProfileIndex == selection.ProfileIndex,
+            PlatformMode.Office => StockProfileMatches(status.OfficeProfileIndex, selection.ProfileIndex),
+            PlatformMode.Balanced => StockProfileMatches(status.GamingProfileIndex, selection.ProfileIndex),
+            PlatformMode.TurboQuiet or PlatformMode.TurboHigh => StockProfileMatches(status.TurboProfileIndex, selection.ProfileIndex),
             PlatformMode.Custom => status.CustomProfileIndex == selection.ProfileIndex - 1,
             _ => false
         };
+
+    // Firmware may omit the index for its sole/default stock profile. Explicit
+    // non-default requests and explicit mismatches still require an exact match.
+    private static bool StockProfileMatches(int? reported, int requested) =>
+        reported == requested || (reported is null && requested == 0);
 
     private static bool TurboStrategyMatches(GcuCpuPolicyStatus status, PlatformMode mode) => mode switch
     {
@@ -103,11 +114,11 @@ public sealed class GcuPlatformModeController(IGcuPlatformModeChannel channel) :
         _ => throw new ArgumentOutOfRangeException(nameof(mode))
     };
 
-    private static string Label(PlatformMode mode) => mode switch
+    private static string Label(PlatformMode mode, bool hasTurboStrategies) => mode switch
     {
         PlatformMode.Office => "办公模式",
         PlatformMode.Balanced => "平衡模式",
-        PlatformMode.TurboQuiet => "狂暴模式 · 静音",
+        PlatformMode.TurboQuiet => hasTurboStrategies ? "狂暴模式 · 静音" : "狂暴模式",
         PlatformMode.TurboHigh => "狂暴模式 · 高能",
         PlatformMode.Custom => "自定义模式",
         _ => mode.ToString()

@@ -19,6 +19,27 @@ public sealed class PerformanceMonitorSettingsTests
         Assert.Equal(2, normalized.SchemaVersion);
         Assert.Equal(MonitorPositionPreset.TopCenter, normalized.PositionPreset);
         Assert.False(normalized.IsPositionLocked);
+        Assert.True(normalized.IsAutomatic);
+        Assert.Null(normalized.SelectedProgramId);
+    }
+
+    [Fact]
+    public void Load_VersionTwoWithoutSourceFieldsDefaultsToAutomatic_AndNewFieldsRoundTrip()
+    {
+        WithStore("""{"SchemaVersion":2,"Enabled":true,"SizePreset":3}""", store =>
+        {
+            var legacy = store.Load();
+            Assert.True(legacy.IsAutomatic);
+            Assert.Null(legacy.SelectedProgramId);
+            Assert.Equal(3, legacy.SizePreset);
+            store.Save(legacy with { IsAutomatic = false, SelectedProgramId = "selected-program" });
+
+            var restored = store.Load();
+            Assert.True(restored.Enabled);
+            Assert.False(restored.IsAutomatic);
+            Assert.Equal("selected-program", restored.SelectedProgramId);
+            Assert.Equal(3, restored.SizePreset);
+        });
     }
 
     [Theory]

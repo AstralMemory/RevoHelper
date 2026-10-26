@@ -330,7 +330,7 @@ public sealed class MainWindowViewModelTests
         Assert.False(viewModel.CanOpenGpuOutput);
         Assert.False(viewModel.CanOpenLighting);
         Assert.False(viewModel.CanOpenLiquidCooling);
-        Assert.Contains("尚未", viewModel.GpuOutputAvailabilityReason, StringComparison.Ordinal);
+        Assert.Equal("test", viewModel.GpuOutputAvailabilityReason);
     }
 
     [Fact]
@@ -377,8 +377,8 @@ public sealed class MainWindowViewModelTests
     {
         var viewModel = new MainWindowViewModel(CreateDashboard());
 
-        Assert.Equal("V1.0.0", viewModel.ReleaseVersionText);
-        Assert.Equal("RevoHelper V1.0.0 · 免费使用", viewModel.AppVersionText);
+        Assert.Equal("V1.0.1", viewModel.ReleaseVersionText);
+        Assert.Equal("RevoHelper V1.0.1 · 免费使用", viewModel.AppVersionText);
     }
 
     [Fact]
@@ -395,7 +395,7 @@ public sealed class MainWindowViewModelTests
         Assert.Equal("en-US", store.LastSaved?.UiLanguageCode);
         Assert.Equal("Laptop performance profiles", viewModel.UiCopy.HomeTitle);
         Assert.Equal("Performance", viewModel.DrawerTitle);
-        Assert.Equal("RevoHelper V1.0.0 · Free to use", viewModel.AppVersionText);
+        Assert.Equal("RevoHelper V1.0.1 · Free to use", viewModel.AppVersionText);
     }
 
     [Fact]

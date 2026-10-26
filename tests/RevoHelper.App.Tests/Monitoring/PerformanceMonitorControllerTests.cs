@@ -69,6 +69,69 @@ public sealed class PerformanceMonitorControllerTests
         Assert.Equal(0, context.Source.StartCalls);
     });
 
+    [Fact]
+    public void Restart_RestoresManualSelectionEvenWhenProgramIsNotRunning() => RunOnSta(() =>
+    {
+        using var first = new Context(null);
+        first.Panel.AddProgram(@"C:\Games\first.exe");
+        first.Panel.AddProgram(@"C:\Games\chosen.exe");
+        var selectedId = first.Panel.SelectedProgram!.Id;
+        Assert.Equal(-1, first.Source.LastPinned!.ProcessId);
+        first.CloseController();
+        // Simulate the saved enabled state without opening a real monitor HWND.
+        var settings = new PerformanceMonitorSettingsStore(Path.Combine(first.DirectoryPath, "monitor.json"));
+        settings.Save(settings.Load() with { Enabled = true });
+
+        using var restarted = new Context(null, first.DirectoryPath);
+
+        Assert.True(restarted.Panel.IsEnabled);
+        Assert.True(restarted.Panel.IsManual);
+        Assert.Equal(selectedId, restarted.Panel.SelectedProgram!.Id);
+        Assert.Equal(@"C:\Games\chosen.exe", restarted.Panel.SelectedProgram.ExecutablePath);
+        restarted.Panel.BackgroundOpacity = 0.75;
+        Assert.False(settings.Load().IsAutomatic);
+        Assert.Equal(selectedId, settings.Load().SelectedProgramId);
+        Assert.Equal(0, restarted.Source.StartCalls);
+        Assert.Equal(0, restarted.Resolver.Calls);
+    });
+
+    [Fact]
+    public void Restart_RestoresAutomaticModeAndSelectionAfterSwitchingBackFromManual() => RunOnSta(() =>
+    {
+        using var first = new Context(null);
+        first.Panel.AddProgram(@"C:\Games\first.exe");
+        first.Panel.AddProgram(@"C:\Games\chosen.exe");
+        var selectedId = first.Panel.SelectedProgram!.Id;
+        first.Panel.IsAutomatic = true;
+        first.CloseController();
+
+        using var restarted = new Context(null, first.DirectoryPath);
+
+        Assert.True(restarted.Panel.IsAutomatic);
+        Assert.Equal(selectedId, restarted.Panel.SelectedProgram!.Id);
+        Assert.Equal(0, restarted.Source.StartCalls);
+    });
+
+    [Fact]
+    public void RemovingManualSelection_PersistsRemainingSelectionWithoutChangingMode() => RunOnSta(() =>
+    {
+        using var first = new Context(null);
+        first.Panel.AddProgram(@"C:\Games\first.exe");
+        first.Panel.AddProgram(@"C:\Games\remove.exe");
+        first.Panel.RemoveSelectedProgram();
+        first.CloseController();
+
+        using var restarted = new Context(null, first.DirectoryPath);
+
+        Assert.True(restarted.Panel.IsManual);
+        Assert.Equal(@"C:\Games\first.exe", restarted.Panel.SelectedProgram!.ExecutablePath);
+        restarted.Panel.RemoveSelectedProgram();
+        Assert.True(restarted.Panel.IsManual);
+        Assert.Null(restarted.Panel.SelectedProgram);
+        Assert.Null(new PerformanceMonitorSettingsStore(Path.Combine(first.DirectoryPath, "monitor.json")).Load().SelectedProgramId);
+        Assert.Equal(-1, restarted.Source.LastPinned!.ProcessId);
+    });
+
     private static void RunOnSta(Action assertion)
     {
         Exception? failure = null;
@@ -87,14 +150,15 @@ public sealed class PerformanceMonitorControllerTests
     {
         private readonly PerformanceMonitorController controller;
         private bool closed;
-        public string DirectoryPath { get; } = Path.Combine(Path.GetTempPath(), "RevoHelper.MonitorController.Tests." + Guid.NewGuid().ToString("N"));
+        public string DirectoryPath { get; }
         public PerformanceMonitorPanelViewModel Panel { get; } = new();
         public FakeSource Source { get; } = new();
         public FakeResolver Resolver { get; }
         public MonitorProgramStore Records { get; }
 
-        public Context(ProcessTarget? result)
+        public Context(ProcessTarget? result, string? directoryPath = null)
         {
+            DirectoryPath = directoryPath ?? Path.Combine(Path.GetTempPath(), "RevoHelper.MonitorController.Tests." + Guid.NewGuid().ToString("N"));
             Resolver = new(result);
             Records = new(Path.Combine(DirectoryPath, "monitor-programs.json"));
             controller = new(Path.Combine(DirectoryPath, "monitor.json"), Panel, Source, Resolver, new NoWindowEnumerationTargets());

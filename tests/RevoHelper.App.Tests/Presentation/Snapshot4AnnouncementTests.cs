@@ -48,13 +48,16 @@ public sealed class Snapshot4AnnouncementTests
     [Theory]
     [InlineData("zh-CN")]
     [InlineData("en-US")]
-    public void BundledCopy_DistinguishesLocalPreparationFromOnlinePublicationAndIncludesDisclosure(string language)
+    public void BundledCopy_UsesReleaseVersionWithoutClaimingPublicationAndIncludesDisclosure(string language)
     {
-        var copy = AnnouncementCopy.For(language, "V1.0.0");
-        Assert.Equal("V1.0.0", copy.Version);
-        Assert.Equal("2026-10-25", copy.UpdatedDate);
+        var copy = AnnouncementCopy.For(language, "V1.0.1");
+        Assert.Equal("V1.0.1", copy.Version);
+        Assert.Equal("2026-10-26", copy.UpdatedDate);
         Assert.Contains("MIT", copy.Release);
-        Assert.Contains(language == "en-US" ? "does not confirm" : "不代表", copy.Release);
+        Assert.Contains("GitHub Releases", copy.Release);
+        Assert.DoesNotContain("Beta", copy.Notice);
+        Assert.DoesNotContain(language == "en-US" ? "V1.0.1 has been publicly released" : "V1.0.1 已正式发布", copy.Release);
+        Assert.Contains(language == "en-US" ? "does not unlock GPU" : "没有 GPU 功耗解锁", copy.Release);
         Assert.Contains(language == "en-US" ? "third-party" : "第三方", copy.Release);
         Assert.Contains(language == "en-US" ? "Some models" : "部分机型", copy.Compatibility);
         Assert.Contains(language == "en-US" ? "Not every feature" : "并非所有", copy.Compatibility);

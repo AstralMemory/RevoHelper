@@ -9,7 +9,6 @@ namespace RevoHelper.App.Monitoring;
 public sealed class PerformanceMonitorPanelViewModel : INotifyPropertyChanged
 {
     private PerformanceMonitorSettings preferences = new();
-    private bool automatic = true;
     private MonitorProgramEntry? selectedProgram;
     private string statusText = "监控已关闭。";
     private bool replacingPrograms;
@@ -41,11 +40,12 @@ public sealed class PerformanceMonitorPanelViewModel : INotifyPropertyChanged
     public bool IsBottomCenter => preferences.PositionPreset == MonitorPositionPreset.BottomCenter;
     public bool IsAutomatic
     {
-        get => automatic;
+        get => preferences.IsAutomatic;
         set
         {
-            if (automatic == value) return;
-            automatic = value; Notify(nameof(IsAutomatic)); Notify(nameof(IsManual));
+            if (IsAutomatic == value) return;
+            preferences = preferences with { IsAutomatic = value };
+            Notify(nameof(IsAutomatic)); Notify(nameof(IsManual));
             SourceModeChanged?.Invoke(value);
         }
     }
@@ -57,7 +57,9 @@ public sealed class PerformanceMonitorPanelViewModel : INotifyPropertyChanged
         {
             if (replacingPrograms) return;
             if (selectedProgram?.Id == value?.Id) return;
-            selectedProgram = value; Notify(nameof(SelectedProgram)); Notify(nameof(HasSelectedProgram));
+            selectedProgram = value;
+            preferences = preferences with { SelectedProgramId = value?.Id };
+            Notify(nameof(SelectedProgram)); Notify(nameof(HasSelectedProgram));
             ProgramSelectionChanged?.Invoke(value);
         }
     }
@@ -80,17 +82,18 @@ public sealed class PerformanceMonitorPanelViewModel : INotifyPropertyChanged
         foreach (var property in new[] { nameof(IsEnabled), nameof(AlwaysOnTop), nameof(SelectedSizePreset),
             nameof(BackgroundOpacity), nameof(BackgroundOpacityText), nameof(IsPositionLocked), nameof(PositionLockText),
             nameof(IsTopLeft), nameof(IsTopCenter), nameof(IsTopRight), nameof(IsBottomLeft), nameof(IsBottomRight),
-            nameof(IsBottomCenter) }) Notify(property);
+            nameof(IsBottomCenter), nameof(IsAutomatic), nameof(IsManual) }) Notify(property);
     }
 
     public void ReplacePrograms(IEnumerable<MonitorProgramEntry> entries, string? selectId = null)
     {
-        var selection = selectId ?? selectedProgram?.Id;
+        var selection = selectId ?? selectedProgram?.Id ?? preferences.SelectedProgramId;
         replacingPrograms = true;
         try
         {
             Programs.Clear(); foreach (var entry in entries) Programs.Add(entry);
             selectedProgram = Programs.FirstOrDefault(entry => entry.Id == selection) ?? Programs.FirstOrDefault();
+            preferences = preferences with { SelectedProgramId = selectedProgram?.Id };
         }
         finally { replacingPrograms = false; }
         Notify(nameof(SelectedProgram)); Notify(nameof(HasPrograms)); Notify(nameof(HasSelectedProgram));
@@ -99,8 +102,8 @@ public sealed class PerformanceMonitorPanelViewModel : INotifyPropertyChanged
     public void ApplyFrameRateStatus(FrameRateSnapshot frame)
     {
         if (frame.Status == FrameRateStatus.Stopped) { StatusText = "监控已关闭。"; return; }
-        if (!automatic && selectedProgram is null) { StatusText = "请先添加并选择一个程序；没有目标时显示 FPS —。"; return; }
-        if (!automatic && frame.Status == FrameRateStatus.TargetExited)
+        if (IsManual && selectedProgram is null) { StatusText = "请先添加并选择一个程序；没有目标时显示 FPS —。"; return; }
+        if (IsManual && frame.Status == FrameRateStatus.TargetExited)
         {
             StatusText = $"未运行：{selectedProgram!.DisplayName}\n启动后会自动匹配该程序。";
             return;

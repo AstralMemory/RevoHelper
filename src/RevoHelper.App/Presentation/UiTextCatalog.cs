@@ -26,6 +26,10 @@ public static class UiTextCatalog
 
     private static readonly (Regex Pattern, Func<Match, string> Format)[] Templates =
     [
+        Rule(@"^部分状态读取失败，已保留已确认状态：(.+)$", m => "Some statuses could not be read; confirmed values were preserved: " + TranslateStatusDetails(m.Groups[1].Value)),
+        Rule(@"^部分状态未读取：(.+)$", m => "Some statuses were not read: " + TranslateStatusDetails(m.Groups[1].Value)),
+        Rule(@"^(按键与设备状态|电源与电池状态|按键状态|设备开关状态|键盘灯光状态|电池保护状态|电源设置状态|快捷设置状态|充电上限状态)读取失败：(.+)$", m => TranslateKnown(m.Groups[1].Value) + " could not be read: " + TranslateStatusDetails(m.Groups[2].Value)),
+        Rule(@"^(按键状态|设备开关状态|键盘灯光状态|电池保护状态|电源设置状态|快捷设置状态|充电上限状态)未返回可识别状态。$", m => TranslateKnown(m.Groups[1].Value) + " did not return a recognized status."),
         Rule(@"^未运行：(.+)\n启动后会自动匹配该程序。$", m => $"Not running: {m.Groups[1].Value}\nIt will be matched when it starts."),
         Rule(@"^当前：([^\n]+)\n([\s\S]+)$", m => $"Current: {m.Groups[1].Value}\n{TranslateKnown(m.Groups[2].Value)}"),
         Rule(@"^当前：(.+) · 更改后需要重启生效$", m => $"Current: {TranslateKnown(m.Groups[1].Value)} · Restart after changing"),
@@ -66,6 +70,8 @@ public static class UiTextCatalog
     ];
 
     private static string TranslateKnown(string text) => English.TryGetValue(text, out var translated) ? translated : text;
+    private static string TranslateStatusDetails(string text) =>
+        string.Join("; ", text.Split('；').Select(part => Translate(part, "en-US")));
 
     private static (Regex, Func<Match, string>) Rule(string pattern, Func<Match, string> format) =>
         (new Regex(pattern, RegexOptions.CultureInvariant | RegexOptions.NonBacktracking, TimeSpan.FromMilliseconds(100)), format);
@@ -362,6 +368,27 @@ XtuService、dptftcs 与 ipfsvc 属于 Intel 平台服务，不是机械革命�
 Windows 处理器策略或 OEM 功耗控制后端已确认可用。	Windows CPU policy or OEM power control is available.
 尚未确认可用的处理器控制后端。	No compatible CPU control backend has been verified.
 正在探测当前设备是否支持此功能。	Checking whether this device supports the feature.
+重新检测	Recheck
+设备与功能检测	Device and feature detection
+设备与功能状态	Device and feature status
+按键与设备状态	Keyboard and device status
+电源与电池状态	Power and battery status
+按键状态	Keyboard status
+设备开关状态	Device switch status
+键盘灯光状态	Keyboard lighting status
+电池保护状态	Battery protection status
+电源设置状态	Power settings status
+快捷设置状态	Shortcut settings status
+充电上限状态	Charge limit status
+正在检测…	Checking…
+正在重新检测设备与官方控制组件…	Rechecking the device and OEM control components…
+正在检测设备与档位，请稍候；无需重复点击。	Checking the device and modes. Please wait; no need to click again.
+设备身份尚未识别成功；请重新检测，不代表机型不支持。	Device identity could not be confirmed. Recheck; this does not mean the model is unsupported.
+当前设备未识别为机械革命，暂不开放 OEM 控制。	This device was not identified as MECHREVO. OEM controls remain disabled.
+官方控制组件未确认完整；请确认官方控制台及其服务可用后重新检测。	Required OEM components have not all been confirmed. Check the official control center and its services, then recheck.
+已识别官方控制组件，尚未收到可用档位；请确认服务连接后重新检测。	OEM components were found, but no available modes have been reported. Check the service connection, then recheck.
+尚未收到此档位的可用证据；可以重新检测，暂不代表机型不支持。	This mode has not been confirmed yet. Recheck; this does not mean the model is unsupported.
+自定义档位或风扇控制尚未确认，曲线仅供查看。	Custom mode or fan control has not been confirmed. The curve is read-only.
 已通过当前设备的运行时探测。	Verified on this device.
 控制链存在，但尚未收到此功能的运行时证据。	A control interface is present, but support is not yet verified.
 当前设备未确认支持此功能。	This feature has not been verified on this device.

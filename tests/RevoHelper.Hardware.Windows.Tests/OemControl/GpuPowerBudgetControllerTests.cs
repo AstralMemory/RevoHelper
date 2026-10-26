@@ -107,17 +107,18 @@ public sealed class GpuPowerBudgetControllerTests
     }
 
     [Fact]
-    public async Task LowPowerTarget_FirmwareClampRestoresInsteadOfClaimingSeventyWatts()
+    public async Task LowPowerTarget_MismatchPreservesUnownedValueInsteadOfClaimingFirmwareClamp()
     {
         var device = new Device { BoostEnabled = false, BoostWatts = 0, MinimumAcceptedTgp = 95 };
         var store = new Store();
         var result = await Create(device, store).ApplyAsync(CustomPerformanceSetting.GpuTgpWatts, 70, default);
 
         Assert.False(result.Succeeded);
-        Assert.Equal(150, device.Tgp);
+        Assert.Equal(95, device.Tgp);
         Assert.False(device.BoostEnabled);
         Assert.Null(store.Read(1));
-        Assert.Contains("已恢复", result.Reason);
+        Assert.Contains("未确认恢复", result.Reason);
+        Assert.Single(device.Commands);
     }
 
     [Fact]
@@ -131,7 +132,7 @@ public sealed class GpuPowerBudgetControllerTests
         Assert.Contains("70 W", result.Reason);
         Assert.Contains("95 W", result.Reason);
         Assert.Contains("100 W", result.Reason);
-        Assert.Equal(150, device.Tgp);
+        Assert.Equal(95, device.Tgp);
     }
 
     [Theory]
@@ -217,33 +218,32 @@ public sealed class GpuPowerBudgetControllerTests
     }
 
     [Fact]
-    public async Task FirmwareMinimum_RestoresOnlyTgpWhenRequestedLowValueIsClamped()
+    public async Task FirmwareMinimum_MismatchDoesNotProveOwnershipOfObservedTgp()
     {
         var device = new Device { MinimumAcceptedTgp = 95 };
         var store = new Store();
         var result = await Create(device, store).ApplyAsync(CustomPerformanceSetting.GpuTgpWatts, 70, default);
         Assert.False(result.Succeeded);
-        Assert.Equal(150, device.Tgp);
+        Assert.Equal(95, device.Tgp);
         Assert.Equal(25, device.BoostWatts);
         Assert.True(device.BoostEnabled);
         Assert.Null(store.Read(1));
-        Assert.Equal(new[] { GcuCustomPerformanceCommand.GpuConfigurableTgp(70),
-            GcuCustomPerformanceCommand.GpuConfigurableTgp(150) }, device.Commands);
-        Assert.Contains("已恢复", result.Reason);
+        Assert.Equal(new[] { GcuCustomPerformanceCommand.GpuConfigurableTgp(70) }, device.Commands);
+        Assert.Contains("未确认恢复", result.Reason);
     }
 
     [Fact]
-    public async Task FailedBudget_RestoresOriginalDisabledTgpSwitchAsWellAsValues()
+    public async Task FailedBudget_UnownedTgpAlsoPreservesItsDependentEnableSwitch()
     {
         var device = new Device { TgpEnabled = false, MinimumAcceptedTgp = 95 };
         var result = await Create(device, new Store()).ApplyAsync(CustomPerformanceSetting.GpuTgpWatts, 70, default);
 
         Assert.False(result.Succeeded);
-        Assert.False(device.TgpEnabled);
-        Assert.Equal(150, device.Tgp);
+        Assert.True(device.TgpEnabled);
+        Assert.Equal(95, device.Tgp);
         Assert.Equal(25, device.BoostWatts);
         Assert.True(device.BoostEnabled);
-        Assert.Contains("已恢复", result.Reason);
+        Assert.Contains("未确认恢复", result.Reason);
     }
 
     [Fact]
@@ -502,6 +502,22 @@ public sealed class GpuPowerBudgetControllerTests
         finally { File.Delete(path); }
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public async Task ExternalTgpChangeDuringConfirmation_IsNeverClaimedAsOwned(int confirmationRead)
+    {
+        var device = new Device { MinimumAcceptedTgp = 95, ExternalTgpAfterRejectedTgp = 120,
+            ExternalTgpReadNumber = confirmationRead };
+        var result = await Create(device, new Store()).ApplyAsync(CustomPerformanceSetting.GpuTgpWatts, 70, default);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(120, device.Tgp);
+        Assert.Equal(GcuCustomPerformanceCommand.GpuConfigurableTgp(70), Assert.Single(device.Commands));
+        Assert.DoesNotContain("已恢复操作前", result.Reason);
+    }
+
     private static GpuPowerBudgetController Create(Device device, Store store) =>
         new(device, _ => ValueTask.FromResult<PlatformModeSelection?>(device.Mode),
             _ => ValueTask.FromResult<double?>(device.Ceiling), store, (_, _) => Task.CompletedTask);
@@ -524,6 +540,7 @@ public sealed class GpuPowerBudgetControllerTests
         public bool OmitTgpMinimum { get; init; }
         public int? ExternalTgpAfterRejectedSwitch { get; init; }
         public int? ExternalTgpAfterRejectedTgp { get; init; }
+        public int ExternalTgpReadNumber { get; init; } = 4;
         private int readsAfterRejectedSwitch;
         private int readsAfterRejectedTgp;
         public int MinimumAcceptedTgp { get; init; } = 25;
@@ -554,7 +571,7 @@ public sealed class GpuPowerBudgetControllerTests
                 ++readsAfterRejectedSwitch == 4 && ExternalTgpAfterRejectedSwitch is { } externalTgp)
                 Tgp = externalTgp;
             if (Commands.Contains(GcuCustomPerformanceCommand.GpuConfigurableTgp(70)) &&
-                ++readsAfterRejectedTgp == 4 && ExternalTgpAfterRejectedTgp is { } laterTgp)
+                ++readsAfterRejectedTgp == ExternalTgpReadNumber && ExternalTgpAfterRejectedTgp is { } laterTgp)
                 Tgp = laterTgp;
             var payload = JsonNode.Parse(Payload)!.AsObject();
             if (OmitTgpMinimum) payload.Remove("GPU_ConfigurableTGPMinimum");

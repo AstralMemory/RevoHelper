@@ -31,20 +31,33 @@ public sealed class ApplicationInstanceGuard : IDisposable
 
     public bool TryAcquire()
     {
-        if (processSnapshot().Any(process =>
-                process.Id != currentProcessId &&
-                IsRevoHelperApplication(process.Name)))
-        {
-            return false;
-        }
-
+        if (mutex is not null) return true;
+        // Elect one current instance before consulting legacy process names. Two
+        // concurrent launches must not reject each other merely for both existing.
         mutex = new Mutex(initiallyOwned: true, mutexName, out var createdNew);
         if (!createdNew)
         {
             mutex.Dispose();
             mutex = null;
+            return false;
         }
-        return createdNew;
+        try
+        {
+            // Current releases share this mutex. Historical preview executables
+            // predate it, so retain their explicit compatibility protection only.
+            if (processSnapshot().Any(process => process.Id != currentProcessId &&
+                    process.Name.StartsWith("RevoHelper-Preview", StringComparison.OrdinalIgnoreCase)))
+            {
+                Dispose();
+                return false;
+            }
+            return true;
+        }
+        catch
+        {
+            Dispose();
+            throw;
+        }
     }
 
     public void Dispose()
@@ -61,12 +74,18 @@ public sealed class ApplicationInstanceGuard : IDisposable
         mutex = null;
     }
 
-    private static IReadOnlyList<ProcessIdentity> SnapshotProcesses() =>
-        Process.GetProcesses()
-            .Select(process => new ProcessIdentity(process.Id, process.ProcessName))
-            .ToArray();
-
-    private static bool IsRevoHelperApplication(string processName) =>
-        processName.Equals("RevoHelper", StringComparison.OrdinalIgnoreCase) ||
-        processName.StartsWith("RevoHelper-Preview", StringComparison.OrdinalIgnoreCase);
+    private static IReadOnlyList<ProcessIdentity> SnapshotProcesses()
+    {
+        var result = new List<ProcessIdentity>();
+        foreach (var process in Process.GetProcesses())
+        {
+            using (process)
+            {
+                try { result.Add(new(process.Id, process.ProcessName)); }
+                catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
+                { /* A process can exit while the legacy preview check is in progress. */ }
+            }
+        }
+        return result;
+    }
 }

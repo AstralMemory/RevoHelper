@@ -3,6 +3,25 @@ namespace RevoHelper.App.Tests.Lifecycle;
 public sealed class StartupOrderingTests
 {
     [Fact]
+    public void App_PublishesBasicDiscoveryBeforeStartingOptionalDirectCpuProbe()
+    {
+        var source = File.ReadAllText(Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory, "..", "..", "..", "..", "..",
+            "src", "RevoHelper.App", "App.xaml.cs")));
+        var start = source.IndexOf("private void StartDeferredHardwareDiscovery", StringComparison.Ordinal);
+        var end = source.IndexOf("protected override void OnExit", start, StringComparison.Ordinal);
+        var discovery = source[start..end];
+
+        Assert.True(discovery.IndexOf("viewModel.UpdateDashboard", StringComparison.Ordinal) <
+            discovery.IndexOf("StartDirectCpuBackendProbe", StringComparison.Ordinal),
+            "Basic OEM discovery must be published before optional direct-backend work starts.");
+        Assert.Contains("viewModel.CapabilityRecheckRequested +=", source, StringComparison.Ordinal);
+        Assert.Contains("case OemControlSessionUpdate:\n", source.Replace("\r\n", "\n"), StringComparison.Ordinal);
+        var reconnect = source.IndexOf("case OemControlSessionUpdate:", StringComparison.Ordinal);
+        Assert.Contains("StartDeferredHardwareDiscovery(viewModel)", source[reconnect..source.IndexOf("break;", reconnect, StringComparison.Ordinal)], StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void App_ShowsMainWindowBeforeStartingHardwareDiscovery()
     {
         var sourcePath = Path.GetFullPath(Path.Combine(

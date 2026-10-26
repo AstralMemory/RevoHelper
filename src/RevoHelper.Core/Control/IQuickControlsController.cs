@@ -15,7 +15,10 @@ public sealed record SystemToggleState(
     bool? BluetoothEnabled,
     bool? TouchpadEnabled,
     bool? WebcamEnabled,
-    bool? CopilotKeyEnabled);
+    bool? CopilotKeyEnabled)
+{
+    public IReadOnlyList<string> ReadWarnings { get; init; } = [];
+}
 public sealed record PowerSettingsState(
     bool? UsbChargingWhileOffEnabled,
     bool SupportsAcAutoBoot,
@@ -23,7 +26,12 @@ public sealed record PowerSettingsState(
     bool? HighPerformancePowerModeEnabled,
     bool? DeepSleepEnabled,
     int? DeepSleepMinutes,
-    int? BatteryChargeLimitPercent);
+    int? BatteryChargeLimitPercent)
+{
+    public IReadOnlyList<string> ReadWarnings { get; init; } = [];
+    // The charge-limit channel alone must not clear support flags from Setting.
+    public bool SettingStatusReadSucceeded { get; init; } = true;
+}
 public sealed record KeyboardLightingState(bool Enabled, string? Type);
 public sealed record BatteryProtectionState(BatteryProtectionMode Mode, int? BatteryPercent);
 public sealed record DisplayFeatureState(

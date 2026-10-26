@@ -91,7 +91,7 @@ public sealed class WindowScaleVisualTests
 
                 var badge = Assert.IsType<Border>(window.FindName("ReleaseStatusBadge"));
                 var version = Assert.IsType<TextBlock>(window.FindName("ReleaseStatusText"));
-                Assert.Equal("V1.0.0", version.Text);
+                Assert.Equal("V1.0.1", version.Text);
                 Assert.Equal(UiFontExtension.Grow(10), version.FontSize);
                 Assert.Equal(Visibility.Collapsed, Assert.IsType<TextBlock>(window.FindName("HomeVersionFooter")).Visibility);
                 SaveOfflineImage(viewport, size, $"prerelease-fan-response-{percent}");
@@ -422,7 +422,7 @@ public sealed class WindowScaleVisualTests
                 Assert.Equal(Visibility.Visible, warning.Visibility);
                 Assert.True(warning.ActualHeight > 0, "OEM warning must have a laid-out visible slot.");
                 Assert.Equal(Color.FromRgb(0xD9, 0x36, 0x3E), Assert.IsType<SolidColorBrush>(warning.Foreground).Color);
-                Assert.Contains("V1.0.0", Assert.IsType<TextBlock>(window.FindName("SettingsVersionFooter")).Text);
+                Assert.Contains("V1.0.1", Assert.IsType<TextBlock>(window.FindName("SettingsVersionFooter")).Text);
                 var label = $"beta001-performance-{(custom ? "custom" : "balanced")}-{percent}";
                 SaveOfflineImage(viewport, size, label + "-top");
 

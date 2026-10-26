@@ -63,6 +63,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private readonly Dictionary<LightingZone, LightingZoneConfiguration> lightingEditorDrafts = [];
     private readonly Dictionary<LightingZone, string> lightingZoneFeedback = [];
     private string statusMessage = "正在初始化设备状态…";
+    private string telemetryStatusMessage = "正在初始化设备状态…";
+    private bool hasOperationFeedback;
+    private readonly Dictionary<(DeviceKind Kind, string Model), DateTimeOffset> deviceSampleTimes = [];
+    private DateTimeOffset? oemCpuTemperatureAt;
+    private static readonly TimeSpan TelemetryMaximumAge = TimeSpan.FromSeconds(4);
     private FanCurveTable? fanReadback;
     private FanCurveTable? fanDraft;
     private bool showingCpuFan = true;
@@ -213,6 +218,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         Experiments = experiments ?? new();
         Dashboard = dashboard;
+        deviceSampleTimes.Clear();
         Devices = new ObservableCollection<DeviceStatus>(dashboard.Devices);
         FanPoints = [];
         ConflictServices = [];
@@ -262,6 +268,30 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
+    public event Action? CapabilityRecheckRequested;
+    private bool isCapabilityDetectionBusy;
+
+    public bool IsCapabilityDetectionBusy => isCapabilityDetectionBusy;
+    public bool CanRecheckCapabilities => !isCapabilityDetectionBusy && !isShuttingDown;
+    public string CapabilityRecheckLabel => isCapabilityDetectionBusy ? "正在检测…" : "重新检测";
+
+    public void SetCapabilityDetectionBusy(bool busy)
+    {
+        if (isCapabilityDetectionBusy == busy) return;
+        isCapabilityDetectionBusy = busy;
+        OnPropertyChanged(nameof(IsCapabilityDetectionBusy));
+        OnPropertyChanged(nameof(CanRecheckCapabilities));
+        OnPropertyChanged(nameof(CapabilityRecheckLabel));
+        NotifyCapabilityReasons();
+    }
+
+    public void RequestCapabilityRecheck()
+    {
+        if (!CanRecheckCapabilities || CapabilityRecheckRequested is null) return;
+        SetCapabilityDetectionBusy(true);
+        StatusMessage = "正在重新检测设备与官方控制组件…";
+        CapabilityRecheckRequested.Invoke();
+    }
 
     public HomeDashboard Dashboard { get; private set; }
 
@@ -450,7 +480,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     }
 
     public bool CanEditFanSettings =>
-        IsCustomProfileSelected && fanController is not null && fanDraft is not null && !isFanBusy && !isApplyingPlatformMode;
+        IsCustomProfileSelected && SupportsPlatformMode(PlatformMode.Custom) && SupportsFeature(HardwareFeature.OemFanCurves) &&
+        fanController is not null && fanDraft is not null && !isFanBusy && !isApplyingPlatformMode;
 
     public bool IsFanApplyEnabled => CanEditFanSettings && IsFanCurveValid;
 
@@ -525,6 +556,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public bool ShowOfficeMode => IsModeVisible(PlatformMode.Office);
     public bool ShowBalancedMode => IsModeVisible(PlatformMode.Balanced);
     public bool ShowTurboMode => IsModeVisible(PlatformMode.TurboQuiet) || IsModeVisible(PlatformMode.TurboHigh);
+    public bool ShowTurboStrategies => IsModeVisible(PlatformMode.TurboQuiet) && IsModeVisible(PlatformMode.TurboHigh);
+    public string TurboModeDescription => ShowTurboStrategies ? UiCopy.TurboDescription
+        : SelectedUiLanguageCode == "en-US" ? "OEM performance preset" : "固件性能预设";
     public bool ShowCustomMode => IsModeVisible(PlatformMode.Custom);
     public bool HasTwoPresetModes => confirmedDisplayModes is { Count: 2 } modes &&
         modes.Contains(PlatformMode.Office) && modes.Contains(PlatformMode.Balanced);
@@ -543,15 +577,40 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private void RefreshModePresentation()
     {
         foreach (var property in new[] { nameof(ShowOfficeMode), nameof(ShowBalancedMode),
-            nameof(ShowTurboMode), nameof(ShowCustomMode), nameof(HasTwoPresetModes), nameof(PresetRowSpan),
+            nameof(ShowTurboMode), nameof(ShowTurboStrategies), nameof(TurboModeDescription), nameof(ShowCustomMode), nameof(HasTwoPresetModes), nameof(PresetRowSpan),
             nameof(OfficeModeTitle), nameof(BalancedModeTitle), nameof(OfficeModeDescription),
             nameof(BalancedModeDescription), nameof(CurrentFanProfileLabel) }) OnPropertyChanged(property);
+        NotifyCapabilityReasons();
     }
     public bool CanUseBalancedMode => SupportsPlatformMode(PlatformMode.Balanced);
     public bool CanUseTurboQuietMode => SupportsPlatformMode(PlatformMode.TurboQuiet);
     public bool CanUseTurboHighMode => SupportsPlatformMode(PlatformMode.TurboHigh);
     public bool CanUseCustomMode => SupportsPlatformMode(PlatformMode.Custom);
     public bool CanOpenFanAdjustment => SupportsFeature(HardwareFeature.OemFanCurves);
+    public string OfficeModeTooltip => CanUseOfficeMode ? OfficeModeDescription : ModeAvailabilityReason();
+    public string BalancedModeTooltip => CanUseBalancedMode ? BalancedModeDescription : ModeAvailabilityReason();
+    public string TurboModeTooltip => CanUseTurboQuietMode ? TurboModeDescription : ModeAvailabilityReason();
+    public string CustomModeTooltip => CanUseCustomMode ? UiCopy.CustomDescription : ModeAvailabilityReason();
+    public string PlatformModeAvailabilityReason => CapabilityReason(HardwareFeature.OemPlatformModes);
+
+    private string ModeAvailabilityReason() => IsCapabilityDetectionBusy
+        ? "正在检测设备与档位，请稍候；无需重复点击。"
+        : SupportsFeature(HardwareFeature.OemPlatformModes)
+            ? "尚未收到此档位的可用证据；可以重新检测，暂不代表机型不支持。"
+            : PlatformModeAvailabilityReason;
+
+    private void NotifyCapabilityReasons()
+    {
+        OnPropertyChanged(nameof(OfficeModeTooltip));
+        OnPropertyChanged(nameof(BalancedModeTooltip));
+        OnPropertyChanged(nameof(TurboModeTooltip));
+        OnPropertyChanged(nameof(CustomModeTooltip));
+        OnPropertyChanged(nameof(PlatformModeAvailabilityReason));
+        OnPropertyChanged(nameof(FanAvailabilityReason));
+        OnPropertyChanged(nameof(GpuOutputAvailabilityReason));
+        OnPropertyChanged(nameof(LightingAvailabilityReason));
+        OnPropertyChanged(nameof(LiquidCoolingAvailabilityReason));
+    }
     public bool CanOpenGpuOutput => gpuOutputModeController is not null;
     public bool CanOpenLighting => SupportsFeature(HardwareFeature.Lighting);
     public bool CanOpenLiquidCooling => SupportsFeature(HardwareFeature.LiquidCooling);
@@ -608,6 +667,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(LightingAvailabilityReason));
         OnPropertyChanged(nameof(LiquidCoolingAvailabilityReason));
         OnPropertyChanged(nameof(PerformanceAvailabilityReason));
+        OnPropertyChanged(nameof(CanEditFanSettings));
+        OnPropertyChanged(nameof(IsFanApplyEnabled));
+        NotifyCapabilityReasons();
     }
 
     private bool SupportsFeature(HardwareFeature feature) =>
@@ -633,11 +695,17 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             return "正在探测当前设备是否支持此功能。";
         }
 
-        return capability.Availability switch
+        if (capability.Availability == CapabilityAvailability.Available) return "已通过当前设备的运行时探测。";
+        if (IsCapabilityDetectionBusy) return "正在检测设备与档位，请稍候；无需重复点击。";
+        return capability.Diagnostic switch
         {
-            CapabilityAvailability.Available => "已通过当前设备的运行时探测。",
-            CapabilityAvailability.Unverified => "控制链存在，但尚未收到此功能的运行时证据。",
-            _ => "当前设备未确认支持此功能。"
+            CapabilityDiagnostic.IdentityUnconfirmed => "设备身份尚未识别成功；请重新检测，不代表机型不支持。",
+            CapabilityDiagnostic.OtherManufacturer => "当前设备未识别为机械革命，暂不开放 OEM 控制。",
+            CapabilityDiagnostic.ControlChainIncomplete => "官方控制组件未确认完整；请确认官方控制台及其服务可用后重新检测。",
+            CapabilityDiagnostic.AwaitingEvidence when feature == HardwareFeature.OemPlatformModes =>
+                "已识别官方控制组件，尚未收到可用档位；请确认服务连接后重新检测。",
+            CapabilityDiagnostic.AwaitingEvidence => "控制链存在，但尚未收到此功能的运行时证据。",
+            _ => string.IsNullOrWhiteSpace(capability.Reason) ? "当前设备未确认支持此功能。" : capability.Reason
         };
     }
 
@@ -658,7 +726,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public bool IsPlatformSwitchPending => isApplyingPlatformMode;
 
-    public string ReleaseVersionText => "V1.0.0";
+    public string ReleaseVersionText => "V1.0.1";
 
     public string AppVersionText => $"RevoHelper {ReleaseVersionText} · {UiCopy.OpenSourceAndFree}";
 
@@ -1705,6 +1773,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         "office" => $"当前：{OfficeModeTitle}",
         "balanced" => $"当前：{BalancedModeTitle}",
+        "turbo" when !ShowTurboStrategies => "当前：狂暴模式",
         "turbo" => SelectedTurboStrategy is TurboStrategy.HighEfficiency
             ? "当前：狂暴模式 · 高能"
             : "当前：狂暴模式 · 静音",
@@ -2087,6 +2156,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         get => statusMessage;
         private set
         {
+            if (!hasOperationFeedback)
+            {
+                hasOperationFeedback = true;
+                OnPropertyChanged(nameof(HasOperationFeedback));
+            }
             if (statusMessage == value)
             {
                 return;
@@ -2094,6 +2168,25 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
             statusMessage = value;
             OnPropertyChanged();
+        }
+    }
+
+    public string TelemetryStatusMessage => telemetryStatusMessage;
+    public bool HasOperationFeedback => hasOperationFeedback;
+
+    private void SetTelemetryStatus(string message)
+    {
+        if (telemetryStatusMessage != message)
+        {
+            telemetryStatusMessage = message;
+            OnPropertyChanged(nameof(TelemetryStatusMessage));
+        }
+        // Keep operation feedback until another operation replaces it. Sensor updates
+        // have their own display line and must never hide a failed control request.
+        if (!hasOperationFeedback && statusMessage != message)
+        {
+            statusMessage = message;
+            OnPropertyChanged(nameof(StatusMessage));
         }
     }
 
@@ -2138,7 +2231,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             "office" => new PlatformModeSelection(PlatformMode.Office),
             "balanced" => new PlatformModeSelection(PlatformMode.Balanced),
             "turbo" => new PlatformModeSelection(
-                SelectedTurboStrategy is TurboStrategy.HighEfficiency
+                SelectedTurboStrategy is TurboStrategy.HighEfficiency && CanUseTurboHighMode
                     ? PlatformMode.TurboHigh
                     : PlatformMode.TurboQuiet),
             "custom" => new PlatformModeSelection(PlatformMode.Custom, SelectedCustomProfileIndex),
@@ -2458,13 +2551,15 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public void ApplyTelemetry(HardwareTelemetrySnapshot snapshot)
     {
+        var freshOemTemperature = oemCpuTemperatureAt is { } sampledAt &&
+            snapshot.CapturedAt - sampledAt <= TelemetryMaximumAge ? oemCpuTemperatureC : null;
         var cpuPackageTemperature = snapshot.Devices
             .FirstOrDefault(device => device.Kind is DeviceKind.Cpu)?.TemperatureC;
         if (cpuPackageTemperature is not { } packageTemperature ||
             !double.IsFinite(packageTemperature) ||
             packageTemperature <= 0)
         {
-            cpuPackageTemperature = oemCpuTemperatureC;
+            cpuPackageTemperature = freshOemTemperature;
         }
 
         foreach (var telemetry in snapshot.Devices)
@@ -2476,6 +2571,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             }
 
             var device = Devices[matchIndex];
+            deviceSampleTimes[(device.Kind, device.Model)] = snapshot.CapturedAt;
             var formatted = TelemetryFormatter.Format(telemetry);
             var sharesCpuPackageTemperature = telemetry.Kind is DeviceKind.IntegratedGpu &&
                                                telemetry.TemperatureC is null &&
@@ -2497,7 +2593,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 ? FormatTemperature(cpuPackageTemperature!.Value)
                 : telemetry.Kind is DeviceKind.Cpu &&
                   telemetry.TemperatureC is null &&
-                  oemCpuTemperatureC is { } oemTemperature
+                  freshOemTemperature is { } oemTemperature
                     ? FormatTemperature(oemTemperature)
                     : formatted.Temperature;
             var details = dedicatedMemoryDetails ?? defaultDetails;
@@ -2515,7 +2611,23 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             };
         }
 
-        StatusMessage = $"只读传感器 · 更新于 {snapshot.CapturedAt:HH:mm:ss}";
+        ExpireTelemetry(snapshot.CapturedAt);
+        SetTelemetryStatus($"只读传感器 · 更新于 {snapshot.CapturedAt:HH:mm:ss}");
+    }
+
+    private void ExpireTelemetry(DateTimeOffset now)
+    {
+        for (var index = 0; index < Devices.Count; index++)
+        {
+            var device = Devices[index];
+            if (deviceSampleTimes.TryGetValue((device.Kind, device.Model), out var lastSeen) &&
+                now - lastSeen <= TelemetryMaximumAge) continue;
+            var temperature = device.Kind == DeviceKind.Cpu && oemCpuTemperatureAt is { } oemAt &&
+                now - oemAt <= TelemetryMaximumAge && oemCpuTemperatureC is { } oemValue
+                    ? FormatTemperature(oemValue) : "N/A";
+            var expired = device with { Usage = "N/A", Temperature = temperature, Power = "N/A", Frequency = "N/A" };
+            if (expired != device) Devices[index] = expired;
+        }
     }
 
     private int FindTelemetryDeviceIndex(DeviceTelemetry telemetry)
@@ -2548,12 +2660,13 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public void ApplyOemCpuStatus(OemCpuStatus status, bool refreshDisplay = true)
     {
-        if (status.TemperatureC is not { } temperature || temperature <= 0)
+        if (status.TemperatureC is not { } temperature || !double.IsFinite(temperature) || temperature <= 0)
         {
             return;
         }
 
         oemCpuTemperatureC = temperature;
+        oemCpuTemperatureAt = utcNow();
         if (!refreshDisplay) return;
 
         var match = Devices
@@ -2672,6 +2785,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             StatusMessage = FanStatusText;
             return;
         }
+        if (!SupportsPlatformMode(PlatformMode.Custom) || !SupportsFeature(HardwareFeature.OemFanCurves))
+        {
+            FanStatusText = "自定义档位或风扇控制尚未确认，曲线仅供查看。";
+            StatusMessage = FanStatusText;
+            return;
+        }
         if (fanController is null || fanDraft is null || !IsFanCurveValid || isFanBusy) return;
         SetFanBusy(true);
         try
@@ -2753,7 +2872,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public void ReportTelemetryUnavailable(string reason)
     {
-        StatusMessage = "只读传感器暂不可用 · 将自动重试";
+        ExpireTelemetry(utcNow());
+        SetTelemetryStatus("只读传感器暂不可用 · 将自动重试");
     }
 
     public void ReportOemStatusUnavailable(string reason)
@@ -2802,26 +2922,33 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         StatusMessage = $"自定义方案 {profileIndex} 已切换 · 当前仅本地编辑";
     }
 
-    public void ApplyCpuPowerLimitProfiles(IEnumerable<CpuPowerLimitProfile> profiles)
+    public void ApplyCpuPowerLimitProfiles(IEnumerable<CpuPowerLimitProfile> profiles, bool preserveDrafts = false)
     {
         powerReadbacksByProfile.Clear();
-        powerDraftsByProfile.Clear();
+        if (!preserveDrafts) powerDraftsByProfile.Clear();
+
+        void UpdateDraft(string key, CpuPowerLimitProfile profile)
+        {
+            powerDraftsByProfile[key] = preserveDrafts && powerDraftsByProfile.TryGetValue(key, out var draft)
+                ? new(profile, draft.Pl1Watts, draft.Pl2Watts)
+                : CreatePowerDraft(profile);
+        }
 
         foreach (var profile in profiles)
         {
             powerReadbacksByProfile[profile.Key] = profile;
-            powerDraftsByProfile[profile.Key] = CreatePowerDraft(profile);
+            UpdateDraft(profile.Key, profile);
             if (profile.Key.Equals("turbo:1", StringComparison.OrdinalIgnoreCase))
             {
-                powerDraftsByProfile["turbo:Quiet"] = CreatePowerDraft(profile);
-                powerDraftsByProfile["turbo:HighEfficiency"] = CreatePowerDraft(profile);
+                UpdateDraft("turbo:Quiet", profile);
+                UpdateDraft("turbo:HighEfficiency", profile);
             }
         }
 
-        LoadSavedPerformanceProfiles(applicationSettings.PerformanceProfiles);
+        if (!preserveDrafts) LoadSavedPerformanceProfiles(applicationSettings.PerformanceProfiles);
 
         RefreshPerformanceProperties();
-        StatusMessage = powerReadbacksByProfile.Count == 0
+        if (!preserveDrafts) StatusMessage = powerReadbacksByProfile.Count == 0
             ? "OEM 功耗档案暂不可用 · 性能调整保持安全锁定"
             : $"已只读加载 {powerReadbacksByProfile.Count} 个 OEM 功耗档案";
     }
@@ -3508,17 +3635,56 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             return;
         }
 
+        var failures = new List<string>();
+        var readAny = await ReadQuickControlPartAsync("按键状态",
+            () => quickControlsController.ReadShortcutsAsync(cancellationToken), ApplyShortcuts, failures, cancellationToken);
+        readAny |= await ReadQuickControlPartAsync("设备开关状态",
+            () => quickControlsController.ReadSystemTogglesAsync(cancellationToken), ApplySystemToggles, failures, cancellationToken);
+        readAny |= await ReadQuickControlPartAsync("键盘灯光状态",
+            () => quickControlsController.ReadKeyboardLightingAsync(cancellationToken), ApplyKeyboardLighting, failures, cancellationToken);
+        KeyboardControlsStatusText = failures.Count == 0
+            ? "Windows 通用开关与官方按键状态已读取。"
+            : (readAny ? "部分状态读取失败，已保留已确认状态：" : "按键与设备状态读取失败：") + string.Join("；", failures);
+    }
+
+    private static async Task<bool> ReadQuickControlPartAsync<T>(
+        string label, Func<ValueTask<T?>> read, Action<T?> apply, List<string> failures,
+        CancellationToken cancellationToken) where T : class
+    {
+        cancellationToken.ThrowIfCancellationRequested();
         try
         {
-            ApplyShortcuts(await quickControlsController.ReadShortcutsAsync(cancellationToken));
-            ApplySystemToggles(await quickControlsController.ReadSystemTogglesAsync(cancellationToken));
-            ApplyKeyboardLighting(await quickControlsController.ReadKeyboardLightingAsync(cancellationToken));
-            KeyboardControlsStatusText = "Windows 通用开关与官方按键状态已读取。";
+            var state = await read();
+            if (state is null)
+            {
+                failures.Add($"{label}未返回可识别状态。");
+                return false;
+            }
+            apply(state);
+            if (state is SystemToggleState toggles) failures.AddRange(toggles.ReadWarnings);
+            if (state is PowerSettingsState power) failures.AddRange(power.ReadWarnings);
+            return state switch
+            {
+                SystemToggleState value => value.WifiEnabled.HasValue || value.BluetoothEnabled.HasValue ||
+                    value.TouchpadEnabled.HasValue || value.WebcamEnabled.HasValue || value.CopilotKeyEnabled.HasValue,
+                PowerSettingsState value => value.UsbChargingWhileOffEnabled.HasValue || value.SupportsAcAutoBoot ||
+                    value.AcAutoBootEnabled.HasValue || value.HighPerformancePowerModeEnabled.HasValue ||
+                    value.DeepSleepEnabled.HasValue || value.DeepSleepMinutes.HasValue || value.BatteryChargeLimitPercent.HasValue,
+                _ => true
+            };
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            KeyboardControlsStatusText = $"读取按键状态失败：{exception.Message}";
+            failures.Add($"{label}读取失败：{exception.Message}");
+            return false;
         }
+    }
+
+    private static string AppendQuickControlWarnings(string message, IEnumerable<string> warnings)
+    {
+        var additional = warnings.Distinct(StringComparer.Ordinal)
+            .Where(warning => !message.Contains(warning, StringComparison.Ordinal)).ToArray();
+        return additional.Length == 0 ? message : $"{message} 部分状态未读取：{string.Join("；", additional)}";
     }
 
     public async Task OpenLiquidCoolingAsync(CancellationToken cancellationToken)
@@ -3684,18 +3850,16 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             return;
         }
 
-        try
-        {
-            ApplyBattery(await quickControlsController.ReadBatteryProtectionAsync(cancellationToken));
-            ApplyPowerSettings(await quickControlsController.ReadPowerSettingsAsync(cancellationToken));
-            BatteryStatusText = BatteryPercent is { } percent
+        var failures = new List<string>();
+        var readAny = await ReadQuickControlPartAsync("电池保护状态",
+            () => quickControlsController.ReadBatteryProtectionAsync(cancellationToken), ApplyBattery, failures, cancellationToken);
+        readAny |= await ReadQuickControlPartAsync("电源设置状态",
+            () => quickControlsController.ReadPowerSettingsAsync(cancellationToken), ApplyPowerSettings, failures, cancellationToken);
+        BatteryStatusText = failures.Count > 0
+            ? (readAny ? "部分状态读取失败，已保留已确认状态：" : "电源与电池状态读取失败：") + string.Join("；", failures)
+            : BatteryPercent is { } percent
                 ? $"电源与电池状态已读取 · 当前电量 {percent}%"
                 : "电源与电池状态已读取。";
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            BatteryStatusText = $"读取电池保护状态失败：{exception.Message}";
-        }
     }
 
     public async Task OpenDisplayAsync(CancellationToken cancellationToken)
@@ -3799,7 +3963,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             }
             else
             {
-                ApplySystemToggles(await quickControlsController.ReadSystemTogglesAsync(cancellationToken));
+                var failures = new List<string>();
+                await ReadQuickControlPartAsync("设备开关状态",
+                    () => quickControlsController.ReadSystemTogglesAsync(cancellationToken), ApplySystemToggles, failures, cancellationToken);
+                KeyboardControlsStatusText = AppendQuickControlWarnings(result.Reason, failures);
             }
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -4273,7 +4440,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             var result = await quickControlsController.SetPowerToggleAsync(control, enabled, cancellationToken);
             BatteryStatusText = result.Reason;
             StatusMessage = result.Reason;
-            ApplyPowerSettings(await quickControlsController.ReadPowerSettingsAsync(cancellationToken));
+            var failures = new List<string>();
+            await ReadQuickControlPartAsync("电源设置状态",
+                () => quickControlsController.ReadPowerSettingsAsync(cancellationToken), ApplyPowerSettings, failures, cancellationToken);
+            BatteryStatusText = AppendQuickControlWarnings(result.Reason, failures);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -4289,7 +4459,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             var result = await quickControlsController.SetDeepSleepAsync(enabled, SelectedDeepSleepMinutes, cancellationToken);
             BatteryStatusText = result.Reason;
             StatusMessage = result.Reason;
-            ApplyPowerSettings(await quickControlsController.ReadPowerSettingsAsync(cancellationToken));
+            var failures = new List<string>();
+            await ReadQuickControlPartAsync("电源设置状态",
+                () => quickControlsController.ReadPowerSettingsAsync(cancellationToken), ApplyPowerSettings, failures, cancellationToken);
+            BatteryStatusText = AppendQuickControlWarnings(result.Reason, failures);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -4537,11 +4710,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private void ApplySystemToggles(SystemToggleState? state)
     {
         if (state is null) return;
-        SupportsWifiToggle = state.WifiEnabled.HasValue;
-        SupportsBluetoothToggle = state.BluetoothEnabled.HasValue;
-        SupportsTouchpadToggle = state.TouchpadEnabled.HasValue;
-        SupportsWebcamToggle = state.WebcamEnabled.HasValue;
-        SupportsCopilotKeyToggle = state.CopilotKeyEnabled.HasValue;
+        var partial = state.ReadWarnings.Count > 0;
+        SupportsWifiToggle = state.WifiEnabled.HasValue || (partial && SupportsWifiToggle);
+        SupportsBluetoothToggle = state.BluetoothEnabled.HasValue || (partial && SupportsBluetoothToggle);
+        SupportsTouchpadToggle = state.TouchpadEnabled.HasValue || (partial && SupportsTouchpadToggle);
+        SupportsWebcamToggle = state.WebcamEnabled.HasValue || (partial && SupportsWebcamToggle);
+        SupportsCopilotKeyToggle = state.CopilotKeyEnabled.HasValue || (partial && SupportsCopilotKeyToggle);
         OnPropertyChanged(nameof(SupportsWifiToggle));
         OnPropertyChanged(nameof(SupportsBluetoothToggle));
         OnPropertyChanged(nameof(SupportsTouchpadToggle));
@@ -4582,14 +4756,15 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private void ApplyPowerSettings(PowerSettingsState? state)
     {
         if (state is null) return;
-        SupportsUsbChargingWhileOff = state.UsbChargingWhileOffEnabled.HasValue;
-        SupportsHighPerformancePowerMode = state.HighPerformancePowerModeEnabled.HasValue;
-        SupportsDeepSleep = state.DeepSleepEnabled.HasValue;
+        var partial = state.ReadWarnings.Count > 0;
+        SupportsUsbChargingWhileOff = state.UsbChargingWhileOffEnabled.HasValue || (partial && SupportsUsbChargingWhileOff);
+        SupportsHighPerformancePowerMode = state.HighPerformancePowerModeEnabled.HasValue || (partial && SupportsHighPerformancePowerMode);
+        SupportsDeepSleep = state.DeepSleepEnabled.HasValue || (partial && SupportsDeepSleep);
         OnPropertyChanged(nameof(SupportsUsbChargingWhileOff));
         OnPropertyChanged(nameof(SupportsHighPerformancePowerMode));
         OnPropertyChanged(nameof(SupportsDeepSleep));
         if (state.UsbChargingWhileOffEnabled is { } usb) IsUsbChargingWhileOffEnabled = usb;
-        SupportsAcAutoBoot = state.SupportsAcAutoBoot;
+        if (state.SettingStatusReadSucceeded) SupportsAcAutoBoot = state.SupportsAcAutoBoot;
         if (state.AcAutoBootEnabled is { } ac) IsAcAutoBootEnabled = ac;
         if (state.HighPerformancePowerModeEnabled is { } performance) IsHighPerformancePowerModeEnabled = performance;
         if (state.DeepSleepEnabled is { } deepSleep) IsDeepSleepEnabled = deepSleep;
@@ -4923,7 +5098,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         finally { performanceTransitionGate.Release(); }
     }
 
-    public void BeginShutdown() => isShuttingDown = true;
+    public void BeginShutdown()
+    {
+        isShuttingDown = true;
+        OnPropertyChanged(nameof(CanRecheckCapabilities));
+    }
 
     private string CurrentPowerLimitKey => SelectedProfileId switch
     {

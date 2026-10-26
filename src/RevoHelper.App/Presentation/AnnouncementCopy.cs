@@ -3,7 +3,7 @@ namespace RevoHelper.App.Presentation;
 /// <summary>
 /// Developer-authored, bundled announcement. Edit this file for a release;
 /// opening the page never downloads content or checks for updates.
-/// Bundled V1.0.0 copy prepared on 2026-10-25; online publication is separate.
+/// Bundled V1.0.1 copy prepared on 2026-10-26; publication is managed separately on GitHub.
 /// </summary>
 public sealed record AnnouncementCopy(
     string Title, string EntryDescription, string VersionLabel, string Version,
@@ -13,7 +13,7 @@ public sealed record AnnouncementCopy(
     string UsageTitle, string Usage, string DevelopmentTitle, string Development,
     string FeedbackTitle, string Feedback, string OfflineNote)
 {
-    public const string UpdateDate = "2026-10-25";
+    public const string UpdateDate = "2026-10-26";
     public const string ProjectUrl = "https://github.com/AstralMemory/RevoHelper";
     public const string DownloadsUrl = ProjectUrl + "/releases";
     public const string FeedbackUrl = ProjectUrl + "/issues";
@@ -31,10 +31,10 @@ public sealed record AnnouncementCopy(
         LocalizedUiCopy.NormalizeLanguageCode(language) == "en-US"
             ? new("About & announcements", "Version & notes", "Version", version,
                 "Updated", UpdateDate, "Developer announcement",
-                "RevoHelper is a lightweight, free third-party control center for MECHREVO laptops. V1.0.0 adds an external performance monitor, dark mode and interface improvements. Check GitHub Releases for publicly available downloads.",
+                "RevoHelper is a lightweight, free third-party control center for MECHREVO laptops. V1.0.1 improves device and performance-mode detection, control feedback, telemetry, FPS source restoration and startup reliability.",
                 "Project", "Downloads", "Feedback", "Back to settings",
                 "Release & source code",
-                "The local V1.0.0 release and source package are prepared for review. RevoHelper's own code uses MIT; third-party components retain their own licenses. This bundled page does not confirm that a release or its source has been published online.",
+                "RevoHelper's own code uses MIT; third-party components retain their own licenses. See GitHub Releases for publicly available versions. This build does not unlock GPU power limits or certify hardware compatibility.",
                 "Compatibility",
                 "Requires 64-bit Windows 11 and .NET 10 Desktop Runtime. Some models have been verified through developer testing or user feedback; available functions depend on each model. Not every feature on every Intel or AMD laptop has been tested.",
                 "Before you use it",
@@ -46,10 +46,10 @@ public sealed record AnnouncementCopy(
                 "This page is bundled with the app and never fetches announcements in the background. Instructions and third-party licenses are included in the release package.")
             : new("关于与公告", "版本、更新和使用提醒", "当前版本", version,
                 "更新日期", UpdateDate, "开发者公告",
-                "RevoHelper 是轻量、免费的机械革命第三方控制台。V1.0.0 新增外置性能监控、深色模式并完善界面体验；公开下载请以 GitHub Releases 为准。",
+                "RevoHelper 是轻量、免费的机械革命第三方控制台。V1.0.1 改进设备与性能档位识别、操作反馈、遥测显示、FPS 来源恢复和启动可靠性。",
                 "GitHub 项目", "下载与更新", "问题反馈", "返回设置",
                 "发布与开源",
-                "V1.0.0 运行包与源码正在本地准备和验收。自有代码采用 MIT 协议，第三方组件保留各自许可；本页不代表版本或源码已在网上发布，公开进度以 GitHub 为准。",
+                "自有代码采用 MIT 协议，第三方组件保留各自许可。公开版本以 GitHub Releases 为准。本版没有 GPU 功耗解锁，也不代表机型硬件兼容性认证。",
                 "适用范围",
                 "需要 Windows 11 64 位及 .NET 10 Desktop Runtime。部分机型已通过开发者实测或用户反馈验证，具体功能以机型实际支持为准；并非所有 Intel、AMD 机型的全部功能都已验证。",
                 "使用提醒",

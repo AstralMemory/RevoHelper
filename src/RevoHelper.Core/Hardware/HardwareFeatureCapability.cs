@@ -13,7 +13,19 @@ public enum HardwareFeature
     AmdSmu
 }
 
+public enum CapabilityDiagnostic
+{
+    None,
+    IdentityUnconfirmed,
+    OtherManufacturer,
+    ControlChainIncomplete,
+    AwaitingEvidence
+}
+
 public sealed record HardwareFeatureCapability(
     HardwareFeature Feature,
     CapabilityAvailability Availability,
-    string Reason);
+    string Reason)
+{
+    public CapabilityDiagnostic Diagnostic { get; init; }
+}

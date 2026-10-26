@@ -70,6 +70,7 @@
         </Style>
 
         <Style x:Key="ProfileRadioStyle" TargetType="RadioButton">
+            <Setter Property="ToolTipService.ShowOnDisabled" Value="True" />
             <Setter Property="Foreground" Value="{DynamicResource AccentSurfaceTextBrush}" />
             <Setter Property="FontSize" Value="{presentation:UiFont 13.5}" />
             <Setter Property="FontWeight" Value="SemiBold" />
@@ -92,7 +93,7 @@
                                            FontSize="{TemplateBinding FontSize}"
                                            FontWeight="{TemplateBinding FontWeight}" />
                                 <TextBlock x:Name="ProfileDescription" Grid.Row="1" Margin="0,2,0,0"
-                                           Text="{TemplateBinding ToolTip}"
+                                           Text="{Binding Path=(AutomationProperties.HelpText), RelativeSource={RelativeSource TemplatedParent}}"
                                            Foreground="{DynamicResource ProfileDescriptionBrush}" FontSize="8.2" Opacity="0.94" />
                             </Grid>
                         </Border>
@@ -675,25 +676,29 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <RadioButton presentation:ThemeScope.AccentSurface="True" x:Name="OfficeProfileRadio" Grid.Row="0" Grid.Column="0" GroupName="PerformanceProfile"
-                                         Content="{presentation:UiText Value={Binding OfficeModeTitle}}" Tag="office" ToolTip="{presentation:UiText Value={Binding OfficeModeDescription}}"
+                                         Content="{presentation:UiText Value={Binding OfficeModeTitle}}" Tag="office" ToolTip="{presentation:UiText Value={Binding OfficeModeTooltip}}"
+                                         AutomationProperties.HelpText="{presentation:UiText Value={Binding OfficeModeDescription}}"
                                          Grid.RowSpan="{Binding PresetRowSpan}" Visibility="{Binding ShowOfficeMode, Converter={StaticResource ModeVisibilityConverter}}"
                                          IsEnabled="{Binding CanUseOfficeMode}"
                                          Background="#DDF8E8" Style="{StaticResource ProfileRadioStyle}"
                                          Checked="Profile_Checked" />
                             <RadioButton presentation:ThemeScope.AccentSurface="True" x:Name="BalancedProfileRadio" Grid.Row="0" Grid.Column="1" GroupName="PerformanceProfile"
-                                         Content="{presentation:UiText Value={Binding BalancedModeTitle}}" Tag="balanced" ToolTip="{presentation:UiText Value={Binding BalancedModeDescription}}"
+                                         Content="{presentation:UiText Value={Binding BalancedModeTitle}}" Tag="balanced" ToolTip="{presentation:UiText Value={Binding BalancedModeTooltip}}"
+                                         AutomationProperties.HelpText="{presentation:UiText Value={Binding BalancedModeDescription}}"
                                          Grid.RowSpan="{Binding PresetRowSpan}" Visibility="{Binding ShowBalancedMode, Converter={StaticResource ModeVisibilityConverter}}"
                                          IsEnabled="{Binding CanUseBalancedMode}"
                                          Background="#DCEEFF" Style="{StaticResource ProfileRadioStyle}"
                                          Checked="Profile_Checked" />
                             <Grid Grid.Row="1" Grid.Column="0" Visibility="{Binding ShowTurboMode, Converter={StaticResource ModeVisibilityConverter}}">
                                 <RadioButton presentation:ThemeScope.AccentSurface="True" x:Name="TurboProfileRadio" GroupName="PerformanceProfile"
-                                             Content="{Binding UiCopy.TurboTitle}" Tag="turbo" ToolTip="{Binding UiCopy.TurboDescription}"
+                                             Content="{Binding UiCopy.TurboTitle}" Tag="turbo" ToolTip="{presentation:UiText Value={Binding TurboModeTooltip}}"
+                                             AutomationProperties.HelpText="{Binding TurboModeDescription}"
                                              IsEnabled="{Binding CanUseTurboQuietMode}"
                                              Background="#EEDCFF" Style="{StaticResource ProfileRadioStyle}"
                                              Checked="Profile_Checked" />
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
-                                            VerticalAlignment="Bottom" Margin="0,0,9,8">
+                                            VerticalAlignment="Bottom" Margin="0,0,9,8"
+                                            Visibility="{Binding ShowTurboStrategies, Converter={StaticResource ModeVisibilityConverter}}">
                                     <RadioButton x:Name="TurboQuietRadio" GroupName="TurboStrategy" Content="{Binding UiCopy.QuietTitle}" Tag="quiet"
                                                  IsChecked="True" Style="{StaticResource StrategyRadioStyle}"
                                                  IsEnabled="{Binding CanUseTurboQuietMode}"
@@ -706,12 +711,14 @@
                             </Grid>
                             <Grid Grid.Row="1" Grid.Column="1" Visibility="{Binding ShowCustomMode, Converter={StaticResource ModeVisibilityConverter}}">
                                 <RadioButton presentation:ThemeScope.AccentSurface="True" x:Name="CustomProfileRadio" GroupName="PerformanceProfile"
-                                             Content="{Binding UiCopy.CustomTitle}" Tag="custom" ToolTip="{Binding UiCopy.CustomDescription}"
+                                             Content="{Binding UiCopy.CustomTitle}" Tag="custom" ToolTip="{presentation:UiText Value={Binding CustomModeTooltip}}"
+                                             AutomationProperties.HelpText="{Binding UiCopy.CustomDescription}"
                                              IsEnabled="{Binding CanUseCustomMode}"
                                              Background="#FFF0D8" Style="{StaticResource ProfileRadioStyle}"
                                              Checked="Profile_Checked" />
                                 <StackPanel x:Name="CustomProfileSelector" Orientation="Horizontal"
                                             HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                            IsEnabled="{Binding CanUseCustomMode}" ToolTipService.ShowOnDisabled="True"
                                             Margin="0,0,5,8" ToolTip="{Binding UiCopy.CustomPlanHint}">
                                     <RadioButton x:Name="CustomProfileOneRadio" GroupName="CustomProfile" Content="1" Tag="1" IsChecked="True"
                                                  Style="{StaticResource CustomPlanRadioStyle}" Checked="CustomProfile_Checked" />
@@ -889,21 +896,6 @@
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
 
-                        <TextBlock x:Name="PlatformSwitchDelayNotice" Text="{presentation:UiText '可能有1-2秒的切换延迟'}"
-                                   Foreground="#D9363E" FontSize="{presentation:UiFont 9}" Height="16"
-                                   VerticalAlignment="Center">
-                            <TextBlock.Style>
-                                <Style TargetType="TextBlock">
-                                    <Setter Property="Visibility" Value="Hidden" />
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding IsPlatformSwitchPending}" Value="True">
-                                            <Setter Property="Visibility" Value="Visible" />
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </TextBlock.Style>
-                        </TextBlock>
-
                         <Grid x:Name="HomeQuickControlsPanel" Margin="-3,7,-3,0" HorizontalAlignment="Stretch">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="64" />
@@ -1055,7 +1047,25 @@
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <StackPanel x:Name="HomeStatusBlock" VerticalAlignment="Bottom" Margin="0,0,0,3">
+                        <TextBlock x:Name="PlatformSwitchDelayNotice" Text="{presentation:UiText '可能有1-2秒的切换延迟'}"
+                                   Foreground="#D9363E" FontSize="{presentation:UiFont 9}" Height="16"
+                                   VerticalAlignment="Center">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsPlatformSwitchPending}" Value="True">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                        <TextBlock x:Name="HomeTelemetryStatusText" Text="{presentation:UiText Value={Binding TelemetryStatusMessage}}"
+                                   ToolTip="{presentation:UiText Value={Binding TelemetryStatusMessage}}" TextTrimming="CharacterEllipsis"
+                                   Foreground="{DynamicResource Neutral8795A8Brush}" FontSize="{presentation:UiFont 8.2}" Margin="0,0,6,1" />
                         <TextBlock x:Name="HomeStatusText" Text="{presentation:UiText Value={Binding StatusMessage}}" ToolTip="{presentation:UiText Value={Binding StatusMessage}}"
+                                   Visibility="{Binding HasOperationFeedback, Converter={StaticResource ModeVisibilityConverter}}"
                                    TextTrimming="CharacterEllipsis" Margin="0,0,6,0"
                                    Foreground="{DynamicResource Neutral8795A8Brush}" FontSize="{presentation:UiFont 9.2}" />
                         <TextBlock x:Name="HomeVersionFooter" Text="{presentation:UiText Value={Binding AppVersionText}}"
@@ -2940,6 +2950,31 @@
                                                Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 8.2}"
                                                Margin="0,6,0,0" TextWrapping="Wrap" />
                                 </StackPanel>
+                            </Border>
+
+                            <TextBlock Text="{presentation:UiText '设备与功能检测'}" Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 10}"
+                                       FontWeight="SemiBold" Margin="0,16,0,7" />
+                            <Border x:Name="CapabilityDetectionSection" Padding="13,11" Background="{DynamicResource SurfaceBrush}"
+                                    BorderBrush="{DynamicResource NeutralD7E0EBBrush}" BorderThickness="1" CornerRadius="12">
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                    <StackPanel VerticalAlignment="Center" Margin="0,0,8,0">
+                                        <TextBlock Text="{presentation:UiText '设备与功能状态'}" Foreground="{DynamicResource TextBrush}"
+                                                   FontSize="{presentation:UiFont 11.5}" FontWeight="SemiBold" />
+                                        <TextBlock Text="{presentation:UiText Value={Binding PlatformModeAvailabilityReason}}"
+                                                   ToolTip="{presentation:UiText Value={Binding PlatformModeAvailabilityReason}}"
+                                                   Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 8.8}"
+                                                   Margin="0,3,0,0" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <Button x:Name="CapabilityRecheckButton" Grid.Column="1"
+                                            Content="{presentation:UiText Value={Binding CapabilityRecheckLabel}}"
+                                            IsEnabled="{Binding CanRecheckCapabilities}" Click="CapabilityRecheck_Click"
+                                            Height="30" Padding="14,5" MinWidth="82" VerticalAlignment="Center"
+                                            Background="#EAF4FF" BorderBrush="#B9D5F2" Foreground="#2676B8"
+                                            FontWeight="SemiBold" Style="{StaticResource IconButtonStyle}" FontSize="{presentation:UiFont 8.8}"
+                                            ToolTip="{presentation:UiText Value={Binding PlatformModeAvailabilityReason}}"
+                                            ToolTipService.ShowOnDisabled="True" />
+                                </Grid>
                             </Border>
 
                             <TextBlock Text="{Binding UiCopy.InterfaceSectionTitle}" Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 10}"

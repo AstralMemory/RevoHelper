@@ -1,4 +1,4 @@
-﻿RevoHelper V1.0.0 — Third-Party
+﻿RevoHelper V1.0.1 — Third-Party
 第三方组件说明、版权与许可证
 
 RevoHelper 自有代码采用 MIT 许可证，Copyright (c) 2026 Astral Memory。

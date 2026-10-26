@@ -3,6 +3,30 @@ namespace RevoHelper.App.Tests.Packaging;
 public sealed class ReleaseSourcePackagingTests
 {
     [Fact]
+    public void MaintenanceRelease_UsesStableVersionAndDoesNotBundleOldHomepageDrafts()
+    {
+        var script = Read("packaging", "Prepare-MaintenanceRelease.ps1");
+        Assert.Contains("'1.0.1+20261026'", script, StringComparison.Ordinal);
+        Assert.Contains("'1.0.1.2'", script, StringComparison.Ordinal);
+        Assert.Contains("RevoHelper v1.0.1 Source Code.zip", script, StringComparison.Ordinal);
+        Assert.Contains("'docs\\release\\V1.0.1_SOURCE_README.md' 'README.md'", script, StringComparison.Ordinal);
+        Assert.Contains("'docs\\release\\MIT_LICENSE_DRAFT.txt' 'LICENSE'", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("GITHUB_REPOSITORY_README.md", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("GITHUB_RELEASE.md", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("Prepare-GitHubRelease.ps1", script, StringComparison.Ordinal);
+        Assert.Contains("-not $existing.PSIsContainer", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void V101SourceReadme_ExplainsStablePackageAndEmptyOutputDirectory()
+    {
+        var source = Read("docs", "release", "V1.0.1_SOURCE_README.md");
+        Assert.Contains("RevoHelper V1.0.1 Source Code", source, StringComparison.Ordinal);
+        Assert.Contains("新目录或空目录", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("SOURCE_README.md` 的通用部分", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void StableRelease_UsesProtectedNewChildrenAndThreeRuntimeFiles()
     {
         var script = Read("packaging", "Prepare-GitHubRelease.ps1");
@@ -43,11 +67,11 @@ public sealed class ReleaseSourcePackagingTests
     }
 
     [Fact]
-    public void SourceAndRuntimeInstructions_DoNotClaimLocalPreparationIsOnlinePublication()
+    public void StableSourceInstructions_DescribePublished100AndRetainBuildAndLicenseDetails()
     {
         var source = Read("docs", "release", "SOURCE_README.md");
-        Assert.Contains("本地正式版候选源码", source, StringComparison.Ordinal);
-        Assert.Contains("不表示应用或源码已经在 GitHub 公开", source, StringComparison.Ordinal);
+        Assert.Contains("本源码包对应 RevoHelper V1.0.0", source, StringComparison.Ordinal);
+        Assert.Contains("下载、源码获取与更新以", source, StringComparison.Ordinal);
         Assert.Contains("Copyright (c) 2026 Astral Memory", source, StringComparison.Ordinal);
         Assert.Contains("dotnet test tests/RevoHelper.Core.Tests", source, StringComparison.Ordinal);
         Assert.Contains("dotnet test tests/RevoHelper.Hardware.Windows.Tests", source, StringComparison.Ordinal);

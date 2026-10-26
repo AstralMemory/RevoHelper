@@ -40,7 +40,8 @@ public sealed class PerformanceMonitorController : IAsyncDisposable
         this.frameSource = frameSource ?? new WindowsFrameRateSource(this.targets);
         this.manualTargets = manualTargets ?? new WindowsManualFrameTargetResolver();
         panel.ApplyPreferences(preferences);
-        panel.ReplacePrograms(programs.Load());
+        panel.ReplacePrograms(programs.Load(), preferences.SelectedProgramId);
+        preferences = panel.Preferences;
         panel.PreferencesChanged += OnPreferencesChanged;
         panel.SourceModeChanged += OnSourceModeChanged;
         panel.ProgramSelectionChanged += OnProgramSelectionChanged;
@@ -80,6 +81,7 @@ public sealed class PerformanceMonitorController : IAsyncDisposable
 
     private void OnSourceModeChanged(bool automatic)
     {
+        Change(preferences with { IsAutomatic = automatic, SelectedProgramId = panel.SelectedProgram?.Id });
         if (automatic) { manualTarget = null; frameSource.SetPinnedTarget(null); }
         else { RememberSelection(); UpdateManualTarget(force: true); }
         Refresh();
@@ -87,6 +89,7 @@ public sealed class PerformanceMonitorController : IAsyncDisposable
 
     private void OnProgramSelectionChanged(MonitorProgramEntry? selected)
     {
+        Change(preferences with { SelectedProgramId = selected?.Id });
         if (panel.IsAutomatic) return;
         if (selected is not null) RememberSelection();
         UpdateManualTarget(force: true);
@@ -112,7 +115,11 @@ public sealed class PerformanceMonitorController : IAsyncDisposable
             var added = programs.Add(executablePath, DateTimeOffset.UtcNow);
             panel.ReplacePrograms(programs.Load(), added.Id);
             if (panel.IsAutomatic) panel.IsAutomatic = false;
-            else { RememberSelection(); UpdateManualTarget(force: true); Refresh(); }
+            else
+            {
+                Change(preferences with { SelectedProgramId = added.Id });
+                RememberSelection(); UpdateManualTarget(force: true); Refresh();
+            }
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
         { panel.ReportStatus("未能添加程序：" + error.Message); }
@@ -124,6 +131,7 @@ public sealed class PerformanceMonitorController : IAsyncDisposable
         {
             programs.Remove(id);
             panel.ReplacePrograms(programs.Load());
+            Change(preferences with { SelectedProgramId = panel.SelectedProgram?.Id });
             if (panel.IsManual) { UpdateManualTarget(force: true); Refresh(); }
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException)

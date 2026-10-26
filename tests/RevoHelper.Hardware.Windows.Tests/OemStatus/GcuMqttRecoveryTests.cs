@@ -1,11 +1,61 @@
 using System.Reflection;
 using MQTTnet;
+using MQTTnet.Packets;
+using RevoHelper.Core.Control;
 using RevoHelper.Hardware.Windows.OemStatus;
 
 namespace RevoHelper.Hardware.Windows.Tests.OemStatus;
 
 public sealed class GcuMqttRecoveryTests
 {
+    [Fact]
+    public async Task LaterModeOnlyStatusPublishesNewCapabilitiesAndDoesNotClaimFreshPowerReadback()
+    {
+        var client = DispatchProxy.Create<IMqttClient, ClientProxy>();
+        var fake = (ClientProxy)(object)client;
+        await using var source = new GcuMqttStatusSource(client,
+            TimeSpan.FromMilliseconds(10), TimeSpan.FromMilliseconds(100));
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var capabilityUpdates = new List<OemRuntimeCapabilitiesUpdate>();
+        var errors = new List<Exception>();
+        var run = source.RunAsync(update =>
+        {
+            if (update is OemControlSessionUpdate) ready.TrySetResult();
+            if (update is OemRuntimeCapabilitiesUpdate evidence) capabilityUpdates.Add(evidence);
+            return ValueTask.CompletedTask;
+        }, error => { errors.Add(error); return ValueTask.CompletedTask; }, stop.Token);
+        try
+        {
+            await ready.Task.WaitAsync(stop.Token);
+            var firstRead = source.ReadStatusAsync(stop.Token).AsTask();
+            await fake.EmitFanStatusAsync("""
+                {"CPU_PL1":45,"CPU_PL2":65,"CPU_PL1Minimum":5,"CPU_PL1Maximum":210,
+                 "CPU_PL2Minimum":5,"CPU_PL2Maximum":210}
+                """);
+            Assert.True((await firstRead).HasCpuPowerLimitSnapshot);
+            Assert.Empty(Assert.Single(capabilityUpdates).Evidence.SupportedPlatformModes);
+
+            const string modeOnly = """{"OperatingMode":1,"OfficeProfileIndex":0,"GamingProfileIndex":0}""";
+            var modeRead = source.ReadStatusAsync(stop.Token).AsTask();
+            await fake.EmitFanStatusAsync(modeOnly);
+            var mode = await modeRead;
+            Assert.Equal(1, mode.OperatingMode);
+            Assert.False(mode.HasCpuPowerLimitSnapshot);
+            Assert.Equal(2, capabilityUpdates.Count);
+            Assert.Contains(PlatformMode.Balanced, capabilityUpdates[1].Evidence.SupportedPlatformModes);
+
+            await fake.EmitFanStatusAsync(modeOnly);
+            Assert.Equal(2, capabilityUpdates.Count);
+            Assert.Empty(errors);
+        }
+        finally
+        {
+            stop.Cancel();
+            try { await run; } catch (OperationCanceledException) { }
+        }
+    }
+
     [Fact]
     public async Task MainAndBootWaterUseDistinctMatchedLocalBrokerIdentities()
     {
@@ -195,6 +245,7 @@ public sealed class GcuMqttRecoveryTests
 
     public class ClientProxy : DispatchProxy
     {
+        private Func<MqttApplicationMessageReceivedEventArgs, Task>? messageReceived;
         public bool Connected;
         public bool FailFirstSubscription;
         public bool StallPublish;
@@ -206,10 +257,21 @@ public sealed class GcuMqttRecoveryTests
         public List<MqttClientOptions> ConnectionOptions = [];
         public List<string> Payloads = [];
 
+        public Task EmitFanStatusAsync(string payload) => messageReceived?.Invoke(
+            new MqttApplicationMessageReceivedEventArgs("test", new MqttApplicationMessageBuilder()
+                .WithTopic("Fan/Status").WithPayload(payload).Build(), new MqttPublishPacket(),
+                (_, _) => Task.CompletedTask)) ?? Task.CompletedTask;
+
         protected override object? Invoke(MethodInfo? method, object?[]? args)
         {
             switch (method!.Name)
             {
+                case "add_ApplicationMessageReceivedAsync":
+                    messageReceived += (Func<MqttApplicationMessageReceivedEventArgs, Task>)args![0]!;
+                    return null;
+                case "remove_ApplicationMessageReceivedAsync":
+                    messageReceived -= (Func<MqttApplicationMessageReceivedEventArgs, Task>)args![0]!;
+                    return null;
                 case "get_IsConnected": return Connected;
                 case "ConnectAsync":
                     Connects++;

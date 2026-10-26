@@ -3,6 +3,7 @@ using MQTTnet.Formatter;
 using MQTTnet.Protocol;
 using RevoHelper.Core.Control;
 using RevoHelper.Core.Fans;
+using RevoHelper.Core.Hardware;
 using RevoHelper.Hardware.Windows.OemControl;
 
 namespace RevoHelper.Hardware.Windows.OemStatus;
@@ -36,6 +37,7 @@ public sealed class GcuMqttStatusSource : IOemStatusSource, IGcuCpuPolicyChannel
     private readonly object cpuStatusSync = new();
     private TaskCompletionSource<GcuCpuPolicyStatus>? pendingCpuStatus;
     private GcuCpuPolicyStatus? cachedCpuStatus;
+    private OemRuntimeEvidence? publishedRuntimeEvidence;
     private readonly SemaphoreSlim gpuStatusRequestLock = new(1, 1);
     private readonly object gpuStatusSync = new();
     private TaskCompletionSource<GcuGpuOutputModeStatus>? pendingGpuStatus;
@@ -108,6 +110,12 @@ public sealed class GcuMqttStatusSource : IOemStatusSource, IGcuCpuPolicyChannel
                         }
 
                         waiter?.TrySetResult(mergedStatus);
+                        var evidence = GcuRuntimeCapabilityMapper.Map(mergedStatus);
+                        if (!SameEvidence(publishedRuntimeEvidence, evidence))
+                        {
+                            publishedRuntimeEvidence = evidence;
+                            await onUpdate(new OemRuntimeCapabilitiesUpdate(evidence)).ConfigureAwait(false);
+                        }
                         update = GcuPlatformModeStatusMapper.Map(mergedStatus) is { } selection
                             ? new OemPlatformModeUpdate(selection)
                             : null;
@@ -196,6 +204,7 @@ public sealed class GcuMqttStatusSource : IOemStatusSource, IGcuCpuPolicyChannel
                     reconnectPending = false;
                     await onUpdate(new OemConnectionStateUpdate("connecting", "正在连接 GCU 控制通道…"));
                     lock (cpuStatusSync) cachedCpuStatus = null;
+                    publishedRuntimeEvidence = null;
                     var options = new MqttClientOptionsBuilder()
                         .WithClientId(sessionClientId)
                         .WithTcpServer(Host, Port)
@@ -299,6 +308,15 @@ public sealed class GcuMqttStatusSource : IOemStatusSource, IGcuCpuPolicyChannel
 
         client.Dispose();
     }
+
+    private static bool SameEvidence(OemRuntimeEvidence? previous, OemRuntimeEvidence current) =>
+        previous is not null &&
+        previous.SupportedPlatformModes.SetEquals(current.SupportedPlatformModes) &&
+        previous.HasCpuPowerLimits == current.HasCpuPowerLimits &&
+        previous.HasFanCurves == current.HasFanCurves &&
+        previous.HasGpuOutputModes == current.HasGpuOutputModes &&
+        previous.HasLighting == current.HasLighting &&
+        previous.HasLiquidCooling == current.HasLiquidCooling;
 
     public async ValueTask<GcuCpuPolicyStatus> ReadStatusAsync(CancellationToken cancellationToken)
     {

@@ -5,6 +5,134 @@ namespace RevoHelper.Hardware.Windows.Tests.OemControl;
 
 public sealed class GcuQuickControlsControllerTests
 {
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task IndependentPowerChannels_PreserveTheSuccessfulChannel(bool settingFails)
+    {
+        var channel = new FakeChannel
+        {
+            SettingStatus = "{\"UsbCharger\":true,\"DeepSleepSwitch\":true}",
+            BatteryChargeLimitPercent = 80,
+            SettingReadException = settingFails ? new TimeoutException("setting timeout") : null,
+            ChargeLimitReadException = settingFails ? null : new TimeoutException("charge limit timeout")
+        };
+
+        var state = await new GcuQuickControlsController(channel).ReadPowerSettingsAsync(default);
+
+        Assert.NotNull(state);
+        Assert.Single(state.ReadWarnings);
+        Assert.Contains("timeout", state.ReadWarnings[0], StringComparison.Ordinal);
+        Assert.Equal(!settingFails, state.SettingStatusReadSucceeded);
+        if (settingFails) Assert.Equal(80, state.BatteryChargeLimitPercent);
+        else
+        {
+            Assert.True(state.UsbChargingWhileOffEnabled);
+            Assert.True(state.DeepSleepEnabled);
+        }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task IndependentDeviceChannels_PreserveTheSuccessfulChannel(bool settingFails)
+    {
+        var channel = new FakeChannel
+        {
+            DeviceSwitchStatus = "{\"WIFIEnable\":true}",
+            SettingStatus = "{\"CopilotKey\":\"COPILOTKEY_UNLOCK\"}",
+            SettingReadException = settingFails ? new TimeoutException("setting timeout") : null,
+            DeviceReadException = settingFails ? null : new TimeoutException("device timeout")
+        };
+
+        var state = await new GcuQuickControlsController(channel).ReadSystemTogglesAsync(default);
+
+        Assert.NotNull(state);
+        Assert.Single(state.ReadWarnings);
+        if (settingFails) Assert.True(state.WifiEnabled);
+        else Assert.True(state.CopilotKeyEnabled);
+    }
+
+    [Fact]
+    public async Task IndependentChannels_AllFailedDoNotReturnASuccessfulEmptyState()
+    {
+        var channel = new FakeChannel
+        {
+            SettingReadException = new TimeoutException("setting timeout"),
+            DeviceReadException = new TimeoutException("device timeout"),
+            ChargeLimitReadException = new TimeoutException("charge limit timeout")
+        };
+        var controller = new GcuQuickControlsController(channel);
+
+        var power = await Assert.ThrowsAsync<InvalidOperationException>(() => controller.ReadPowerSettingsAsync(default).AsTask());
+        var system = await Assert.ThrowsAsync<InvalidOperationException>(() => controller.ReadSystemTogglesAsync(default).AsTask());
+
+        Assert.Contains("setting timeout", power.Message, StringComparison.Ordinal);
+        Assert.Contains("charge limit timeout", power.Message, StringComparison.Ordinal);
+        Assert.Contains("device timeout", system.Message, StringComparison.Ordinal);
+        Assert.Contains("setting timeout", system.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task IndependentPowerChannels_CancellationStillPropagates(bool settingCancels)
+    {
+        var channel = new FakeChannel
+        {
+            SettingReadException = settingCancels ? new OperationCanceledException() : null,
+            ChargeLimitReadException = settingCancels ? null : new OperationCanceledException()
+        };
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            new GcuQuickControlsController(channel).ReadPowerSettingsAsync(default).AsTask());
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task IndependentDeviceChannels_CancellationStillPropagates(bool settingCancels)
+    {
+        var channel = new FakeChannel
+        {
+            SettingReadException = settingCancels ? new OperationCanceledException() : null,
+            DeviceReadException = settingCancels ? null : new OperationCanceledException()
+        };
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            new GcuQuickControlsController(channel).ReadSystemTogglesAsync(default).AsTask());
+    }
+
+    [Fact]
+    public async Task IndependentWriteReadback_ConfirmsOnlyTheRequestedPowerField()
+    {
+        var channel = new FakeChannel
+        {
+            SettingStatus = "{\"UsbCharger\":true}",
+            ChargeLimitReadException = new TimeoutException("charge limit timeout")
+        };
+        var controller = new GcuQuickControlsController(channel, (_, _) => Task.CompletedTask);
+        var confirmed = await controller.SetPowerToggleAsync(PowerToggleControl.UsbChargingWhileOff, true, default);
+        Assert.True(confirmed.Succeeded);
+        Assert.Contains("charge limit timeout", confirmed.Reason, StringComparison.Ordinal);
+        channel.SettingStatus = "{}";
+        Assert.False((await controller.SetPowerToggleAsync(PowerToggleControl.UsbChargingWhileOff, true, default)).Succeeded);
+    }
+
+    [Fact]
+    public async Task IndependentWriteReadback_ConfirmsOnlyTheRequestedDeviceField()
+    {
+        var channel = new FakeChannel
+        {
+            DeviceSwitchStatus = "{\"WIFIEnable\":true}",
+            SettingReadException = new TimeoutException("setting timeout")
+        };
+        var controller = new GcuQuickControlsController(channel, (_, _) => Task.CompletedTask);
+        var confirmed = await controller.SetSystemToggleAsync(SystemToggleControl.Wifi, true, default);
+        Assert.True(confirmed.Succeeded);
+        Assert.Contains("setting timeout", confirmed.Reason, StringComparison.Ordinal);
+        channel.DeviceSwitchStatus = "{}";
+        Assert.False((await controller.SetSystemToggleAsync(SystemToggleControl.Wifi, true, default)).Succeeded);
+    }
+
     [Fact]
     public async Task Shortcut_UnrelatedPartialPacketDoesNotConfirmMissingTarget()
     {
@@ -702,6 +830,9 @@ public sealed class GcuQuickControlsControllerTests
 
     private sealed class FakeChannel : IGcuQuickControlsChannel
     {
+        public Exception? SettingReadException { get; set; }
+        public Exception? DeviceReadException { get; set; }
+        public Exception? ChargeLimitReadException { get; set; }
         public string SettingStatus { get; set; } = "{}";
         public string DeviceSwitchStatus { get; set; } = "{}";
         public string KeyboardStatus { get; set; } = "{}";
@@ -728,11 +859,13 @@ public sealed class GcuQuickControlsControllerTests
         public ValueTask<string> ReadSettingStatusAsync(CancellationToken cancellationToken)
         {
             SettingReads++;
+            if (SettingReadException is { } exception) return ValueTask.FromException<string>(exception);
             return ValueTask.FromResult(SettingStatuses.Count > 0 ? SettingStatuses.Dequeue() : SettingStatus);
         }
 
         public ValueTask<string> ReadDeviceSwitchStatusAsync(CancellationToken cancellationToken) =>
-            ValueTask.FromResult(DeviceSwitchStatuses.Count > 0 ? DeviceSwitchStatuses.Dequeue() : DeviceSwitchStatus);
+            DeviceReadException is { } exception ? ValueTask.FromException<string>(exception) :
+                ValueTask.FromResult(DeviceSwitchStatuses.Count > 0 ? DeviceSwitchStatuses.Dequeue() : DeviceSwitchStatus);
 
         public ValueTask<string> ReadKeyboardStatusAsync(CancellationToken cancellationToken) => ValueTask.FromResult(KeyboardStatus);
         public ValueTask<string> ReadLightingStatusAsync(LightingZone zone, CancellationToken cancellationToken)
@@ -753,7 +886,8 @@ public sealed class GcuQuickControlsControllerTests
         public ValueTask<string> ReadLiquidCoolingAsync(CancellationToken cancellationToken) =>
             ValueTask.FromResult(LiquidStatuses.Count > 0 ? LiquidStatuses.Dequeue() : LiquidStatus);
         public ValueTask<int?> ReadBatteryChargeLimitAsync(CancellationToken cancellationToken) =>
-            ValueTask.FromResult(BatteryChargeLimitPercent);
+            ChargeLimitReadException is { } exception ? ValueTask.FromException<int?>(exception) :
+                ValueTask.FromResult(BatteryChargeLimitPercent);
         public ValueTask WriteSettingAsync(string payload, CancellationToken cancellationToken) { LastSettingCommand = payload; return ValueTask.CompletedTask; }
         public ValueTask WriteKeyboardAsync(string payload, CancellationToken cancellationToken) { LastKeyboardCommand = payload; return ValueTask.CompletedTask; }
         public ValueTask WriteLightingAsync(LightingZone zone, string payload, CancellationToken cancellationToken)

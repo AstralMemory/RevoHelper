@@ -24,19 +24,58 @@ public sealed class GcuQuickControlsController : IQuickControlsController
 
     public async ValueTask<SystemToggleState?> ReadSystemTogglesAsync(CancellationToken cancellationToken)
     {
-        var devicePayload = await channel.ReadDeviceSwitchStatusAsync(cancellationToken).ConfigureAwait(false);
-        var settingPayload = await channel.ReadSettingStatusAsync(cancellationToken).ConfigureAwait(false);
-        return GcuQuickControlsStatusParser.MergeSystemToggles(
-            GcuQuickControlsStatusParser.ParseSystemToggles(devicePayload),
-            GcuQuickControlsStatusParser.ParseSystemToggles(settingPayload));
+        var device = await ReadIndependentChannelAsync("设备开关状态",
+            () => channel.ReadDeviceSwitchStatusAsync(cancellationToken), cancellationToken).ConfigureAwait(false);
+        var setting = await ReadIndependentChannelAsync("快捷设置状态",
+            () => channel.ReadSettingStatusAsync(cancellationToken), cancellationToken).ConfigureAwait(false);
+        var warnings = ReadWarnings(device.Failure, setting.Failure);
+        if (device.Failure is not null && setting.Failure is not null)
+            throw new InvalidOperationException(string.Join("；", warnings));
+
+        var state = GcuQuickControlsStatusParser.MergeSystemToggles(
+            GcuQuickControlsStatusParser.ParseSystemToggles(device.Value ?? "{}"),
+            GcuQuickControlsStatusParser.ParseSystemToggles(setting.Value ?? "{}"));
+        if (state is null && warnings.Length == 0) return null;
+        return (state ?? new(null, null, null, null, null)) with { ReadWarnings = warnings };
     }
 
     public async ValueTask<PowerSettingsState?> ReadPowerSettingsAsync(CancellationToken cancellationToken)
     {
-        var settingPayload = await channel.ReadSettingStatusAsync(cancellationToken).ConfigureAwait(false);
-        var chargeLimit = await channel.ReadBatteryChargeLimitAsync(cancellationToken).ConfigureAwait(false);
-        return GcuQuickControlsStatusParser.ParsePowerSettings(settingPayload, chargeLimit);
+        var setting = await ReadIndependentChannelAsync("电源设置状态",
+            () => channel.ReadSettingStatusAsync(cancellationToken), cancellationToken).ConfigureAwait(false);
+        var chargeLimit = await ReadIndependentChannelAsync("充电上限状态",
+            () => channel.ReadBatteryChargeLimitAsync(cancellationToken), cancellationToken).ConfigureAwait(false);
+        var warnings = ReadWarnings(setting.Failure, chargeLimit.Failure);
+        if (setting.Failure is not null && chargeLimit.Failure is not null)
+            throw new InvalidOperationException(string.Join("；", warnings));
+
+        var state = GcuQuickControlsStatusParser.ParsePowerSettings(setting.Value ?? "{}", chargeLimit.Value);
+        if (state is null && warnings.Length == 0) return null;
+        return (state ?? new(null, false, null, null, null, null, null)) with
+        {
+            ReadWarnings = warnings,
+            SettingStatusReadSucceeded = setting.Failure is null
+        };
     }
+
+    private static async ValueTask<(T? Value, string? Failure)> ReadIndependentChannelAsync<T>(
+        string label, Func<ValueTask<T>> read, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        try { return (await read().ConfigureAwait(false), null); }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return (default, $"{label}读取失败：{exception.Message}");
+        }
+    }
+
+    private static string[] ReadWarnings(params string?[] failures) =>
+        failures.OfType<string>().ToArray();
+
+    private static ControlResult WithReadWarnings(ControlResult result, IReadOnlyList<string>? warnings) =>
+        warnings is { Count: > 0 }
+            ? result with { Reason = $"{result.Reason} 部分状态未读取：{string.Join("；", warnings)}" }
+            : result;
 
     public async ValueTask<KeyboardLightingState?> ReadKeyboardLightingAsync(CancellationToken cancellationToken) =>
         GcuQuickControlsStatusParser.ParseKeyboardLighting(await channel.ReadKeyboardStatusAsync(cancellationToken).ConfigureAwait(false));
@@ -98,11 +137,11 @@ public sealed class GcuQuickControlsController : IQuickControlsController
                 cancellationToken)
             .ConfigureAwait(false);
         var actual = ReadSystemToggle(state, control);
-        return actual == enabled
+        return WithReadWarnings(actual == enabled
             ? new(true, $"{SystemToggleLabel(control)}已{(enabled ? "开启" : "关闭")}并回读确认。")
             : actual is null
                 ? ControlResult.Rejected($"{SystemToggleLabel(control)}命令已发送，但设备状态接口未返回该项，无法确认实际状态。")
-                : ControlResult.Rejected($"{SystemToggleLabel(control)}写入后未得到目标状态回读。");
+                : ControlResult.Rejected($"{SystemToggleLabel(control)}写入后未得到目标状态回读。"), state?.ReadWarnings);
     }
 
     public async ValueTask<ControlResult> SetPowerToggleAsync(
@@ -112,11 +151,11 @@ public sealed class GcuQuickControlsController : IQuickControlsController
         var state = await WaitForPowerSettingsAsync(candidate => ReadPowerToggle(candidate, control) == enabled, cancellationToken)
             .ConfigureAwait(false);
         var actual = ReadPowerToggle(state, control);
-        return actual == enabled
+        return WithReadWarnings(actual == enabled
             ? new(true, $"{PowerToggleLabel(control)}已{(enabled ? "开启" : "关闭")}并回读确认。")
             : actual is null
                 ? ControlResult.Rejected($"{PowerToggleLabel(control)}命令已发送，但 OEM 状态未返回该项，无法确认实际状态。")
-                : ControlResult.Rejected($"{PowerToggleLabel(control)}写入后未得到目标状态回读。");
+                : ControlResult.Rejected($"{PowerToggleLabel(control)}写入后未得到目标状态回读。"), state?.ReadWarnings);
     }
 
     public async ValueTask<ControlResult> SetDeepSleepAsync(bool enabled, int minutes, CancellationToken cancellationToken)
@@ -126,9 +165,9 @@ public sealed class GcuQuickControlsController : IQuickControlsController
         var state = await WaitForPowerSettingsAsync(candidate =>
             candidate?.DeepSleepEnabled == enabled && (!enabled || candidate.DeepSleepMinutes == minutes), cancellationToken)
             .ConfigureAwait(false);
-        return state?.DeepSleepEnabled == enabled && (!enabled || state.DeepSleepMinutes == minutes)
+        return WithReadWarnings(state?.DeepSleepEnabled == enabled && (!enabled || state.DeepSleepMinutes == minutes)
             ? new(true, $"深度睡眠已{(enabled ? $"开启（{minutes} 分钟）" : "关闭")}并回读确认。")
-            : ControlResult.Rejected("深度睡眠写入后未得到目标状态回读。");
+            : ControlResult.Rejected("深度睡眠写入后未得到目标状态回读。"), state?.ReadWarnings);
     }
 
     public async ValueTask<ControlResult> SetBatteryChargeLimitAsync(int percent, CancellationToken cancellationToken)

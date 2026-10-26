@@ -106,6 +106,8 @@ public static class SnapshotPreview
                 },
                 _ => null
             });
+            if (page == HomeDrawer.Settings && language == "zh-CN" && theme == "light")
+                RenderSettingsTopPreview(directory, language, theme, dashboard, telemetry, now);
         }
 
         void RenderDrawer(string name, bool bottom, bool manual)
@@ -131,6 +133,21 @@ public static class SnapshotPreview
             var scroll = (ScrollViewer)drawer.FindName("PerformanceMonitorDrawerContent");
             Render(drawer, Path.Combine(directory, name), bottom ? () => scroll.ScrollToEnd() : null);
         }
+    }
+
+    private static void RenderSettingsTopPreview(string directory, string language, string theme,
+        HomeDashboard dashboard, HardwareTelemetrySnapshot telemetry, DateTimeOffset now)
+    {
+        var model = new MainWindowViewModel(dashboard, new(UiLanguageCode: language, UiThemeCode: theme),
+            new PreviewSettings(new(UiLanguageCode: language, UiThemeCode: theme)), new PreviewStartup(),
+            lightingProfileStore: new PreviewLighting(), utcNow: () => now);
+        model.ApplyTelemetry(telemetry);
+        var window = new MainWindow(model) { AllowApplicationClose = true };
+        typeof(MainWindowViewModel).GetProperty(nameof(MainWindowViewModel.ActiveDrawer))!.SetValue(model, HomeDrawer.Settings);
+        typeof(MainWindow).GetMethod("OpenDrawer", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window, null);
+        window.RaiseEvent(new RoutedEventArgs(FrameworkElement.LoadedEvent));
+        var scroll = (ScrollViewer)window.FindName("SettingsDrawerContent");
+        Render(window, Path.Combine(directory, "snapshot4-zh-CN-light-Settings-top.png"), scroll.ScrollToHome);
     }
 
     /// <summary>Render only window content without ever showing the window.</summary>

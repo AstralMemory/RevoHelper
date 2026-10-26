@@ -39,6 +39,13 @@ public partial class App : Application
     private OemRuntimeEvidence capabilityOemEvidence = OemRuntimeEvidence.None;
     private IGpuOutputModeController? capabilityGpuOutputController;
     private Task? capabilityProbeTask;
+    private RetryableDiscoveryCoordinator? hardwareDiscovery;
+    private DeferredCpuBackendProbe? directBackendProbe;
+    private CpuBackendCapability? directCpuCapability;
+    private MachineIdentity? lastDiscoveredIdentity;
+    private bool powerProfilesDiscovered;
+    private readonly CancellationTokenSource applicationLifetime = new();
+    private bool isExiting;
     private SwitchableCpuPolicyController? directCpuPolicyController;
     private PlatformAwareCpuPolicyController? platformAwareCpuPolicyController;
     private ExperimentalControlsViewModel? experiments;
@@ -220,6 +227,11 @@ public partial class App : Application
         capabilityCpuBackends = new WindowsCpuBackendProbe().Probe(dashboard.Identity.Cpu);
         RefreshRuntimeCapabilities(viewModel);
         window.Show();
+        viewModel.CapabilityRecheckRequested += () =>
+        {
+            StartDeferredHardwareDiscovery(viewModel);
+            StartRuntimeCapabilityProbe(gcuStatusSource, gpuOutputController, viewModel);
+        };
         performanceMonitor.Initialize();
         _ = ApplyAutomaticRefreshRateForCurrentPowerSourceAsync(viewModel);
         StartConflictServiceDetection(viewModel);
@@ -257,65 +269,130 @@ public partial class App : Application
 
     private void StartDeferredHardwareDiscovery(MainWindowViewModel viewModel)
     {
-        _ = Task.Run(async () =>
-        {
-            IWmiQuery query = new RetryingWmiQuery(
-                new SystemManagementWmiQuery(),
-                maxAttempts: 3,
-                delay: TimeSpan.FromMilliseconds(200));
-            var identity = ReadIdentity(query);
-            var dashboard = HomeDashboardFactory.Create(
-                identity,
-                ReadDisplayAdapters(query));
-            OemControlInventory inventory;
-            try
-            {
-                inventory = new OemControlInventoryReader(new WindowsOemEnvironmentProbe(query)).Read();
-            }
-            catch (Exception exception)
-            {
-                inventory = new([], false, $"OEM control-chain probe failed: {exception.GetType().Name}");
-            }
-            var cpuBackends = new WindowsCpuBackendProbe().Probe(identity.Cpu);
-            var directProbe = await new DirectCpuPolicyBackendProbe().ProbeAsync(
-                identity.Cpu,
-                AppContext.BaseDirectory,
-                CancellationToken.None).ConfigureAwait(false);
-            cpuBackends = MergeDirectCpuCapability(cpuBackends, directProbe.Capability);
-            IReadOnlyList<RevoHelper.Core.Control.CpuPowerLimitProfile> powerProfiles;
-            try
-            {
-                powerProfiles = new OemCpuPowerLimitProfileReader(
-                    OemCpuPowerLimitProfileReader.DefaultProfileDirectory).Read();
-            }
-            catch (Exception)
-            {
-                powerProfiles = [];
-            }
+        if (isExiting) return;
+        hardwareDiscovery ??= new RetryableDiscoveryCoordinator(
+            token => DiscoverHardwareAsync(viewModel, token),
+            busy => DispatchDiscoveryUpdateAsync(() => viewModel.SetCapabilityDetectionBusy(busy)),
+            exception => RuntimeDiagnosticLog.Write("hardware-discovery", $"{exception.GetType().Name}: {exception.Message}"));
+        _ = hardwareDiscovery.RequestAsync();
+    }
 
-            _ = Dispatcher.BeginInvoke(() =>
+    private async Task<bool> DiscoverHardwareAsync(MainWindowViewModel viewModel, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        IWmiQuery query = new RetryingWmiQuery(
+            new SystemManagementWmiQuery(),
+            maxAttempts: 3,
+            delay: TimeSpan.FromMilliseconds(200));
+        var identity = ReadIdentity(query);
+        var displayAdapters = ReadDisplayAdapters(query);
+        cancellationToken.ThrowIfCancellationRequested();
+        OemControlInventory inventory;
+        try
+        {
+            inventory = new OemControlInventoryReader(new WindowsOemEnvironmentProbe(query)).Read();
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            inventory = new([], false, $"OEM control-chain probe failed: {exception.GetType().Name}");
+        }
+        IReadOnlyList<CpuPowerLimitProfile> powerProfiles = [];
+        var profileEvidence = OemRuntimeEvidence.None;
+        var profileDirectory = OemCpuPowerLimitProfileReader.ResolveProfileDirectory(inventory);
+        try
+        {
+            powerProfiles = new OemCpuPowerLimitProfileReader(profileDirectory).Read();
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            RuntimeDiagnosticLog.Write("power-profile-discovery", exception.GetType().Name);
+        }
+        try
+        {
+            // Basic mode discovery does not depend on CPU PL fields being available.
+            profileEvidence = new OemPlatformModeProfileReader(profileDirectory).ReadEvidence();
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            RuntimeDiagnosticLog.Write("mode-profile-discovery", exception.GetType().Name);
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        await DispatchDiscoveryUpdateAsync(() =>
+        {
+            // Only prior real observations participate; the initial dashboard placeholder
+            // must never turn an unknown manufacturer into a confirmed MECHREVO identity.
+            identity = DiscoveryIdentityMerger.Merge(lastDiscoveredIdentity, identity);
+            lastDiscoveredIdentity = identity;
+            var dashboard = HomeDashboardFactory.Create(identity, displayAdapters);
+            var cpuBackends = new WindowsCpuBackendProbe().Probe(identity.Cpu);
+            viewModel.UpdateDashboard(dashboard);
+            var firstProfilesRead = !powerProfilesDiscovered && powerProfiles.Count > 0;
+            viewModel.ApplyCpuPowerLimitProfiles(powerProfiles, preserveDrafts: powerProfilesDiscovered);
+            if (powerProfiles.Count > 0) powerProfilesDiscovered = true;
+            capabilityIdentity = identity;
+            capabilityInventory = inventory;
+            capabilityCpuBackends = MergeDirectCpuCapability(cpuBackends, directCpuCapability);
+            capabilityOemEvidence = MergeEvidence(capabilityOemEvidence,
+                MergeEvidence(profileEvidence, OemCpuPowerLimitProfileCapabilityMapper.Map(powerProfiles)));
+            RefreshRuntimeCapabilities(viewModel);
+            if (firstProfilesRead) _ = InitializePerformancePolicyWhenReadyAsync(viewModel);
+            // This separate one-shot worker can neither hold up OEM controls nor repeat
+            // privileged write verification on reconnect or a manual read-only recheck.
+            StartDirectCpuBackendProbe(identity.Cpu, viewModel);
+        }).ConfigureAwait(false);
+
+        var knownIdentity = !string.IsNullOrWhiteSpace(identity.Manufacturer) &&
+            !identity.Manufacturer.Equals("UNKNOWN", StringComparison.OrdinalIgnoreCase);
+        return knownIdentity && identity.Cpu.Vendor is not CpuVendor.Unknown &&
+            (!identity.Manufacturer.Trim().Equals("MECHREVO", StringComparison.OrdinalIgnoreCase) ||
+             inventory.HasCompletePlatformModeChain);
+    }
+
+    private Task DispatchDiscoveryUpdateAsync(Action update)
+    {
+        if (isExiting || Dispatcher.HasShutdownStarted) return Task.CompletedTask;
+        return Dispatcher.InvokeAsync(() =>
+        {
+            if (!isExiting && !Dispatcher.HasShutdownStarted) update();
+        }, System.Windows.Threading.DispatcherPriority.Background, applicationLifetime.Token).Task;
+    }
+
+    private void StartDirectCpuBackendProbe(CpuIdentity cpu, MainWindowViewModel viewModel)
+    {
+        if (isExiting) return;
+        directBackendProbe ??= new DeferredCpuBackendProbe(
+            (identity, token) => new DirectCpuPolicyBackendProbe().ProbeAsync(identity, AppContext.BaseDirectory, token),
+            action => Dispatcher.InvokeAsync(action, System.Windows.Threading.DispatcherPriority.Background,
+                applicationLifetime.Token).Task,
+            result =>
             {
-                if (directProbe.Controller is not null)
+                if (result.Controller is not null) directCpuPolicyController!.SetController(result.Controller);
+                // Ownership has transferred. A presentation error must not dispose the
+                // installed controller while leaving the proxy pointing at it.
+                try
                 {
-                    directCpuPolicyController?.SetController(directProbe.Controller);
+                    directCpuCapability = result.Capability;
+                    capabilityCpuBackends = MergeDirectCpuCapability(capabilityCpuBackends, result.Capability);
+                    RefreshRuntimeCapabilities(viewModel);
+                    _ = InitializePerformancePolicyWhenReadyAsync(viewModel);
                 }
-                viewModel.UpdateDashboard(dashboard);
-                viewModel.ApplyCpuPowerLimitProfiles(powerProfiles);
-                capabilityIdentity = identity;
-                capabilityInventory = inventory;
-                capabilityCpuBackends = cpuBackends;
-                capabilityOemEvidence = MergeEvidence(
-                    capabilityOemEvidence,
-                    OemCpuPowerLimitProfileCapabilityMapper.Map(powerProfiles));
-                RefreshRuntimeCapabilities(viewModel);
-                _ = InitializePerformancePolicyWhenReadyAsync(viewModel);
-            });
-        });
+                catch (Exception exception)
+                {
+                    RuntimeDiagnosticLog.Write("cpu-backend-presentation", $"{exception.GetType().Name}: {exception.Message}");
+                }
+            },
+            exception => RuntimeDiagnosticLog.Write("cpu-backend-discovery", $"{exception.GetType().Name}: {exception.Message}"));
+        _ = directBackendProbe.StartAsync(cpu);
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
         if (previewOnly) { base.OnExit(e); return; }
+        isExiting = true;
+        applicationLifetime.Cancel();
+        hardwareDiscovery?.Dispose();
+        directBackendProbe?.Dispose();
         performanceMonitor?.CloseWindows();
         mainViewModel?.BeginShutdown();
         systemTrayController?.Dispose();
@@ -323,23 +400,25 @@ public partial class App : Application
         using (var displayTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(3)))
             BoundedShutdown.Run(() => displayController.StopAndRestoreAsync(displayTimeout.Token).AsTask(),
                 TimeSpan.FromSeconds(3));
-        if (experiments is not null)
+        // Do not let the manual layer mistake an unrestored dynamic cap for an
+        // external change and discard the original session baseline.
+        using (var frequencyTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(6)))
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-            BoundedShutdown.Run(() => experiments.ShutdownAsync(timeout.Token), TimeSpan.FromSeconds(3));
-            experiments.Dispose();
+            var recovered = false;
+            var completed = BoundedShutdown.Run(async () => recovered = await LayeredFrequencyRecovery.RunAsync(
+                token => experiments?.ShutdownAsync(token) ?? Task.FromResult(true),
+                async token => processorFrequencyLimitController is null ||
+                    (await processorFrequencyLimitController.RecoverAsync(token).ConfigureAwait(false)).Succeeded,
+                frequencyTimeout.Token).ConfigureAwait(false), TimeSpan.FromSeconds(6));
+            if (!completed) frequencyTimeout.Cancel();
+            if (!completed || !recovered)
+                RuntimeDiagnosticLog.Write("frequency-recovery", "Exit recovery incomplete; dependent recovery journals retained for next launch.");
         }
+        experiments?.Dispose();
         if (platformAwareCpuPolicyController is not null)
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
             BoundedShutdown.Run(() => platformAwareCpuPolicyController.RestoreActivePresetBaselineAsync(timeout.Token).AsTask(),
-                TimeSpan.FromSeconds(3));
-        }
-        if (processorFrequencyLimitController is not null)
-        {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-            BoundedShutdown.Run(
-                () => processorFrequencyLimitController.RecoverAsync(timeout.Token).AsTask(),
                 TimeSpan.FromSeconds(3));
         }
         if (processorBoostController is not null)
@@ -438,10 +517,19 @@ public partial class App : Application
                         case OemPlatformModeUpdate platform:
                             _ = viewModel.ObservePlatformModeAsync(platform.Selection, CancellationToken.None);
                             break;
+                        case OemRuntimeCapabilitiesUpdate capabilities:
+                            var merged = MergeEvidence(capabilityOemEvidence, capabilities.Evidence);
+                            if (!ReferenceEquals(merged, capabilityOemEvidence))
+                            {
+                                capabilityOemEvidence = merged;
+                                RefreshRuntimeCapabilities(viewModel);
+                            }
+                            break;
                         case OemLightingZoneUpdate lighting:
                             viewModel.ApplyLightingZoneState(lighting.Zone, lighting.State);
                             break;
                         case OemControlSessionUpdate:
+                            StartDeferredHardwareDiscovery(viewModel);
                             if (oemStatusSource is GcuMqttStatusSource source && capabilityGpuOutputController is { } gpu)
                                 StartRuntimeCapabilityProbe(source, gpu, viewModel);
                             _ = viewModel.SynchronizeControlSessionAsync(CancellationToken.None);
@@ -465,6 +553,7 @@ public partial class App : Application
     private void StartRuntimeCapabilityProbe(GcuMqttStatusSource source,
         IGpuOutputModeController gpu, MainWindowViewModel viewModel)
     {
+        if (isExiting) return;
         capabilityGpuOutputController = gpu;
         if (capabilityProbeTask is { IsCompleted: false }) return;
         capabilityProbeTask = ProbeRuntimeCapabilitiesWhenReadyAsync(source, gpu, viewModel);
@@ -479,13 +568,13 @@ public partial class App : Application
         {
             try
             {
-                await Task.Delay(TimeSpan.FromMilliseconds(500));
-                var status = await gcuStatusSource.ReadStatusAsync(CancellationToken.None);
+                await Task.Delay(TimeSpan.FromMilliseconds(500), applicationLifetime.Token);
+                var status = await gcuStatusSource.ReadStatusAsync(applicationLifetime.Token);
                 var evidence = GcuRuntimeCapabilityMapper.Map(status);
                 GpuOutputModeState? gpuState = null;
                 try
                 {
-                    gpuState = await gpuOutputController.ReadStateAsync(CancellationToken.None);
+                    gpuState = await gpuOutputController.ReadStateAsync(applicationLifetime.Token);
                 }
                 catch (Exception exception) when (exception is not OperationCanceledException)
                 {
@@ -496,13 +585,17 @@ public partial class App : Application
                 {
                     HasGpuOutputModes = gpuState is not null && HasAnyGpuOutputMode(gpuState.Capabilities)
                 };
-                await Dispatcher.InvokeAsync(() =>
+                await DispatchDiscoveryUpdateAsync(() =>
                 {
                     capabilityOemEvidence = MergeEvidence(capabilityOemEvidence, evidence);
                     if (gpuState is not null) viewModel.ApplyGpuOutputState(gpuState);
                     RefreshRuntimeCapabilities(viewModel);
-                    _ = viewModel.SynchronizeControlSessionAsync(CancellationToken.None);
+                    _ = viewModel.SynchronizeControlSessionAsync(applicationLifetime.Token);
                 });
+                if (evidence.SupportedPlatformModes.Count > 0) return;
+            }
+            catch (OperationCanceledException) when (applicationLifetime.IsCancellationRequested)
+            {
                 return;
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
@@ -525,13 +618,7 @@ public partial class App : Application
 
     private static OemRuntimeEvidence MergeEvidence(
         OemRuntimeEvidence current,
-        OemRuntimeEvidence update) => new(
-            new HashSet<PlatformMode>(current.SupportedPlatformModes.Concat(update.SupportedPlatformModes)),
-            current.HasCpuPowerLimits || update.HasCpuPowerLimits,
-            current.HasFanCurves || update.HasFanCurves,
-            current.HasGpuOutputModes || update.HasGpuOutputModes,
-            current.HasLighting || update.HasLighting,
-            current.HasLiquidCooling || update.HasLiquidCooling);
+        OemRuntimeEvidence update) => RuntimeEvidenceMerger.Merge(current, update);
 
     private static bool HasAnyGpuOutputMode(GpuOutputModeCapabilities capabilities) =>
         capabilities.SupportsHybrid || capabilities.SupportsDiscrete || capabilities.SupportsIntegrated;
@@ -633,7 +720,8 @@ public partial class App : Application
     {
         try
         {
-            return new WindowsMachineIdentityReader(query).Read();
+            return new WindowsMachineIdentityReader(query, reportQueryFailure: (name, exception) =>
+                RuntimeDiagnosticLog.Write("identity-discovery", $"{name}: {exception.GetType().Name}")).Read();
         }
         catch (Exception)
         {
