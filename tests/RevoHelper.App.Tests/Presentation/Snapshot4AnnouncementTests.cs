@@ -50,13 +50,20 @@ public sealed class Snapshot4AnnouncementTests
     [InlineData("en-US")]
     public void BundledCopy_UsesReleaseVersionWithoutClaimingPublicationAndIncludesDisclosure(string language)
     {
-        var copy = AnnouncementCopy.For(language, "V1.0.1");
-        Assert.Equal("V1.0.1", copy.Version);
-        Assert.Equal("2026-10-26", copy.UpdatedDate);
+        var copy = AnnouncementCopy.For(language, "V1.0.2");
+        Assert.Equal("V1.0.2", copy.Version);
+        Assert.Equal("2026-10-30", copy.UpdatedDate);
         Assert.Contains("MIT", copy.Release);
         Assert.Contains("GitHub Releases", copy.Release);
-        Assert.DoesNotContain("Beta", copy.Notice);
-        Assert.DoesNotContain(language == "en-US" ? "V1.0.1 has been publicly released" : "V1.0.1 已正式发布", copy.Release);
+        Assert.Contains("V1.0.2", copy.Notice);
+        Assert.DoesNotContain(language == "en-US" ? "has been publicly released" : "已正式发布", copy.Release);
+        Assert.Contains("60% / 80% / 100%", copy.Notice);
+        Assert.Contains("N.1.18MRO24", copy.Notice);
+        Assert.Contains("1.25", copy.Notice);
+        Assert.Contains(language == "en-US" ? "off by default" : "默认关闭", copy.Notice);
+        Assert.Contains(language == "en-US" ? "remain unverified" : "尚待验证", copy.Notice);
+        foreach (var risk in language == "en-US" ? new[] { "platform state", "fans", "power", "keys" } : new[] { "平台状态", "风扇", "功耗", "按键" })
+            Assert.Contains(risk, copy.Notice);
         Assert.Contains(language == "en-US" ? "does not unlock GPU" : "没有 GPU 功耗解锁", copy.Release);
         Assert.Contains(language == "en-US" ? "third-party" : "第三方", copy.Release);
         Assert.Contains(language == "en-US" ? "Some models" : "部分机型", copy.Compatibility);

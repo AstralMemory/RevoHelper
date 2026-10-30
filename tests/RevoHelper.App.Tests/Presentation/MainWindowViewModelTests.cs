@@ -377,8 +377,9 @@ public sealed class MainWindowViewModelTests
     {
         var viewModel = new MainWindowViewModel(CreateDashboard());
 
-        Assert.Equal("V1.0.1", viewModel.ReleaseVersionText);
-        Assert.Equal("RevoHelper V1.0.1 · 免费使用", viewModel.AppVersionText);
+        Assert.Equal("V1.0.2", viewModel.ReleaseVersionText);
+        Assert.Equal("V1.0.2", viewModel.ReleaseBadgeText);
+        Assert.Equal("RevoHelper V1.0.2 · 免费使用", viewModel.AppVersionText);
     }
 
     [Fact]
@@ -395,7 +396,7 @@ public sealed class MainWindowViewModelTests
         Assert.Equal("en-US", store.LastSaved?.UiLanguageCode);
         Assert.Equal("Laptop performance profiles", viewModel.UiCopy.HomeTitle);
         Assert.Equal("Performance", viewModel.DrawerTitle);
-        Assert.Equal("RevoHelper V1.0.1 · Free to use", viewModel.AppVersionText);
+        Assert.Equal("RevoHelper V1.0.2 · Free to use", viewModel.AppVersionText);
     }
 
     [Fact]
@@ -1892,6 +1893,57 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public async Task LiquidCoolingSmartSwitchPreservesAndRestoresLastManualPosition()
+    {
+        var controls = new RecordingQuickControlsController();
+        var vm = CreateViewModel(quickControlsController: controls);
+        await vm.OpenLiquidCoolingAsync(CancellationToken.None);
+        vm.SelectedLiquidCoolingManualIndex = 3;
+        await vm.ApplyLiquidCoolingManualStrategyAsync(CancellationToken.None);
+        Assert.Equal(LiquidCoolingFanMode.Maximum, controls.LiquidFanMode);
+        await vm.SetLiquidCoolingSmartAsync(true, CancellationToken.None);
+        Assert.True(vm.IsLiquidCoolingSmartStrategy);
+        Assert.False(vm.CanChooseLiquidCoolingManualStrategy);
+        Assert.Equal(3, vm.SelectedLiquidCoolingManualIndex);
+        vm.SelectedLiquidCoolingManualIndex = 0;
+        Assert.Equal(3, vm.SelectedLiquidCoolingManualIndex);
+        await vm.SetLiquidCoolingSmartAsync(false, CancellationToken.None);
+        Assert.False(vm.IsLiquidCoolingSmartStrategy);
+        Assert.True(vm.CanChooseLiquidCoolingManualStrategy);
+        Assert.Equal(LiquidCoolingFanMode.Maximum, controls.LiquidFanMode);
+        Assert.Equal(new[] { LiquidCoolingFanMode.Maximum, LiquidCoolingFanMode.Auto, LiquidCoolingFanMode.Maximum }, controls.LiquidFanRequests);
+    }
+
+    [Fact]
+    public async Task LiquidCoolingSliderDraftAndInvalidPositionsNeverWriteUntilCommitted()
+    {
+        var controls = new RecordingQuickControlsController();
+        var vm = CreateViewModel(quickControlsController: controls);
+        await vm.OpenLiquidCoolingAsync(CancellationToken.None);
+        vm.SelectedLiquidCoolingManualIndex = 0;
+        vm.SelectedLiquidCoolingManualIndex = 4;
+        vm.SelectedLiquidCoolingManualIndex = -1;
+        Assert.Equal(0, vm.SelectedLiquidCoolingManualIndex);
+        Assert.Empty(controls.LiquidFanRequests);
+        await vm.ApplyLiquidCoolingManualStrategyAsync(CancellationToken.None);
+        Assert.Equal(LiquidCoolingFanMode.Quieter, controls.LiquidFanMode);
+    }
+
+    [Fact]
+    public async Task RejectedLiquidCoolingStrategyRestoresSliderToActualReadback()
+    {
+        var controls = new RecordingQuickControlsController { RejectLiquidFan = true };
+        var vm = CreateViewModel(quickControlsController: controls);
+        await vm.OpenLiquidCoolingAsync(CancellationToken.None);
+        vm.SelectedLiquidCoolingManualIndex = 3;
+        await vm.ApplyLiquidCoolingManualStrategyAsync(CancellationToken.None);
+        Assert.Equal(2, vm.SelectedLiquidCoolingManualIndex);
+        Assert.False(vm.IsLiquidCoolingSmartStrategy);
+        await vm.SetLiquidCoolingSmartAsync(true, CancellationToken.None);
+        Assert.False(vm.IsLiquidCoolingSmartStrategy);
+    }
+
+    [Fact]
     public async Task QuickControlDrawers_OpenAndReadTheirTypedStates()
     {
         var controls = new RecordingQuickControlsController();
@@ -2895,6 +2947,77 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public async Task LiquidCoolingRecovery_ConfirmedUnexpectedDisconnectReconnectsOutsideDrawerWithoutScanning()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var controls = new RecordingQuickControlsController();
+        var vm = CreateViewModel(quickControlsController: controls, utcNow: () => now);
+        await vm.RefreshLiquidCoolingRecoveryAsync(CancellationToken.None);
+        controls.LiquidConnected = false;
+        await vm.RefreshLiquidCoolingRecoveryAsync(CancellationToken.None);
+        Assert.Equal(0, controls.LiquidConnectCalls);
+        now += TimeSpan.FromSeconds(3);
+        await vm.RefreshLiquidCoolingRecoveryAsync(CancellationToken.None);
+        Assert.Equal(1, controls.LiquidConnectCalls);
+        Assert.True(vm.IsLiquidCoolingConnected);
+        Assert.Equal(0, controls.LiquidScanCalls);
+        Assert.NotEqual(HomeDrawer.LiquidCooling, vm.ActiveDrawer);
+    }
+
+    [Theory]
+    [InlineData("disconnect")]
+    [InlineData("selection")]
+    [InlineData("preference")]
+    [InlineData("priming")]
+    [InlineData("shutdown")]
+    public async Task LiquidCoolingRecovery_ManualIntentOrExitCancelsWithoutReconnectingOldDevice(string action)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var controls = new RecordingQuickControlsController();
+        var vm = CreateViewModel(quickControlsController: controls, utcNow: () => now);
+        await vm.RefreshLiquidCoolingRecoveryAsync(CancellationToken.None);
+        controls.LiquidConnected = false;
+        await vm.RefreshLiquidCoolingRecoveryAsync(CancellationToken.None);
+        switch (action)
+        {
+            case "disconnect": await vm.DisconnectLiquidCoolingAsync(CancellationToken.None); break;
+            case "selection": vm.SelectedLiquidCoolingDeviceId = "CoolingSystem LCT21001 (31:09)"; break;
+            case "preference": vm.IsLiquidCoolingAutoConnectEnabled = false; break;
+            case "priming": await vm.StartLiquidCoolingPrimingAsync(CancellationToken.None); break;
+            case "shutdown": vm.BeginShutdown(); break;
+        }
+        now += TimeSpan.FromSeconds(3);
+        await vm.RefreshLiquidCoolingRecoveryAsync(CancellationToken.None);
+        Assert.Equal(0, controls.LiquidConnectCalls);
+        if (action == "selection") Assert.Equal("CoolingSystem LCT21001 (31:09)", vm.SelectedLiquidCoolingDeviceId);
+    }
+
+    [Fact]
+    public async Task LiquidCoolingRecovery_ManualDisconnectAlsoPreventsResumeStartupAutoconnect()
+    {
+        var controls = new RecordingQuickControlsController();
+        var vm = CreateViewModel(quickControlsController: controls);
+        await vm.RefreshLiquidCoolingRecoveryAsync(CancellationToken.None);
+        await vm.DisconnectLiquidCoolingAsync(CancellationToken.None);
+        var resumed = await vm.TryAutoConnectLiquidCoolingAsync(CancellationToken.None);
+        Assert.False(resumed.Succeeded);
+        Assert.Equal(0, controls.LiquidConnectCalls);
+    }
+
+    [Fact]
+    public async Task LiquidCoolingRecovery_NeverConnectedSessionDoesNotAutoEnableSavedDevice()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var controls = new RecordingQuickControlsController { LiquidConnected = false };
+        var vm = CreateViewModel(quickControlsController: controls, utcNow: () => now);
+        await vm.RefreshLiquidCoolingRecoveryAsync(CancellationToken.None);
+        now += TimeSpan.FromMinutes(1);
+        await vm.RefreshLiquidCoolingRecoveryAsync(CancellationToken.None);
+        Assert.Equal(0, controls.LiquidConnectCalls);
+        Assert.Equal(0, controls.LiquidScanCalls);
+    }
+
+    [Fact]
     public void LiquidCoolingAutoConnectPreference_PersistsWithoutTouchingHardware()
     {
         var store = new RecordingSettingsStore();
@@ -3496,8 +3619,12 @@ public sealed class MainWindowViewModelTests
         public bool LiquidConnected { get; set; } = true;
         public bool EmptyLiquidDiscovery { get; init; }
         public int LiquidFanDuty { get; set; } = 60;
+        public LiquidCoolingFanMode LiquidFanMode { get; private set; } = LiquidCoolingFanMode.Balanced;
+        public List<LiquidCoolingFanMode> LiquidFanRequests { get; } = [];
+        public bool RejectLiquidFan { get; init; }
         public bool LiquidPriming { get; set; }
         public int LiquidConnectCalls { get; private set; }
+        public int LiquidScanCalls { get; private set; }
         public string? SelectedLiquidDeviceId { get; private set; } = "CoolingSystem LCT22002 (59:05)";
         private static readonly LiquidCoolingDevice[] LiquidDevices =
         [
@@ -3537,12 +3664,15 @@ public sealed class MainWindowViewModelTests
 
         public ValueTask<LiquidCoolingState?> ReadLiquidCoolingAsync(CancellationToken cancellationToken) =>
             ValueTask.FromResult<LiquidCoolingState?>(new(LiquidConnected, LiquidConnected ? "Connected" : "Disconnected",
-                LiquidCoolingFanMode.Balanced, LiquidCoolingPumpMode.Maximum, LiquidConnected ? LiquidFanDuty : 0,
+                LiquidFanMode, LiquidCoolingPumpMode.Maximum, LiquidConnected ? LiquidFanDuty : 0,
                 LiquidConnected ? 90 : 0, EmptyLiquidDiscovery ? [] : LiquidDevices, SelectedLiquidDeviceId,
                 "CoolingSystem LCT22002 v2.0.0.4", true, LiquidPriming, true));
 
-        public ValueTask<LiquidCoolingState?> ScanLiquidCoolingDevicesAsync(CancellationToken cancellationToken) =>
-            ReadLiquidCoolingAsync(cancellationToken);
+        public ValueTask<LiquidCoolingState?> ScanLiquidCoolingDevicesAsync(CancellationToken cancellationToken)
+        {
+            LiquidScanCalls++;
+            return ReadLiquidCoolingAsync(cancellationToken);
+        }
 
         public ValueTask<ControlResult> SetShortcutAsync(ShortcutControl control, bool enabled, CancellationToken cancellationToken) =>
             ValueTask.FromResult(new ControlResult(true, "按键状态已回读"));
@@ -3620,8 +3750,12 @@ public sealed class MainWindowViewModelTests
         public ValueTask<ControlResult> SetLocalDimmingAsync(bool enabled, CancellationToken cancellationToken) =>
             ValueTask.FromResult(LocalDimmingResult ?? new ControlResult(true, enabled ? "局部调光已开启" : "局部调光已关闭"));
 
-        public ValueTask<ControlResult> SetLiquidCoolingFanAsync(LiquidCoolingFanMode mode, CancellationToken cancellationToken) =>
-            ValueTask.FromResult(new ControlResult(true, "水冷风扇已回读"));
+        public ValueTask<ControlResult> SetLiquidCoolingFanAsync(LiquidCoolingFanMode mode, CancellationToken cancellationToken)
+        {
+            LiquidFanRequests.Add(mode);
+            if (!RejectLiquidFan) LiquidFanMode = mode;
+            return ValueTask.FromResult(new ControlResult(!RejectLiquidFan, RejectLiquidFan ? "模拟写入未确认" : "水冷风扇已回读"));
+        }
 
         public ValueTask<ControlResult> SetLiquidCoolingPumpAsync(LiquidCoolingPumpMode mode, CancellationToken cancellationToken) =>
             ValueTask.FromResult(new ControlResult(true, "水冷泵已回读"));

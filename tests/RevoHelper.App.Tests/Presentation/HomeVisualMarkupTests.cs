@@ -7,6 +7,7 @@ namespace RevoHelper.App.Tests.Presentation;
 
 public sealed class HomeVisualMarkupTests
 {
+    private static readonly XNamespace Xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
     [Fact]
     public void September28_GpuSuperPerformanceControlsAndSliderStepsMatchTheContract()
     {
@@ -64,12 +65,13 @@ public sealed class HomeVisualMarkupTests
     }
 
     [Fact]
-    public void LightingCommands_AllUseZoneScopedVersionsAndCaptureMasterPowerBeforeWaiting()
+    public void LightingCommands_AllUseZoneScopedVersionsAndCaptureZonePowerBeforeWaiting()
     {
         var source = File.ReadAllText(LocateRepositoryFile("src", "RevoHelper.App", "MainWindow.xaml.cs"));
         Assert.DoesNotContain("Volatile.Read(ref lightingAutoApplyVersion)", source, StringComparison.Ordinal);
         Assert.Contains("lightingMutationVersions.IsCurrent(zone, version)", source, StringComparison.Ordinal);
-        Assert.Contains("ViewModel.CaptureKeyboardLightingPower(enabled)", source, StringComparison.Ordinal);
+        Assert.Contains("ViewModel.CaptureLightingEditor()", source, StringComparison.Ordinal);
+        Assert.Contains("QueueLightingAutoApply(powerChange: true)", source, StringComparison.Ordinal);
         var marker = FindNamedElement(LoadMainWindowXaml(), "LightingBuildLabel");
         Assert.Equal("分区即时编辑", (string?)marker.Attribute("Text"));
     }
@@ -390,7 +392,8 @@ public sealed class HomeVisualMarkupTests
         Assert.Contains("OpenKeyboardControlsAsync", codeBehind, StringComparison.Ordinal);
         Assert.Contains("OpenBatteryAsync", codeBehind, StringComparison.Ordinal);
         Assert.Contains("OpenDisplayAsync", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("KeyboardLighting_Click", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("LightingZonePower_Click", codeBehind, StringComparison.Ordinal);
+        Assert.DoesNotContain("KeyboardLighting_Click", codeBehind, StringComparison.Ordinal);
         Assert.DoesNotContain("KeyboardLighting_Checked", codeBehind, StringComparison.Ordinal);
         Assert.Contains("LiquidFan_Click", codeBehind, StringComparison.Ordinal);
         Assert.Contains("BatteryMode_Click", codeBehind, StringComparison.Ordinal);
@@ -556,7 +559,7 @@ public sealed class HomeVisualMarkupTests
         var checkBoxes = document.Descendants().Where(element => element.Name.LocalName == "CheckBox").ToArray();
 
         Assert.All(
-            new[] { "IsKeyboardLightingEnabled", "IsWinKeyEnabled", "IsFnKeyEnabled", "IsOsdEnabled" },
+            new[] { "IsWinKeyEnabled", "IsFnKeyEnabled", "IsOsdEnabled" },
             propertyName =>
             {
                 var checkBox = Assert.Single(
@@ -564,6 +567,27 @@ public sealed class HomeVisualMarkupTests
                     element => ((string?)element.Attribute("IsChecked"))?.Contains(propertyName, StringComparison.Ordinal) == true);
                 Assert.Contains("Mode=OneWay", (string?)checkBox.Attribute("IsChecked"), StringComparison.Ordinal);
             });
+    }
+
+    [Fact]
+    public void KeyboardLightingKeepsOnlyTheZoneEditorPowerToggleAndPreservesProfiles()
+    {
+        var document = LoadMainWindowXaml();
+        Assert.DoesNotContain(document.Descendants(), element => (string?)element.Attribute(Xaml + "Name") == "KeyboardLightingToggle");
+        var drawer = FindNamedElement(document, "LightingDrawerContent");
+        var power = Assert.Single(drawer.Descendants(), element =>
+            element.Name.LocalName == "CheckBox" && (string?)element.Attribute("Click") == "LightingZonePower_Click");
+        Assert.Equal("LightingZonePowerToggle", (string?)power.Attribute(Xaml + "Name"));
+        Assert.Contains("IsSelectedLightingZoneEnabled", (string?)power.Attribute("IsChecked"));
+        Assert.Equal("{Binding CanToggleSelectedLightingZonePower}", (string?)power.Attribute("IsEnabled"));
+        Assert.DoesNotContain(power.Ancestors(), element =>
+            ((string?)element.Attribute("IsEnabled"))?.Contains("CanApplyLighting", StringComparison.Ordinal) == true);
+        var profiles = FindNamedElement(document, "KeyboardLightingProfilesSection");
+        Assert.DoesNotContain(profiles.Descendants(), element => element.Name.LocalName == "CheckBox");
+        Assert.Contains(profiles.Descendants(), element => (string?)element.Attribute(Xaml + "Name") == "OemDefaultLightingButton");
+        Assert.Equal(new[] { "revo-flow", "ice-breath", "quiet-night" },
+            profiles.Descendants().Where(element => (string?)element.Attribute("Click") == "LightingPreset_Click")
+                .Select(element => (string?)element.Attribute("Tag")));
     }
 
     [Fact]
@@ -662,13 +686,27 @@ public sealed class HomeVisualMarkupTests
         Assert.Contains("登录后与睡眠唤醒时自动连接上次设备", drawerText, StringComparison.Ordinal);
         Assert.Equal("CheckBox", FindNamedElement(document, "LiquidCoolingAutoConnectToggle").Name.LocalName);
 
-        var strategies = drawer.Descendants()
-            .Where(element => element.Name.LocalName == "RadioButton" && (string?)element.Attribute("GroupName") == "LiquidCoolingStrategy")
-            .ToArray();
-        Assert.Equal(new[] { "更安静", "安静", "均衡", "最大", "智慧控制" },
-            strategies.Select(strategy => (string?)strategy.Attribute("Content")));
-        Assert.Equal(new[] { "0", "1", "2", "3", "4" },
-            strategies.Select(strategy => (string?)strategy.Attribute("Tag")));
+        var strategy = FindNamedElement(document, "LiquidCoolingStrategySection");
+        Assert.DoesNotContain(strategy.Descendants(), element => element.Name.LocalName == "RadioButton");
+        Assert.Equal(new[] { "智慧控制", "更安静", "安静", "均衡", "最大" },
+            strategy.Descendants().Where(element => element.Name.LocalName == "TextBlock").Select(element => (string?)element.Attribute("Text")));
+        var slider = FindNamedElement(document, "LiquidCoolingManualStrategySlider");
+        Assert.Equal("0", (string?)slider.Attribute("Minimum"));
+        Assert.Equal("3", (string?)slider.Attribute("Maximum"));
+        Assert.Equal("1", (string?)slider.Attribute("TickFrequency"));
+        Assert.Equal("True", (string?)slider.Attribute("IsSnapToTickEnabled"));
+        Assert.Null(slider.Attribute("ValueChanged"));
+        var ticks = FindNamedElement(document, "LiquidCoolingManualStrategyTicks");
+        Assert.Equal("TickBar", ticks.Name.LocalName);
+        Assert.Equal("0", (string?)ticks.Attribute("Minimum"));
+        Assert.Equal("3", (string?)ticks.Attribute("Maximum"));
+        Assert.Equal("1", (string?)ticks.Attribute("TickFrequency"));
+        Assert.Equal("5", (string?)ticks.Attribute("Height"));
+        Assert.Equal("10", (string?)ticks.Attribute("ReservedSpace"));
+        var sections = FindNamedElement(document, "LiquidCoolingContentStack").Elements().ToList();
+        Assert.Equal(1, sections.IndexOf(strategy));
+        foreach (var later in new[] { "LiquidCoolingMonitorSection", "LiquidCoolingDeviceSection", "BootWaterSection" })
+            Assert.True(sections.IndexOf(strategy) < sections.IndexOf(FindNamedElement(document, later)));
 
         var codeBehind = File.ReadAllText(LocateRepositoryFile("src", "RevoHelper.App", "MainWindow.xaml.cs"));
         Assert.Contains("ScanLiquidCooling_Click", codeBehind, StringComparison.Ordinal);
@@ -690,7 +728,7 @@ public sealed class HomeVisualMarkupTests
     }
 
     [Fact]
-    public void LiquidCoolingDrawer_UsesAlignedTypographyAndDedicatedStrategyStyle()
+    public void LiquidCoolingDrawer_UsesAlignedTypographyAndCompactSmartToggle()
     {
         var document = LoadMainWindowXaml();
         var content = FindNamedElement(document, "LiquidCoolingContentStack");
@@ -701,10 +739,11 @@ public sealed class HomeVisualMarkupTests
         Assert.Equal("7,6,7,10", (string?)content.Attribute("Margin"));
         Assert.Equal("14", (string?)fanValue.Attribute("FontSize"));
         Assert.Equal("14", (string?)pumpValue.Attribute("FontSize"));
-        Assert.All(
-            drawer.Descendants().Where(element => element.Name.LocalName == "RadioButton" &&
-                (string?)element.Attribute("GroupName") == "LiquidCoolingStrategy"),
-            strategy => Assert.Equal("{StaticResource LiquidCoolingStrategyRadioStyle}", (string?)strategy.Attribute("Style")));
+        var smart = FindNamedElement(document, "LiquidCoolingSmartToggle");
+        Assert.Equal("{StaticResource SettingsToggleStyle}", (string?)smart.Attribute("Style"));
+        Assert.Equal("{Binding IsLiquidCoolingSmartStrategy, Mode=OneWay}", (string?)smart.Attribute("IsChecked"));
+        Assert.Equal("{Binding CanChooseLiquidCoolingManualStrategy}",
+            (string?)FindNamedElement(document, "LiquidCoolingManualStrategyControls").Attribute("IsEnabled"));
         Assert.Equal("扫描", (string?)FindNamedElement(document, "LiquidCoolingScanButton").Attribute("Content"));
     }
 
@@ -740,7 +779,9 @@ public sealed class HomeVisualMarkupTests
 
         Assert.DoesNotContain("监视器", drawerMarkup, StringComparison.Ordinal);
         Assert.Contains("水冷箱风扇状态", drawerMarkup, StringComparison.Ordinal);
-        Assert.Contains("散热策略档位调节", drawerMarkup, StringComparison.Ordinal);
+        Assert.Contains("智慧控制", drawerMarkup, StringComparison.Ordinal);
+        Assert.Equal("CheckBox", FindNamedElement(document, "LiquidCoolingSmartToggle").Name.LocalName);
+        Assert.Equal("Slider", FindNamedElement(document, "LiquidCoolingManualStrategySlider").Name.LocalName);
         Assert.DoesNotContain("仅调节水冷风扇噪音与散热倾向", drawerMarkup, StringComparison.Ordinal);
         Assert.Equal("Viewbox", FindNamedElement(document, "LiquidCoolingDrawerHeaderIcon").Name.LocalName);
         Assert.Equal("{StaticResource ModernComboBoxStyle}",
@@ -794,7 +835,7 @@ public sealed class HomeVisualMarkupTests
         Assert.Equal("Center", (string?)logo.Attribute("HorizontalAlignment"));
         Assert.Equal("Center", (string?)logo.Attribute("VerticalAlignment"));
         Assert.Equal("0,-1,0,1", (string?)logo.Attribute("Margin"));
-        Assert.Equal("{Binding ReleaseVersionText}", (string?)status.Attribute("Text"));
+        Assert.Equal("{Binding ReleaseBadgeText}", (string?)status.Attribute("Text"));
         Assert.Equal("Center", (string?)status.Attribute("HorizontalAlignment"));
         Assert.Equal("Center", (string?)status.Attribute("VerticalAlignment"));
         Assert.Equal("Center", (string?)badge.Attribute("VerticalAlignment"));

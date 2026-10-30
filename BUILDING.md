@@ -1,8 +1,10 @@
 # RevoHelper
 
-轻量、免费的第三方机械革命笔记本控制台。V1.0.0，开发与维护：Astral Memory。
+轻量、免费的第三方机械革命笔记本控制台。V1.0.2，开发与维护：Astral Memory。
 
-本源码包对应 RevoHelper V1.0.0。RevoHelper 自有代码采用 MIT，版权声明为 `Copyright (c) 2026 Astral Memory`，详见 `LICENSE`。第三方组件、嵌入二进制及其对应源码保留各自许可；项目 MIT 不替代它们的许可条件。下载、源码获取与更新以 [项目仓库](https://github.com/AstralMemory/RevoHelper) 为准。
+本仓库当前源码对应 RevoHelper V1.0.2（产品版本 `1.0.2+20261030`，文件版本 `1.0.2.4`）。RevoHelper 自有代码采用 MIT，版权声明为 `Copyright (c) 2026 Astral Memory`，详见 `LICENSE`。第三方组件、嵌入二进制及其对应源码保留各自许可；项目 MIT 不替代它们的许可条件。下载、源码获取与更新以 [项目仓库](https://github.com/AstralMemory/RevoHelper) 为准。
+
+本版的限充适配、会话恢复与源码分发边界见 [V1.0.2 源码说明](./docs/release/V1.0.2_SOURCE_README.md)，用户说明见 [V1.0.2 使用说明](./docs/release/V1.0.2_USER_README.txt)。构建与离线测试不会启用限充，不要为了构建而运行硬件实验。
 
 RevoHelper 采用 Vibe Coding 方式开发，代码主要由 AI 辅助编写。开发者主要负责产品逻辑、方案与改动审批、UI 设计、实际测试和迭代改进等工作。
 
@@ -62,10 +64,10 @@ dotnet test tests/RevoHelper.App.Tests/RevoHelper.App.Tests.csproj
 使用 PowerShell 7 运行打包脚本（`pwsh`）。
 
 ```powershell
-pwsh -File packaging/Prepare-GitHubRelease.ps1 -PublishExe artifacts/publish/RevoHelper.exe -OutputDirectory artifacts/release
+pwsh -NoProfile -File packaging/Prepare-V102Release.ps1 -PublishExe artifacts/publish/RevoHelper.exe -OutputDirectory artifacts/release-v1.0.2
 ```
 
-输出放在 `artifacts/release/正式版发布资源` 的新子目录中，含运行目录及 ZIP、完整源码目录及 ZIP。再次打包时换一个 `-ResourceDirectoryName`；脚本不会覆盖已经存在的资源子目录。该步骤只生成本地文件，不操作 GitHub。源包需要联网还原 NuGet 依赖，不是全部工具链的离线镜像。
+输出目录必须为新目录或空目录，包含运行目录、`RevoHelper v1.0.2.zip`、`RevoHelper v1.0.2 Source Code.zip` 与更新日志。再次打包时使用新的输出路径；脚本不会覆盖已有资源。该步骤只生成本地文件，不操作 GitHub，也不生成哈希。源包需要联网还原 NuGet 依赖，不是全部工具链的离线镜像。历史打包脚本与固定输入仅为兼容既有离线测试而保留，请以本版脚本和说明为准。
 
 ## 功能边界
 

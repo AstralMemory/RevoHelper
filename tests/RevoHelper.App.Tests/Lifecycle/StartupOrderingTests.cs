@@ -3,6 +3,23 @@ namespace RevoHelper.App.Tests.Lifecycle;
 public sealed class StartupOrderingTests
 {
     [Fact]
+    public void App_RoutesPowerTransitionsThroughTheSessionChargeController()
+    {
+        var source = File.ReadAllText(Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory, "..", "..", "..", "..", "..",
+            "src", "RevoHelper.App", "App.xaml.cs")));
+        Assert.Contains("sessionCharge = new SessionChargeController(experimentalCharge,", source);
+        Assert.Contains("chargeController: sessionCharge", source);
+        var start = source.IndexOf("private void SystemEvents_PowerModeChanged", StringComparison.Ordinal);
+        var end = source.IndexOf("private async Task InitializePerformancePolicyWhenReadyAsync", start, StringComparison.Ordinal);
+        var power = source[start..end];
+        Assert.Contains("UpdateChargePowerAvailabilityAsync(e.Mode != PowerModes.Suspend", power);
+        Assert.Contains("sessionCharge.SetPowerAvailableAsync(available, applicationLifetime.Token)", power);
+        Assert.DoesNotContain("experimentalCharge?.RequestStop", power);
+        Assert.Contains("sessionCharge?.Dispose();", source);
+    }
+
+    [Fact]
     public void App_PublishesBasicDiscoveryBeforeStartingOptionalDirectCpuProbe()
     {
         var source = File.ReadAllText(Path.GetFullPath(Path.Combine(
@@ -113,17 +130,18 @@ public sealed class StartupOrderingTests
     }
 
     [Fact]
-    public void App_MigratesApprovedPortableStartupEntryBeforeCreatingViewModel()
+    public void ExperimentalAppReadsStartupWithoutMigratingStablePortableEntry()
     {
         var sourcePath = Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory, "..", "..", "..", "..", "..",
             "src", "RevoHelper.App", "App.xaml.cs"));
         var source = File.ReadAllText(sourcePath);
-        var migrationIndex = source.IndexOf("StartupRegistrationSynchronizer.Synchronize(startupRegistration)", StringComparison.Ordinal);
+        var readIndex = source.IndexOf("startupRegistration.IsEnabled()", StringComparison.Ordinal);
         var viewModelIndex = source.IndexOf("var viewModel = new MainWindowViewModel", StringComparison.Ordinal);
 
-        Assert.True(migrationIndex >= 0 && migrationIndex < viewModelIndex,
-            "A stale portable startup entry must target the current executable before the UI reads its state.");
+        Assert.DoesNotContain("StartupRegistrationSynchronizer.Synchronize(startupRegistration)", source, StringComparison.Ordinal);
+        Assert.True(readIndex >= 0 && readIndex < viewModelIndex,
+            "Experimental startup must only read registration and must not retarget the stable executable.");
     }
 
     [Fact]

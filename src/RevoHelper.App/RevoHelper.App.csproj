@@ -16,10 +16,10 @@
     <EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
     <DebugType>none</DebugType>
     <DebugSymbols>false</DebugSymbols>
-    <Version>1.0.1</Version>
-    <AssemblyVersion>1.0.1.0</AssemblyVersion>
-    <FileVersion>1.0.1.2</FileVersion>
-    <InformationalVersion>1.0.1+20261026</InformationalVersion>
+    <Version>1.0.2</Version>
+    <AssemblyVersion>1.0.2.0</AssemblyVersion>
+    <FileVersion>1.0.2.4</FileVersion>
+    <InformationalVersion>1.0.2+20261030</InformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>

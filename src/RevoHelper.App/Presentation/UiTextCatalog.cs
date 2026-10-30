@@ -26,6 +26,19 @@ public static class UiTextCatalog
 
     private static readonly (Regex Pattern, Func<Match, string> Format)[] Templates =
     [
+        Rule(@"^电源暂停后的恢复未确认；不会自动重启限充。([\s\S]*)$", m => "Restoration after the power pause is not confirmed; charge limiting will not restart automatically. " + TranslateKnown(m.Groups[1].Value)),
+        Rule(@"^限充自动恢复未确认，保持关闭且不自动重试。([\s\S]*)$", m => "Automatic charge-limit resumption is not confirmed; remaining off without automatic retries. " + TranslateKnown(m.Groups[1].Value)),
+        Rule(@"^限充已安全停止，不自动重启。([\s\S]*)$", m => "Charge limiting stopped safely and will not restart automatically. " + TranslateKnown(m.Groups[1].Value)),
+        Rule(@"^(限充操作失败|停止限充失败|恢复限充失败)：(.+)$", m => (m.Groups[1].Value switch
+        {
+            "限充操作失败" => "Charge-limit operation failed",
+            "停止限充失败" => "Stopping charge limiting failed",
+            _ => "Restoring charge limiting failed"
+        }) + ": " + TranslateKnown(m.Groups[2].Value)),
+        Rule(@"^(启用|停止|恢复)实验性限充失败：(.+)$", m => (m.Groups[1].Value switch { "启用" => "Enabling", "停止" => "Stopping", _ => "Restoring" }) + " experimental charge limiting failed: " + Translate(m.Groups[2].Value, "en-US")),
+        Rule(@"^实验性限充未完成：(.+)$", m => "Experimental charge limiting did not complete: " + Translate(m.Groups[1].Value, "en-US")),
+        Rule(@"^实验已停止，监护正在复核恢复：(.+)$", m => "The experiment stopped; the guardian is checking restoration: " + Translate(m.Groups[1].Value, "en-US")),
+        Rule(@"^原始状态0x([0-9A-F]{4})已改变；不接管已有设置。$", m => "Original state 0x" + m.Groups[1].Value + " changed; existing settings will not be taken over."),
         Rule(@"^部分状态读取失败，已保留已确认状态：(.+)$", m => "Some statuses could not be read; confirmed values were preserved: " + TranslateStatusDetails(m.Groups[1].Value)),
         Rule(@"^部分状态未读取：(.+)$", m => "Some statuses were not read: " + TranslateStatusDetails(m.Groups[1].Value)),
         Rule(@"^(按键与设备状态|电源与电池状态|按键状态|设备开关状态|键盘灯光状态|电池保护状态|电源设置状态|快捷设置状态|充电上限状态)读取失败：(.+)$", m => TranslateKnown(m.Groups[1].Value) + " could not be read: " + TranslateStatusDetails(m.Groups[2].Value)),
@@ -89,6 +102,79 @@ public static class UiTextCatalog
     }
 
     private const string Copy = """
+请先确认原值恢复，不接管待恢复的限充会话。	Confirm restoration of the original values first; a pending charge-limit session will not be taken over.
+限充仍在恢复，请等待完成后再选择档位。	Charge limiting is still restoring; wait until it finishes before selecting a limit.
+请接通电源后手动启用限充；未启用的会话不会自动开始。	Connect AC before enabling charge limiting manually; a session that has not been enabled will not start automatically.
+限充启用未确认，保持关闭；不会自动重试，请检查恢复状态。	Charge-limit enabling is not confirmed; remaining off without automatic retries. Check restoration status.
+启用前电源状态已变化；未启用新的限充会话。	Power state changed before enabling; no new charge-limit session was enabled.
+底层未确认目标限充会话已启用。	The underlying controller did not confirm that the requested charge-limit session was enabled.
+已请求关闭限充，正在确认原值恢复。	Charge-limit shutdown was requested; confirming restoration of the original values.
+电源已断开，限充未启用。	AC is disconnected; charge limiting is not enabled.
+无法核对电源状态，保持关闭；不会自动重启限充。	Power state could not be checked; remaining off. Charge limiting will not restart automatically.
+旧限充会话恢复尚未确认，不并行启用新会话。	Restoration of the previous charge-limit session is not confirmed; no new session will be enabled in parallel.
+限充开关保持开启；正在安全暂停并恢复原值，完成后等待电源，不代表正在限制充电。	The charge switch remains on; safely pausing and restoring the original values, then waiting for power. Charging is not necessarily being limited.
+限充开关保持开启；已安全暂停，等待电源稳定后恢复，并非正在限制充电。	The charge switch remains on; safely paused, waiting for stable power before resuming. Charging is not currently being limited.
+限充开关保持开启；已安全暂停，等待重新接通电源，并非正在限制充电。	The charge switch remains on; safely paused, waiting for AC to reconnect. Charging is not currently being limited.
+程序退出，限充已关闭并请求恢复原值。	The app is exiting; charge limiting is off and restoration of the original values was requested.
+供电状态处理未完成，停止限充并保留恢复记录。	Power-state handling did not complete; stop charge limiting and retain the recovery record.
+限充未连接；默认关闭。	Charge limiting is not connected; off by default.
+真正退出程序，独立监护继续恢复限充原值。	Actually exiting the app; the independent guardian continues restoring the original charge-limit state.
+已开启：100% 不限制，按原生策略充电；未保持平台覆盖。	Enabled: 100% sets no charge limit and follows the native charging policy; no platform override is held.
+限充已关闭；100% 透传模式没有平台覆盖需要恢复。	Charge limiting is off; 100% pass-through has no platform override to restore.
+正在停止限充并恢复原值。	Stopping charge limiting and restoring the original values.
+恢复未确认；请先使用恢复按钮，不继续启用或换档。	Restoration is not confirmed. Use Restore first; do not enable or change the limit.
+限充已关闭，已有实验限制已恢复；按原生策略充电。	Charge limiting is off and the previous experimental limit has been restored; charging follows the native policy.
+换档前恢复未确认；保持关闭并先恢复原值。	Restoration before changing the limit is not confirmed; remain off and restore the original values first.
+存在待恢复记录，不启用新的充电档位。	A pending recovery record exists; no new charge-limit setting will be enabled.
+旧限充会话尚未恢复；不启用排队的新档位。	The previous charge-limit session has not been restored; the queued setting will not be enabled.
+关闭后的原值恢复尚未确认。	Restoration of the original values after switching off is not confirmed.
+恢复操作结束，但原值仍未确认。	The restoration operation ended, but the original values are still not confirmed.
+原值恢复尚未确认；请先使用恢复按钮。	Restoration of the original values is not confirmed; use Restore first.
+水冷意外断开；10分钟内每3秒尝试重连同一设备。	Liquid cooling disconnected unexpectedly; retry connecting to the same device every 3 seconds for up to 10 minutes.
+水冷已自动重连。	Liquid cooling reconnected automatically.
+水冷重连等待已超过10分钟；请手动连接。	Liquid-cooling reconnection has waited more than 10 minutes; connect manually.
+水冷重连已取消。	Liquid-cooling reconnection was cancelled.
+水冷自动连接已取消。	Automatic liquid-cooling connection was cancelled.
+实验性限充未连接；默认关闭。	Experimental charge limiting is not connected; off by default.
+默认关闭；仅手动启用。本功能会覆盖平台状态。	Off by default; enable manually only. This feature overrides the platform state.
+发现未确认恢复的实验会话。请先使用恢复按钮，不自动启用。	An experimental session has unconfirmed restoration. Use Restore first; it will not be enabled automatically.
+正在启动独立监护并检查本机固件。	Starting the independent guardian and checking this machine's firmware.
+正在检查本机固件与原值；尚未启用。	Checking this machine's firmware and original values; not enabled yet.
+正在停止实验性限充并恢复原值。	Stopping experimental charge limiting and restoring the original values.
+正在核对旧会话并恢复原值。	Checking the previous session and restoring the original values.
+没有需要恢复的实验会话；保持关闭。	No experimental session needs restoration; remaining off.
+实验未启用，原值未改动。	The experiment was not enabled; original values were not changed.
+实验性限充运行中：已达上限，当前未充电。	Experimental charge limiting is active: the limit is reached and the battery is not charging.
+实验性限充运行中：低于上限，正在充电。	Experimental charge limiting is active: below the limit and charging.
+实验性限充运行中：等待充电状态确认。	Experimental charge limiting is active: waiting for charging status confirmation.
+工作进程已尝试恢复，监护正在复核。	The worker attempted restoration; the guardian is checking it.
+实验性限充已停止；平台、阈值和缓存观察已恢复，不能排除全部持久化副作用。	Experimental charge limiting stopped; the platform, threshold and observed cache match their original values. Persistent side effects cannot be ruled out.
+恢复尚未确认。请勿再次启用，保留诊断日志并使用恢复按钮。	Restoration is not confirmed. Do not enable again. Keep the diagnostic logs and use Restore.
+恢复尚未确认；独立监护可能仍在处理，请勿再次启用。	Restoration is not confirmed; the independent guardian may still be working. Do not enable again.
+独立监护已退出，但恢复尚未确认。请使用恢复按钮。	The independent guardian exited, but restoration is not confirmed. Use Restore.
+状态监测异常，已请求停止；请核对恢复。	Status monitoring failed and stop was requested; check restoration.
+启用未完成，已请求恢复；请检查状态或使用恢复按钮。	Enabling did not complete and restoration was requested; check the status or use Restore.
+先恢复上一会话；不会接管未知原值。	Restore the previous session first; unknown original values will not be taken over.
+独立监护未启动，未确认启用。	The independent guardian did not start; enabling is not confirmed.
+监护启动超时，已请求停止；请检查恢复状态。	The guardian start timed out and stop was requested; check restoration status.
+原监护或工作进程仍在恢复，不并行写入。	The original guardian or worker is still restoring; no parallel writes will be made.
+仅支持已验证的MRO24 / EC1.25本机固件。	Only this machine's verified MRO24 / EC 1.25 firmware is supported.
+请先恢复原生工作站养护档及原始阈值；不强制接管。	Restore the native workstation care profile and original threshold first; they will not be forcibly taken over.
+请连接电源并确认电池状态有效后，再手动启用。	Connect AC and confirm a valid battery state before enabling manually.
+平台或阈值被外部改变；停止实验，不反复覆盖。	The platform or threshold changed externally; stop the experiment without repeatedly overwriting it.
+已断开电源或电池状态无效，尝试恢复原值。	AC is disconnected or battery state is invalid; attempting to restore the original values.
+相关状态在启用前改变；不写入。	Related state changed before enabling; no writes will be made.
+启用期间收到停止请求。	A stop request was received while enabling.
+监测中断或系统刚恢复，停止实验并恢复原值。	Monitoring was interrupted or the system just resumed; stop the experiment and restore the original values.
+固件限充门控未开启，停止实验。	The firmware charge-limit gate is not enabled; stop the experiment.
+阈值读取失败或格式改变。	The threshold could not be read or its format changed.
+阈值由其他程序改变，不覆盖。	Another program changed the threshold; it will not be overwritten.
+平台状态由其他程序改变，不覆盖。	Another program changed the platform state; it will not be overwritten.
+阈值所有权已改变，不覆盖。	Threshold ownership changed; it will not be overwritten.
+工作进程未及时退出，监护正在恢复；不能保证WMI provider已取消迟到调用。	The worker did not exit promptly and the guardian is restoring; cancellation of late WMI provider calls is not guaranteed.
+无法确认工作进程已结束；不并行发起恢复。	Worker exit is not confirmed; no parallel restoration will be started.
+界面或独立监护已退出，停止实验并恢复。	The UI or independent guardian exited; stop the experiment and restore.
+另一个限充实验或恢复仍在运行。	Another charge-limit experiment or restoration is still running.
 安静	Quiet
 安装 / 修复	Install / repair
 按键开关设置	Key controls

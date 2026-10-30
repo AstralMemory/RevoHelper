@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using RevoHelper.App.Settings;
 using RevoHelper.Core.Control.DynamicPower;
+using RevoHelper.Core.Control.ExperimentalCharge;
 using RevoHelper.Core.Telemetry;
 
 namespace RevoHelper.App.Presentation;
@@ -25,14 +26,17 @@ public sealed class ExperimentalControlsViewModel : INotifyPropertyChanged, IDis
     private BootWaterTaskStatus waterStatus = new(BootWaterTaskState.NotInstalled, "点击检查，读取登录前任务状态。");
 
     public ExperimentalControlsViewModel(IDynamicPowerController? dynamicPower = null,
-        IBootWaterTaskManager? bootWater = null, Action<Action>? dispatch = null, TimeProvider? timeProvider = null)
+        IBootWaterTaskManager? bootWater = null, Action<Action>? dispatch = null, TimeProvider? timeProvider = null,
+        IExperimentalChargeController? chargeController = null)
     {
         this.dynamicPower = dynamicPower; this.bootWater = bootWater;
         this.dispatch = dispatch ?? (action => action()); clock = timeProvider ?? TimeProvider.System;
+        Charge = new ExperimentalChargeViewModel(chargeController, this.dispatch);
         displayed = CaptureDisplayState();
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
+    public ExperimentalChargeViewModel Charge { get; }
     public bool IsDynamicEnabled => dynamicPower?.Status.Enabled == true;
     public bool CanToggleDynamic => dynamicPower is not null && !dynamicBusy && !stopping && Volatile.Read(ref pausing) == 0;
     public bool HasRecoveryPending => dynamicPower?.Status.HasRecoveryPending == true;
@@ -71,6 +75,9 @@ public sealed class ExperimentalControlsViewModel : INotifyPropertyChanged, IDis
 
     public async Task<bool> PauseForManualControlAsync()
     {
+        // An active charge session is independent of ordinary performance edits. Its guardian
+        // owns hardware-conflict detection; only an in-flight transition or pending recovery blocks edits.
+        if (Charge.IsBusy || Charge.RecoveryPending) return false;
         if (dynamicPower is null) return true;
         Interlocked.Increment(ref pausing); operationError = null; Notify();
         try
@@ -80,7 +87,7 @@ public sealed class ExperimentalControlsViewModel : INotifyPropertyChanged, IDis
         }
         catch (Exception ex) { operationError = $"频率恢复未完成：{ex.Message}"; }
         finally { Interlocked.Decrement(ref pausing); Notify(); }
-        return !HasRecoveryPending && operationError is null;
+        return !HasRecoveryPending && operationError is null && !Charge.IsBusy && !Charge.RecoveryPending;
     }
 
     public async Task PauseAsync(string reason, CancellationToken token)
@@ -143,6 +150,9 @@ public sealed class ExperimentalControlsViewModel : INotifyPropertyChanged, IDis
     {
         stopping = true;
         watchdog?.Dispose();
+        // The independent charge guardian owns its restoration after RequestStop.
+        // Never spend the frequency-recovery budget waiting on another control domain.
+        Charge.Dispose();
         await PauseAsync("程序退出，恢复原始频率限制。", token).ConfigureAwait(false);
         return operationError is null && !HasRecoveryPending && dynamicPower?.Status.IsLimited != true;
     }
@@ -177,5 +187,5 @@ public sealed class ExperimentalControlsViewModel : INotifyPropertyChanged, IDis
 
     private readonly record struct DisplayState(bool DynamicEnabled, bool CanToggle, bool RecoveryPending,
         string Message, string Progress, bool CanManageWater, string WaterMessage, string WaterResult);
-    public void Dispose() { stopping = true; watchdog?.Dispose(); }
+    public void Dispose() { stopping = true; watchdog?.Dispose(); Charge.Dispose(); }
 }

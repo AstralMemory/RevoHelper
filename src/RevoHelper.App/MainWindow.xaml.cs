@@ -243,14 +243,6 @@ public partial class MainWindow : Window
     private void RemoveMonitorProgram_Click(object sender, RoutedEventArgs e) =>
         ViewModel.Monitor.RemoveSelectedProgram();
 
-    private void KeyboardLighting_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is not CheckBox checkBox) return;
-        var enabled = checkBox.IsChecked == true;
-        var configuration = ViewModel.CaptureKeyboardLightingPower(enabled);
-        QueueCapturedLightingConfiguration(configuration, TimeSpan.Zero, powerChange: true);
-    }
-
     private void LightingZoneTab_Click(object sender, RoutedEventArgs e)
     {
         if (sender is FrameworkElement { Tag: string zoneText } &&
@@ -1055,6 +1047,7 @@ public partial class MainWindow : Window
     }
 
     private bool ShouldRefreshLiquidCooling() =>
+        !ViewModel.IsLiquidCoolingMonitoring &&
         IsVisible &&
         WindowState is not WindowState.Minimized &&
         DrawerPanel.Visibility is Visibility.Visible &&
@@ -1180,6 +1173,10 @@ public partial class MainWindow : Window
             Hide();
             return;
         }
+        // Tray hiding and a cancelled close leave the long-running charge session intact.
+        base.OnClosing(e);
+        if (e.Cancel) return;
+        ViewModel.Experiments.Charge.RequestStop("真正退出程序，独立监护继续恢复限充原值。");
         liquidCoolingRefreshTimer.Stop();
         liquidCoolingRefreshTimer.Tick -= LiquidCoolingRefreshTimer_Tick;
         shutdownCountdownTimer.Stop();
@@ -1190,7 +1187,6 @@ public partial class MainWindow : Window
         pendingDraggedCustomSliders.Clear();
         windowSource?.RemoveHook(WindowMessageHook);
         LocationChanged -= Window_LocationChanged;
-        base.OnClosing(e);
     }
 
     private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)

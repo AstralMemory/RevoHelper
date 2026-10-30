@@ -16,7 +16,7 @@ using RevoHelper.Hardware.Windows.OemStatus;
 
 namespace RevoHelper.App.Presentation;
 
-public sealed class MainWindowViewModel : INotifyPropertyChanged
+public sealed partial class MainWindowViewModel : INotifyPropertyChanged
 {
     private string selectedProfileId = "balanced";
     private TurboStrategy selectedTurboStrategy = TurboStrategy.Quiet;
@@ -252,6 +252,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         this.fanBoostController = fanBoostController;
         this.shutdownScheduler = shutdownScheduler;
         this.utcNow = utcNow ?? (() => DateTimeOffset.UtcNow);
+        liquidCoolingReconnect = new(this.utcNow);
         this.officialConsoleRunningProbe = officialConsoleRunningProbe ?? (() => false);
         this.verificationDelay = verificationDelay ?? Task.Delay;
         RestoreSavedLightingProfile();
@@ -726,7 +727,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public bool IsPlatformSwitchPending => isApplyingPlatformMode;
 
-    public string ReleaseVersionText => "V1.0.1";
+    public string ReleaseVersionText => "V1.0.2";
+
+    public string ReleaseBadgeText => "V1.0.2";
 
     public string AppVersionText => $"RevoHelper {ReleaseVersionText} · {UiCopy.OpenSourceAndFree}";
 
@@ -936,15 +939,20 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             isLightingBusy = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(CanApplyLighting));
+            OnPropertyChanged(nameof(CanToggleSelectedLightingZonePower));
             OnPropertyChanged(nameof(CanApplyLightingSleepTimer));
         }
     }
 
     public bool CanApplyLighting => quickControlsController is not null && !IsLightingBusy &&
+                                    lightingZoneStates.GetValueOrDefault(SelectedLightingZone)?.Available == true &&
+                                    (SelectedLightingZone != LightingZone.Keyboard || !IsKeyboardLightingPowerOnly);
+
+    public bool CanToggleSelectedLightingZonePower => quickControlsController is not null && !IsLightingBusy &&
                                     lightingZoneStates.GetValueOrDefault(SelectedLightingZone)?.Available == true;
 
     public bool CanApplyLightingSleepTimer => quickControlsController is not null && !IsLightingBusy &&
-                                               (IsKeyboardLightingZoneAvailable || IsCoastLightingZoneAvailable);
+                                               (IsKeyboardLightingZoneAvailable && !IsKeyboardLightingPowerOnly || IsCoastLightingZoneAvailable);
 
     public bool IsSynchronizingLightingEditor { get; private set; }
 
@@ -1003,6 +1011,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         {
             if (selectedLiquidCoolingFanMode == value) return;
             selectedLiquidCoolingFanMode = value;
+            SynchronizeLiquidCoolingManualReadback(value);
             OnPropertyChanged();
             OnPropertyChanged(nameof(IsLiquidCoolingQuieterStrategy));
             OnPropertyChanged(nameof(IsLiquidCoolingQuietStrategy));
@@ -1047,6 +1056,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         set
         {
             if (string.Equals(selectedLiquidCoolingDeviceId, value, StringComparison.Ordinal)) return;
+            if (!applyingLiquidCoolingState)
+            {
+                CancelLiquidCoolingRecovery();
+                liquidCoolingSelectionDraft = true;
+            }
             selectedLiquidCoolingDeviceId = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(LiquidCoolingDeviceDisplayName));
@@ -1104,6 +1118,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         {
             if (value == applicationSettings.AutoConnectLiquidCooling) return;
             if (!TrySaveSettings(applicationSettings with { AutoConnectLiquidCooling = value })) return;
+            if (!value) CancelLiquidCoolingRecovery();
+            else liquidCoolingStartupAutoConnectSuppressed = false;
 
             OnPropertyChanged();
             LiquidCoolingStatusText = value
@@ -1479,9 +1495,15 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private async Task<bool> PauseDynamicForManualControlAsync()
     {
         if (await Experiments.PauseForManualControlAsync()) return true;
-        StatusMessage = "动态频率恢复未完成，请在更多方案中重试恢复后再调整。";
+        StatusMessage = ManualControlBlockedMessage;
         return false;
     }
+
+    private string ManualControlBlockedMessage => Experiments.Charge.RecoveryPending
+        ? "限充恢复未完成，请在电源设置中恢复原值后再调整。"
+        : Experiments.Charge.IsBusy
+            ? "限充正在切换或恢复，请等待完成后再调整。"
+            : "动态频率恢复未完成，请在更多方案中重试恢复后再调整。";
 
     public void OpenMoreProfiles() => ActiveDrawer = HomeDrawer.MoreProfiles;
 
@@ -3057,7 +3079,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             selection == CurrentPlatformSelection() && requestRevision == Volatile.Read(ref platformRequestRevision);
         if (!await Experiments.PauseForManualControlAsync())
         {
-            if (IsCurrentTarget()) StatusMessage = "动态频率恢复未完成，请在更多方案中重试恢复后再调整。";
+            if (IsCurrentTarget()) StatusMessage = ManualControlBlockedMessage;
             return;
         }
         if (!IsCurrentTarget() || !IsPerformanceApplyEnabled || cpuPolicyController is null || boostController is null)
@@ -3560,6 +3582,16 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             {
                 ApplyLightingZoneState(zone, state ?? new(false, null, null, []));
             }
+            // Older keyboards can report a plain backlight switch without a detailed RGB zone.
+            // Discover that switch independently; missing RGB state must not remove its sole power control.
+            if (!IsKeyboardLightingZoneAvailable)
+            {
+                try
+                {
+                    ApplyKeyboardLighting(await quickControlsController.ReadKeyboardLightingAsync(cancellationToken));
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException) { }
+            }
             if (lightingZoneStates.GetValueOrDefault(LightingZone.Keyboard)?.Configuration is { } keyboard)
                 IsKeyboardLightingEnabled = keyboard.Enabled;
             NotifyLightingCapabilitiesChanged();
@@ -3696,10 +3728,14 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             return;
         }
 
+        await liquidCoolingOperationGate.WaitAsync(cancellationToken);
         IsLiquidCoolingBusy = true;
         try
         {
-            ApplyLiquidCooling(await quickControlsController.ReadLiquidCoolingAsync(cancellationToken));
+            var revision = liquidCoolingSelectionRevision;
+            var state = await quickControlsController.ReadLiquidCoolingAsync(cancellationToken);
+            if (revision != liquidCoolingSelectionRevision || isShuttingDown) return;
+            ApplyLiquidCooling(state);
             LiquidCoolingStatusText = IsLiquidCoolingConnected
                 ? "水冷已连接，已读取风扇、水泵与散热策略状态。"
                 : "未检测到连接的官方水冷设备。";
@@ -3711,16 +3747,20 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         finally
         {
             IsLiquidCoolingBusy = false;
+            liquidCoolingOperationGate.Release();
         }
     }
 
     public async Task RefreshLiquidCoolingStatusAsync(CancellationToken cancellationToken)
     {
-        if (quickControlsController is null || IsLiquidCoolingBusy || isRefreshingLiquidCoolingStatus) return;
+        if (quickControlsController is null || isShuttingDown || IsLiquidCoolingBusy || isRefreshingLiquidCoolingStatus
+            || !await liquidCoolingOperationGate.WaitAsync(0, cancellationToken)) return;
         isRefreshingLiquidCoolingStatus = true;
         try
         {
-            ApplyLiquidCooling(await quickControlsController.ReadLiquidCoolingAsync(cancellationToken));
+            var revision = liquidCoolingSelectionRevision;
+            var state = await quickControlsController.ReadLiquidCoolingAsync(cancellationToken);
+            if (revision == liquidCoolingSelectionRevision && !isShuttingDown) ApplyLiquidCooling(state);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -3729,6 +3769,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         finally
         {
             isRefreshingLiquidCoolingStatus = false;
+            liquidCoolingOperationGate.Release();
         }
     }
 
@@ -3738,29 +3779,39 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             return ControlResult.Rejected("水冷自动连接已关闭。");
         if (quickControlsController is null)
             return ControlResult.Rejected("官方水冷控制通道未接入。");
-        if (isAutoConnectingLiquidCooling || IsLiquidCoolingPriming)
+        if (isShuttingDown || liquidCoolingStartupAutoConnectSuppressed || isAutoConnectingLiquidCooling || IsLiquidCoolingPriming)
             return ControlResult.Rejected("水冷自动连接当前不可执行。");
 
+        var revision = liquidCoolingSelectionRevision;
+        await liquidCoolingOperationGate.WaitAsync(cancellationToken);
         isAutoConnectingLiquidCooling = true;
+        using var connecting = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, liquidCoolingLifetime.Token);
+        liquidCoolingConnectCancellation = connecting;
         IsLiquidCoolingBusy = true;
         try
         {
+            if (isShuttingDown || revision != liquidCoolingSelectionRevision)
+                return ControlResult.Rejected("水冷自动连接已取消。");
             var connector = new LiquidCoolingAutoConnector(
                 quickControlsController.ReadLiquidCoolingAsync,
                 quickControlsController.ConnectLiquidCoolingAsync,
                 verificationDelay);
-            var result = await connector.TryConnectAsync(cancellationToken);
+            var result = await connector.TryConnectAsync(connecting.Token);
+            if (revision != liquidCoolingSelectionRevision) return ControlResult.Rejected("水冷自动连接已取消。");
             LiquidCoolingStatusText = result.Succeeded
                 ? $"自动连接：{result.Reason}"
                 : result.Reason;
 
             if (result.Succeeded)
             {
-                ApplyLiquidCooling(await quickControlsController.ReadLiquidCoolingAsync(cancellationToken));
+                var state = await quickControlsController.ReadLiquidCoolingAsync(connecting.Token);
+                if (revision == liquidCoolingSelectionRevision && !isShuttingDown) RememberLiquidCoolingConnection(state);
             }
 
             return result;
         }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        { return ControlResult.Rejected("水冷自动连接已取消。"); }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             var result = ControlResult.Rejected($"水冷自动连接失败：{exception.Message}");
@@ -3771,16 +3822,21 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         {
             IsLiquidCoolingBusy = false;
             isAutoConnectingLiquidCooling = false;
+            if (ReferenceEquals(liquidCoolingConnectCancellation, connecting)) liquidCoolingConnectCancellation = null;
+            liquidCoolingOperationGate.Release();
         }
     }
 
     public async Task ScanLiquidCoolingDevicesAsync(CancellationToken cancellationToken)
     {
-        if (quickControlsController is null || IsLiquidCoolingBusy) return;
+        if (quickControlsController is null || isShuttingDown) return;
+        CancelLiquidCoolingRecovery();
+        await liquidCoolingOperationGate.WaitAsync(cancellationToken);
         IsLiquidCoolingBusy = true;
         LiquidCoolingStatusText = "正在通过机械革命 GCU 扫描兼容蓝牙水冷设备…";
         try
         {
+            if (isShuttingDown) return;
             var scanned = await quickControlsController.ScanLiquidCoolingDevicesAsync(cancellationToken);
             ApplyLiquidCooling(scanned);
             LiquidCoolingStatusText = LiquidCoolingDevices.Count == 0
@@ -3796,26 +3852,42 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         finally
         {
             IsLiquidCoolingBusy = false;
+            liquidCoolingOperationGate.Release();
         }
     }
 
     public async Task ConnectLiquidCoolingAsync(CancellationToken cancellationToken)
     {
-        if (quickControlsController is null || IsLiquidCoolingBusy || string.IsNullOrWhiteSpace(SelectedLiquidCoolingDeviceId)) return;
+        if (quickControlsController is null || isShuttingDown || string.IsNullOrWhiteSpace(SelectedLiquidCoolingDeviceId)) return;
+        CancelLiquidCoolingRecovery();
+        var device = SelectedLiquidCoolingDeviceId;
+        var revision = liquidCoolingSelectionRevision;
+        await liquidCoolingOperationGate.WaitAsync(cancellationToken);
+        using var connecting = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, liquidCoolingLifetime.Token);
+        liquidCoolingConnectCancellation = connecting;
         IsLiquidCoolingBusy = true;
         try
         {
-            var selection = await quickControlsController.SelectLiquidCoolingDeviceAsync(SelectedLiquidCoolingDeviceId, cancellationToken);
+            if (isShuttingDown || revision != liquidCoolingSelectionRevision) return;
+            var selection = await quickControlsController.SelectLiquidCoolingDeviceAsync(device, connecting.Token);
             if (!selection.Succeeded)
             {
                 LiquidCoolingStatusText = selection.Reason;
                 return;
             }
-            var result = await quickControlsController.ConnectLiquidCoolingAsync(cancellationToken);
+            if (revision != liquidCoolingSelectionRevision) return;
+            liquidCoolingSelectionDraft = false;
+            var result = await quickControlsController.ConnectLiquidCoolingAsync(connecting.Token);
+            if (revision != liquidCoolingSelectionRevision) return;
             LiquidCoolingStatusText = result.Reason;
             StatusMessage = result.Reason;
-            if (result.Succeeded) ApplyLiquidCooling(await quickControlsController.ReadLiquidCoolingAsync(cancellationToken));
+            if (result.Succeeded)
+            {
+                var state = await quickControlsController.ReadLiquidCoolingAsync(connecting.Token);
+                if (revision == liquidCoolingSelectionRevision && !isShuttingDown) RememberLiquidCoolingConnection(state);
+            }
         }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             LiquidCoolingStatusText = $"连接水冷失败：{exception.Message}";
@@ -3823,6 +3895,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         finally
         {
             IsLiquidCoolingBusy = false;
+            if (ReferenceEquals(liquidCoolingConnectCancellation, connecting)) liquidCoolingConnectCancellation = null;
+            liquidCoolingOperationGate.Release();
         }
     }
 
@@ -3988,41 +4062,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         return target;
     }
 
-    public async Task SetKeyboardLightingAsync(LightingZoneConfiguration target, CancellationToken cancellationToken)
-    {
-        if (quickControlsController is null) return;
-        var enabled = target.Enabled;
-        TrackLightingLocalTarget(target);
-        try
-        {
-            var result = enabled && target.Effect != LightingEffect.OemDefault
-                ? await quickControlsController.ApplyLightingZoneAsync(target, cancellationToken)
-                : await quickControlsController.SetKeyboardLightingAsync(enabled, cancellationToken);
-            KeyboardControlsStatusText = result.Reason;
-            StatusMessage = result.Reason;
-            ReportLightingFeedback(LightingZone.Keyboard, result.Reason);
-            if (result.Succeeded)
-            {
-                var previous = lightingZoneStates.GetValueOrDefault(LightingZone.Keyboard);
-                lightingZoneStates[LightingZone.Keyboard] = previous is null
-                    ? new(true, null, target, [target.Effect])
-                    : previous with { Configuration = target };
-                IsKeyboardLightingEnabled = enabled;
-                CompleteLightingEditorDraft(target);
-                TrackLightingLocalTarget(target);
-                if (SelectedLightingZone == LightingZone.Keyboard) LoadLightingEditor(LightingZone.Keyboard);
-            }
-            else
-            {
-                lightingLocalTargets.Remove(LightingZone.Keyboard);
-            }
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            lightingLocalTargets.Remove(LightingZone.Keyboard);
-            KeyboardControlsStatusText = $"键盘背光切换失败：{exception.Message}";
-        }
-    }
+    public Task SetKeyboardLightingAsync(LightingZoneConfiguration target, CancellationToken cancellationToken) =>
+        SetLightingZonePowerAsync(target, cancellationToken);
 
     public void SelectLightingZone(LightingZone zone)
     {
@@ -4048,14 +4089,24 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         if (quickControlsController is null || IsLightingBusy) return;
         var zone = targetConfiguration.Zone;
         var enabled = targetConfiguration.Enabled;
+        var useLegacyKeyboardPower = zone == LightingZone.Keyboard &&
+            (!IsKeyboardLightingZoneAvailable || IsKeyboardLightingPowerOnly);
+        var hardwareTarget = useLegacyKeyboardPower
+            ? targetConfiguration with { Effect = LightingEffect.OemDefault }
+            : targetConfiguration;
         var previousEnabled = lightingZoneStates.GetValueOrDefault(zone)?.Configuration?.Enabled;
         IsLightingBusy = true;
         try
         {
             ControlResult result;
             pendingLightingConfiguration = targetConfiguration;
-            TrackLightingLocalTarget(targetConfiguration);
-            if (enabled && (zone != LightingZone.Keyboard || lightingEditorDrafts.ContainsKey(zone)))
+            TrackLightingLocalTarget(hardwareTarget);
+            if (useLegacyKeyboardPower)
+            {
+                // Choose one protocol path, never send both the zone command and its legacy equivalent.
+                result = await quickControlsController.SetKeyboardLightingAsync(enabled, cancellationToken);
+            }
+            else if (enabled && (zone != LightingZone.Keyboard || lightingEditorDrafts.ContainsKey(zone)))
             {
                 result = await quickControlsController.ApplyLightingZoneAsync(targetConfiguration, cancellationToken);
             }
@@ -4065,7 +4116,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             }
             if (result.Succeeded)
             {
-                StoreLightingZoneConfiguration(targetConfiguration);
+                if (useLegacyKeyboardPower)
+                    StoreKeyboardLightingPower(hardwareTarget, lightingZoneStates.GetValueOrDefault(zone)?.HardwareType);
+                else
+                    StoreLightingZoneConfiguration(targetConfiguration);
             }
             if (zone == LightingZone.Keyboard) KeyboardControlsStatusText = result.Reason;
             ReportLightingFeedback(zone,
@@ -4076,7 +4130,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             if (result.Succeeded)
             {
                 CompleteLightingEditorDraft(targetConfiguration);
-                TrackLightingLocalTarget(targetConfiguration);
+                TrackLightingLocalTarget(hardwareTarget);
+                if (useLegacyKeyboardPower && SelectedLightingZone == zone) LoadLightingEditor(zone);
             }
             else if (!result.Succeeded)
                 lightingLocalTargets.Remove(zone);
@@ -4090,7 +4145,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             lightingLocalTargets.Remove(zone);
-            ReportLightingFeedback(zone, $"切换{LightingZoneLabel(zone)}失败：{exception.Message}");
+            var reason = $"切换{LightingZoneLabel(zone)}失败：{exception.Message}";
+            if (zone == LightingZone.Keyboard) KeyboardControlsStatusText = reason;
+            ReportLightingFeedback(zone, reason);
         }
         finally
         {
@@ -4116,6 +4173,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         LightingZoneConfiguration configuration, CancellationToken cancellationToken)
     {
         if (quickControlsController is null || IsLightingBusy) return;
+        if (configuration.Zone == LightingZone.Keyboard && IsKeyboardLightingPowerOnly)
+        {
+            ReportLightingFeedback(configuration.Zone, "当前键盘仅确认支持背光开关，未发送灯效、颜色或亮度配置。");
+            return;
+        }
         if (!configuration.Enabled)
         {
             StoreLightingZoneConfiguration(configuration);
@@ -4306,7 +4368,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         {
             foreach (var configuration in profile.Zones)
             {
-                if (!IsLightingZoneAvailable(configuration.Zone))
+                if (!IsLightingZoneAvailable(configuration.Zone) ||
+                    configuration.Zone == LightingZone.Keyboard && IsKeyboardLightingPowerOnly)
                 {
                     skipped++;
                     continue;
@@ -4643,9 +4706,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public async Task SetLiquidCoolingFanAsync(LiquidCoolingFanMode mode, CancellationToken cancellationToken)
     {
-        if (quickControlsController is null) return;
+        if (quickControlsController is null || isShuttingDown) return;
+        await liquidCoolingOperationGate.WaitAsync(cancellationToken);
         try
         {
+            if (isShuttingDown) return;
+            IsLiquidCoolingBusy = true;
             var result = await quickControlsController.SetLiquidCoolingFanAsync(mode, cancellationToken);
             LiquidCoolingStatusText = result.Reason;
             StatusMessage = result.Reason;
@@ -4659,13 +4725,17 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         {
             LiquidCoolingStatusText = $"水冷风扇切换失败：{exception.Message}";
         }
+        finally { IsLiquidCoolingBusy = false; liquidCoolingOperationGate.Release(); }
     }
 
     public async Task SetLiquidCoolingPumpAsync(LiquidCoolingPumpMode mode, CancellationToken cancellationToken)
     {
-        if (quickControlsController is null) return;
+        if (quickControlsController is null || isShuttingDown) return;
+        await liquidCoolingOperationGate.WaitAsync(cancellationToken);
         try
         {
+            if (isShuttingDown) return;
+            IsLiquidCoolingBusy = true;
             var result = await quickControlsController.SetLiquidCoolingPumpAsync(mode, cancellationToken);
             LiquidCoolingStatusText = result.Reason;
             StatusMessage = result.Reason;
@@ -4675,6 +4745,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         {
             LiquidCoolingStatusText = $"水冷泵切换失败：{exception.Message}";
         }
+        finally { IsLiquidCoolingBusy = false; liquidCoolingOperationGate.Release(); }
     }
 
     private async Task SetShortcutAsync(ShortcutControl control, bool enabled, CancellationToken cancellationToken)
@@ -4744,6 +4815,22 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         if (state is null) return;
         IsKeyboardLightingEnabled = state.Enabled;
+        if (IsKeyboardLightingZoneAvailable && !IsKeyboardLightingPowerOnly) return;
+        var configuration = lightingZoneStates.GetValueOrDefault(LightingZone.Keyboard)?.Configuration ??
+            new(LightingZone.Keyboard, state.Enabled, LightingEffect.OemDefault, new(0, 0, 0),
+                3, 2, LightingDirection.None, 120);
+        StoreKeyboardLightingPower(configuration with { Enabled = state.Enabled }, state.Type);
+        if (SelectedLightingZone == LightingZone.Keyboard) LoadLightingEditor(LightingZone.Keyboard);
+    }
+
+    private void StoreKeyboardLightingPower(LightingZoneConfiguration configuration, string? hardwareType)
+    {
+        // A confirmed power acknowledgement is not evidence of RGB configuration support.
+        lightingZoneStates[LightingZone.Keyboard] = new(true, hardwareType,
+            configuration with { Effect = LightingEffect.OemDefault }, [LightingEffect.OemDefault],
+            HasDetailedConfiguration: false, ReportedFields: LightingReportedFields.Power);
+        IsKeyboardLightingEnabled = configuration.Enabled;
+        NotifyLightingCapabilitiesChanged();
     }
 
     private void ApplyBattery(BatteryProtectionState? state)
@@ -4837,6 +4924,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private void ApplyLiquidCooling(LiquidCoolingState? state)
     {
         if (state is null) return;
+        liquidCoolingReconnect.Observe(state);
         liquidCoolingConnectionStatus = state.ConnectionStatus;
         liquidCoolingFanDutyPercent = state.FanDutyPercent;
         liquidCoolingPumpDutyPercent = state.PumpDutyPercent;
@@ -4845,16 +4933,23 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         IsLiquidCoolingPriming = state.IsPriming;
         liquidCoolingMeterNormal = state.MeterNormal;
         var previousSelection = SelectedLiquidCoolingDeviceId;
-        LiquidCoolingDevices.Clear();
-        foreach (var device in state.Devices) LiquidCoolingDevices.Add(device.Id);
-        if (!string.IsNullOrWhiteSpace(state.SelectedDeviceId) &&
-            !LiquidCoolingDevices.Contains(state.SelectedDeviceId, StringComparer.OrdinalIgnoreCase))
-            LiquidCoolingDevices.Add(state.SelectedDeviceId);
-        SelectedLiquidCoolingDeviceId = state.SelectedDeviceId is { Length: > 0 } selected && LiquidCoolingDevices.Contains(selected)
-            ? selected
-            : previousSelection is { Length: > 0 } previous && LiquidCoolingDevices.Contains(previous)
-                ? previous
-                : LiquidCoolingDevices.FirstOrDefault();
+        applyingLiquidCoolingState = true;
+        try
+        {
+            LiquidCoolingDevices.Clear();
+            foreach (var device in state.Devices) LiquidCoolingDevices.Add(device.Id);
+            if (!string.IsNullOrWhiteSpace(state.SelectedDeviceId) &&
+                !LiquidCoolingDevices.Contains(state.SelectedDeviceId, StringComparer.OrdinalIgnoreCase))
+                LiquidCoolingDevices.Add(state.SelectedDeviceId);
+            SelectedLiquidCoolingDeviceId = liquidCoolingSelectionDraft && !string.IsNullOrWhiteSpace(previousSelection)
+                ? previousSelection
+                : state.SelectedDeviceId is { Length: > 0 } selected && LiquidCoolingDevices.Contains(selected)
+                    ? selected
+                    : previousSelection is { Length: > 0 } previous && LiquidCoolingDevices.Contains(previous)
+                        ? previous
+                        : LiquidCoolingDevices.FirstOrDefault();
+        }
+        finally { applyingLiquidCoolingState = false; }
         IsLiquidCoolingConnected = state.Connected;
         if (state.FanMode is { } fan) SelectedLiquidCoolingFanMode = fan;
         if (state.PumpMode is { } pump) SelectedLiquidCoolingPumpMode = pump;
@@ -4876,10 +4971,13 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         string failurePrefix,
         CancellationToken cancellationToken)
     {
-        if (quickControlsController is null || IsLiquidCoolingBusy) return;
+        if (quickControlsController is null || isShuttingDown) return;
+        CancelLiquidCoolingRecovery();
+        await liquidCoolingOperationGate.WaitAsync(cancellationToken);
         IsLiquidCoolingBusy = true;
         try
         {
+            if (isShuttingDown) return;
             var result = await action(quickControlsController);
             LiquidCoolingStatusText = result.Reason;
             StatusMessage = result.Reason;
@@ -4892,6 +4990,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         finally
         {
             IsLiquidCoolingBusy = false;
+            liquidCoolingOperationGate.Release();
         }
     }
 
@@ -4903,6 +5002,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(CanPrimeLiquidCooling));
         OnPropertyChanged(nameof(CanResetLiquidCooling));
         OnPropertyChanged(nameof(CanControlLiquidCoolingStrategy));
+        OnPropertyChanged(nameof(CanChooseLiquidCoolingManualStrategy));
     }
 
     public async Task<bool> InitializeGpuOutputModeAsync(CancellationToken cancellationToken)
@@ -5101,6 +5201,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public void BeginShutdown()
     {
         isShuttingDown = true;
+        CancelLiquidCoolingRecovery();
+        liquidCoolingLifetime.Cancel();
         OnPropertyChanged(nameof(CanRecheckCapabilities));
     }
 
@@ -5442,6 +5544,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private bool IsLightingZoneAvailable(LightingZone zone) =>
         lightingZoneStates.GetValueOrDefault(zone)?.Available == true;
 
+    private bool IsKeyboardLightingPowerOnly =>
+        lightingZoneStates.GetValueOrDefault(LightingZone.Keyboard) is { Available: true, HasDetailedConfiguration: false } state &&
+        state.SupportedEffects.All(effect => effect == LightingEffect.OemDefault);
+
     private void NotifyLightingCapabilitiesChanged()
     {
         OnPropertyChanged(nameof(IsKeyboardLightingZoneAvailable));
@@ -5449,6 +5555,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(IsLogoLightingZoneAvailable));
         OnPropertyChanged(nameof(IsWaterLightingZoneAvailable));
         OnPropertyChanged(nameof(CanApplyLighting));
+        OnPropertyChanged(nameof(CanToggleSelectedLightingZonePower));
         OnPropertyChanged(nameof(CanApplyLightingSleepTimer));
     }
 
@@ -5470,6 +5577,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 state?.SupportedEffects ?? [LightingEffect.Static]);
         }
         OnPropertyChanged(nameof(CanApplyLighting));
+        OnPropertyChanged(nameof(CanToggleSelectedLightingZonePower));
     }
 
     private void LoadLightingConfiguration(

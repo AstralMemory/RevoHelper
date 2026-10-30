@@ -639,7 +639,7 @@
                             <Border presentation:ThemeScope.AccentSurface="True" x:Name="ReleaseStatusBadge" Margin="9,4,0,0" Padding="8,2"
                                     MinWidth="72" Height="22" VerticalAlignment="Center"
                                     Background="{Binding PerformanceAccentSurfaceColor}" CornerRadius="7">
-                                <TextBlock x:Name="ReleaseStatusText" Text="{presentation:UiText Value={Binding ReleaseVersionText}}"
+                                <TextBlock x:Name="ReleaseStatusText" Text="{presentation:UiText Value={Binding ReleaseBadgeText}}"
                                            Foreground="{Binding PerformanceAccentColor}" FontSize="{presentation:UiFont 10}" FontWeight="Bold"
                                            HorizontalAlignment="Center" VerticalAlignment="Center" />
                             </Border>
@@ -1867,14 +1867,6 @@
                                         <StackPanel><TextBlock Text="{presentation:UiText '机器最初始默认背光'}" FontSize="{presentation:UiFont 9.5}" FontWeight="SemiBold" /><TextBlock Text="{presentation:UiText '恢复官方彩色静态键盘背光'}" Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 7.6}" /></StackPanel>
                                     </StackPanel>
                                 </Button>
-                                <Border Margin="0,6,0,0" Padding="10,7" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource NeutralD7E0EBBrush}" BorderThickness="1" CornerRadius="10">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="52" /></Grid.ColumnDefinitions>
-                                        <StackPanel><TextBlock Text="{presentation:UiText '键盘背光总开关'}" FontSize="{presentation:UiFont 9.2}" FontWeight="SemiBold" ToolTip="{presentation:UiText '使用官方背光电源控制。'}" /></StackPanel>
-                                        <CheckBox x:Name="KeyboardLightingToggle" Grid.Column="1" IsChecked="{Binding IsKeyboardLightingEnabled, Mode=OneWay}"
-                                                  Click="KeyboardLighting_Click" Style="{StaticResource SettingsToggleStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" />
-                                    </Grid>
-                                </Border>
                                 <UniformGrid Columns="2" Margin="0,6,0,0">
                                     <Button presentation:ThemeScope.AccentSurface="True" Tag="revo-flow" Height="48" Margin="0,0,3,3" Background="#F0EBFF" BorderBrush="#B8A3F2" Style="{StaticResource IconButtonStyle}" Click="LightingPreset_Click"><StackPanel><TextBlock Text="{presentation:UiText '耀世流光'}" FontWeight="SemiBold" FontSize="{presentation:UiFont 9.5}" /><TextBlock Text="{presentation:UiText '键盘彩虹 · 平滑流动'}" FontSize="{presentation:UiFont 7.2}" Foreground="#7559B8" /></StackPanel></Button>
                                     <Button presentation:ThemeScope.AccentSurface="True" Tag="ice-breath" Height="48" Margin="3,0,0,3" Background="#EAF8FF" BorderBrush="#88C9EC" Style="{StaticResource IconButtonStyle}" Click="LightingPreset_Click"><StackPanel><TextBlock Text="{presentation:UiText '冰海呼吸'}" FontWeight="SemiBold" FontSize="{presentation:UiFont 9.5}" /><TextBlock Text="{presentation:UiText '键盘青蓝呼吸 · 低干扰'}" FontSize="{presentation:UiFont 7.2}" Foreground="#297DAA" /></StackPanel></Button>
@@ -1888,7 +1880,7 @@
                                     <Grid>
                                         <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="54" /></Grid.ColumnDefinitions>
                                         <StackPanel><TextBlock Text="{presentation:UiText Value={Binding SelectedLightingZoneLabel}}" FontSize="{presentation:UiFont 11}" FontWeight="SemiBold" ToolTip="{presentation:UiText '分别设置每个区域的灯光。'}" /></StackPanel>
-                                        <CheckBox x:Name="LightingZonePowerToggle" Grid.Column="1" IsChecked="{Binding IsSelectedLightingZoneEnabled, Mode=TwoWay}" Style="{StaticResource SettingsToggleStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="LightingZonePower_Click" />
+                                        <CheckBox x:Name="LightingZonePowerToggle" Grid.Column="1" IsChecked="{Binding IsSelectedLightingZoneEnabled, Mode=TwoWay}" IsEnabled="{Binding CanToggleSelectedLightingZonePower}" Style="{StaticResource SettingsToggleStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" Click="LightingZonePower_Click" />
                                     </Grid>
                                     <TextBlock Text="{presentation:UiText '灯效'}" Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 8}" Margin="0,10,0,4" />
                                     <ComboBox x:Name="LightingEffectCombo" Height="34" Padding="8,0" ItemsSource="{Binding LightingEffectOptions}"
@@ -2046,6 +2038,39 @@
                             <Border presentation:ThemeScope.AccentSurface="True" Padding="11,9" Background="#EEF8FF" BorderBrush="#83BDE8" BorderThickness="1" CornerRadius="10">
                                 <TextBlock Text="{presentation:UiText Value={Binding LiquidCoolingStatusText}}" Foreground="#23638F" FontSize="{presentation:UiFont 8.6}"
                                            TextWrapping="Wrap" />
+                            </Border>
+
+                            <Border x:Name="LiquidCoolingStrategySection" Padding="12,10" Margin="0,10,0,0"
+                                    Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource NeutralD7E0EBBrush}"
+                                    BorderThickness="1" CornerRadius="11">
+                                <StackPanel>
+                                    <Grid Height="30">
+                                        <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="50" /></Grid.ColumnDefinitions>
+                                        <TextBlock Text="{presentation:UiText '智慧控制'}" Foreground="{DynamicResource TextBrush}"
+                                                   FontSize="{presentation:UiFont 10.5}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                        <CheckBox x:Name="LiquidCoolingSmartToggle" Grid.Column="1" Style="{StaticResource SettingsToggleStyle}"
+                                                  IsChecked="{Binding IsLiquidCoolingSmartStrategy, Mode=OneWay}" IsEnabled="{Binding CanControlLiquidCoolingStrategy}"
+                                                  Click="LiquidCoolingSmartStrategy_Click" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                    </Grid>
+                                    <StackPanel x:Name="LiquidCoolingManualStrategyControls" IsEnabled="{Binding CanChooseLiquidCoolingManualStrategy}">
+                                        <StackPanel.Style><Style TargetType="StackPanel"><Style.Triggers>
+                                            <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45" /></Trigger>
+                                        </Style.Triggers></Style></StackPanel.Style>
+                                        <Slider x:Name="LiquidCoolingManualStrategySlider" Minimum="0" Maximum="3" TickFrequency="1"
+                                                SmallChange="1" LargeChange="1" IsSnapToTickEnabled="True" TickPlacement="BottomRight" Margin="0,5,0,0"
+                                                Value="{Binding SelectedLiquidCoolingManualIndex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                PreviewMouseLeftButtonUp="LiquidCoolingManualStrategy_Commit" KeyUp="LiquidCoolingManualStrategy_KeyUp" />
+                                        <TickBar x:Name="LiquidCoolingManualStrategyTicks" Minimum="0" Maximum="3" TickFrequency="1"
+                                                 Placement="Bottom" Height="5" ReservedSpace="10" Fill="{DynamicResource MutedBrush}" IsHitTestVisible="False" />
+                                        <Grid Margin="0,3,0,0">
+                                            <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition /><ColumnDefinition /><ColumnDefinition /></Grid.ColumnDefinitions>
+                                            <TextBlock Text="{presentation:UiText '更安静'}" FontSize="{presentation:UiFont 8.5}" Foreground="{DynamicResource TextBrush}" HorizontalAlignment="Left" />
+                                            <TextBlock Grid.Column="1" Text="{presentation:UiText '安静'}" FontSize="{presentation:UiFont 8.5}" Foreground="{DynamicResource TextBrush}" HorizontalAlignment="Center" />
+                                            <TextBlock Grid.Column="2" Text="{presentation:UiText '均衡'}" FontSize="{presentation:UiFont 8.5}" Foreground="{DynamicResource TextBrush}" HorizontalAlignment="Center" />
+                                            <TextBlock Grid.Column="3" Text="{presentation:UiText '最大'}" FontSize="{presentation:UiFont 8.5}" Foreground="{DynamicResource TextBrush}" HorizontalAlignment="Right" />
+                                        </Grid>
+                                    </StackPanel>
+                                </StackPanel>
                             </Border>
 
                             <Border presentation:ThemeScope.AccentSurface="True" x:Name="LiquidCoolingPrimingNotice" Margin="0,8,0,0" Padding="12,11"
@@ -2248,30 +2273,6 @@
                                     </Expander>
                                 </StackPanel>
                             </Border>
-                            <TextBlock Text="{presentation:UiText '散热策略档位调节'}" Foreground="{DynamicResource TextBrush}" FontSize="{presentation:UiFont 10.5}"
-                                       FontWeight="SemiBold" Margin="1,12,0,6" />
-                            <Border x:Name="LiquidCoolingStrategySection" Padding="10" Background="{DynamicResource SurfaceBrush}"
-                                    BorderBrush="{DynamicResource NeutralD7E0EBBrush}" BorderThickness="1" CornerRadius="11">
-                                <StackPanel>
-                                    <UniformGrid Columns="2" IsEnabled="{Binding CanControlLiquidCoolingStrategy}">
-                                        <RadioButton Tag="0" Content="{presentation:UiText '更安静'}" GroupName="LiquidCoolingStrategy" Click="LiquidFan_Click"
-                                                     IsChecked="{Binding IsLiquidCoolingQuieterStrategy, Mode=OneWay}"
-                                                     Style="{StaticResource LiquidCoolingStrategyRadioStyle}" />
-                                        <RadioButton Tag="1" Content="{presentation:UiText '安静'}" GroupName="LiquidCoolingStrategy" Click="LiquidFan_Click"
-                                                     IsChecked="{Binding IsLiquidCoolingQuietStrategy, Mode=OneWay}"
-                                                     Style="{StaticResource LiquidCoolingStrategyRadioStyle}" />
-                                        <RadioButton Tag="2" Content="{presentation:UiText '均衡'}" GroupName="LiquidCoolingStrategy" Click="LiquidFan_Click"
-                                                     IsChecked="{Binding IsLiquidCoolingBalancedStrategy, Mode=OneWay}"
-                                                     Style="{StaticResource LiquidCoolingStrategyRadioStyle}" />
-                                        <RadioButton Tag="3" Content="{presentation:UiText '最大'}" GroupName="LiquidCoolingStrategy" Click="LiquidFan_Click"
-                                                     IsChecked="{Binding IsLiquidCoolingMaximumStrategy, Mode=OneWay}"
-                                                     Style="{StaticResource LiquidCoolingStrategyRadioStyle}" />
-                                        <RadioButton Tag="4" Content="{presentation:UiText '智慧控制'}" GroupName="LiquidCoolingStrategy" Click="LiquidFan_Click"
-                                                     IsChecked="{Binding IsLiquidCoolingSmartStrategy, Mode=OneWay}"
-                                                     Style="{StaticResource LiquidCoolingStrategyRadioStyle}" />
-                                    </UniformGrid>
-                                </StackPanel>
-                            </Border>
                         </StackPanel>
                     </ScrollViewer>
                     <ScrollViewer x:Name="KeyboardDrawerContent" Grid.Row="2" Visibility="Collapsed"
@@ -2340,7 +2341,24 @@
                                     <Separator Background="{DynamicResource NeutralE3E9F1Brush}" />
                                     <Grid x:Name="AcAutoBootControlRow" Height="60"><Grid.Style><Style TargetType="Grid"><Setter Property="Visibility" Value="Collapsed" /><Style.Triggers><DataTrigger Binding="{Binding SupportsAcAutoBoot}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers></Style></Grid.Style><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="50" /></Grid.ColumnDefinitions><StackPanel VerticalAlignment="Center"><TextBlock x:Name="AcAutoBootSettingLabel" Text="{presentation:UiText '来电自动开机'}" Foreground="{DynamicResource TextBrush}" FontSize="{presentation:UiFont 10.5}" FontWeight="SemiBold" /><TextBlock Text="{presentation:UiText '接入电源适配器后自动启动设备'}" Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 7.8}" Margin="0,2,0,0" /></StackPanel><CheckBox Grid.Column="1" Tag="AcAutoBoot" IsChecked="{Binding IsAcAutoBootEnabled, Mode=OneWay}" Click="PowerToggle_Click" Style="{StaticResource SettingsToggleStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" /></Grid>
                                     <Separator Background="{DynamicResource NeutralE3E9F1Brush}" />
-                                    <Grid x:Name="HighPerformancePowerControlRow" Height="60"><Grid.Style><Style TargetType="Grid"><Setter Property="Visibility" Value="Collapsed" /><Style.Triggers><DataTrigger Binding="{Binding SupportsHighPerformancePowerMode}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers></Style></Grid.Style><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="50" /></Grid.ColumnDefinitions><StackPanel VerticalAlignment="Center"><TextBlock x:Name="HighPerformanceSettingLabel" Text="{presentation:UiText 'Windows 电源模式跟随'}" Foreground="{DynamicResource TextBrush}" FontSize="{presentation:UiFont 10.5}" FontWeight="SemiBold" /><TextBlock Text="{presentation:UiText '办公→最佳能效，平衡/自定义→平衡，狂暴→最佳性能'}" Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 7.8}" Margin="0,2,0,0" /></StackPanel><CheckBox Grid.Column="1" Tag="HighPerformancePowerMode" IsChecked="{Binding IsHighPerformancePowerModeEnabled, Mode=OneWay}" Click="PowerToggle_Click" Style="{StaticResource SettingsToggleStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" /></Grid>
+                                    <Grid x:Name="HighPerformancePowerControlRow" Height="60">
+                                        <Grid.Style><Style TargetType="Grid"><Setter Property="Visibility" Value="Collapsed" /><Style.Triggers><DataTrigger Binding="{Binding SupportsHighPerformancePowerMode}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers></Style></Grid.Style>
+                                        <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="50" /></Grid.ColumnDefinitions>
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <TextBlock x:Name="HighPerformanceSettingLabel" Text="{presentation:UiText 'Windows 电源模式跟随'}" Foreground="{DynamicResource TextBrush}" FontSize="{presentation:UiFont 10.5}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                            <Border x:Name="PowerModeFollowHelpIcon" Width="14" Height="14" CornerRadius="7" Margin="6,0,0,0"
+                                                    Background="Transparent" BorderBrush="#718095" BorderThickness="0.8" Cursor="Help" VerticalAlignment="Center"
+                                                    ToolTipService.InitialShowDelay="180" ToolTipService.ShowDuration="20000">
+                                                <Border.ToolTip><ToolTip x:Name="PowerModeFollowHelpTooltip" presentation:ThemeScope.AccentSurface="True"
+                                                    Background="#F1F7FF" BorderBrush="#90BFF2" Foreground="{DynamicResource TextBrush}"
+                                                    DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                                    <TextBlock Text="{Binding UiCopy.PowerModeFollowHint}" MaxWidth="280" FontSize="{presentation:UiFont 8.5}" TextWrapping="Wrap" />
+                                                </ToolTip></Border.ToolTip>
+                                                <TextBlock Text="?" Foreground="#718095" FontSize="{presentation:UiFont 8}" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </Border>
+                                        </StackPanel>
+                                        <CheckBox Grid.Column="1" Tag="HighPerformancePowerMode" IsChecked="{Binding IsHighPerformancePowerModeEnabled, Mode=OneWay}" Click="PowerToggle_Click" Style="{StaticResource SettingsToggleStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                    </Grid>
                                     <Separator Background="{DynamicResource NeutralE3E9F1Brush}" />
                                     <Grid x:Name="DeepSleepControlRow" Height="64">
                                         <Grid.Style><Style TargetType="Grid"><Setter Property="Visibility" Value="Collapsed" /><Style.Triggers><DataTrigger Binding="{Binding SupportsDeepSleep}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers></Style></Grid.Style>
@@ -2355,12 +2373,80 @@
                             </Border>
                             <TextBlock Text="{presentation:UiText '电池状态'}" Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 9.3}" FontWeight="SemiBold" Margin="2,12,0,6" />
                             <Border Padding="13,8" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource NeutralD7E0EBBrush}" BorderThickness="1" CornerRadius="12">
-                                <StackPanel>
+                                <StackPanel x:Name="NativeBatteryCareModes" IsEnabled="{Binding Experiments.Charge.CanUseNativeCareModes}">
                                     <Grid Height="58"><Grid.ColumnDefinitions><ColumnDefinition Width="32" /><ColumnDefinition /></Grid.ColumnDefinitions><RadioButton Tag="0" GroupName="BatteryProtectionMode" IsChecked="{Binding IsBatteryLongLifeMode, Mode=OneWay}" Click="BatteryMode_Click" VerticalAlignment="Center" /><StackPanel Grid.Column="1" VerticalAlignment="Center"><TextBlock Text="{presentation:UiText '长效模式'}" Foreground="{DynamicResource TextBrush}" FontSize="{presentation:UiFont 10.5}" FontWeight="SemiBold" /><TextBlock Text="{presentation:UiText '优先续航，适合经常依靠电池供电。'}" Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 7.8}" /></StackPanel></Grid>
                                     <Separator Background="{DynamicResource NeutralE3E9F1Brush}" />
                                     <Grid Height="58"><Grid.ColumnDefinitions><ColumnDefinition Width="32" /><ColumnDefinition /></Grid.ColumnDefinitions><RadioButton Tag="1" GroupName="BatteryProtectionMode" IsChecked="{Binding IsBatteryBalancedMode, Mode=OneWay}" Click="BatteryMode_Click" VerticalAlignment="Center" /><StackPanel Grid.Column="1" VerticalAlignment="Center"><TextBlock Text="{presentation:UiText '均衡模式'}" Foreground="{DynamicResource TextBrush}" FontSize="{presentation:UiFont 10.5}" FontWeight="SemiBold" /><TextBlock Text="{presentation:UiText '在续航能力和电池寿命之间取得平衡。'}" Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 7.8}" /></StackPanel></Grid>
                                     <Separator Background="{DynamicResource NeutralE3E9F1Brush}" />
                                     <Grid Height="58"><Grid.ColumnDefinitions><ColumnDefinition Width="32" /><ColumnDefinition /></Grid.ColumnDefinitions><RadioButton Tag="2" GroupName="BatteryProtectionMode" IsChecked="{Binding IsBatteryWorkstationMode, Mode=OneWay}" Click="BatteryMode_Click" VerticalAlignment="Center" /><StackPanel Grid.Column="1" VerticalAlignment="Center"><TextBlock Text="{presentation:UiText '工作站模式'}" Foreground="{DynamicResource TextBrush}" FontSize="{presentation:UiFont 10.5}" FontWeight="SemiBold" /><TextBlock Text="{presentation:UiText '面向长期连接电源的固定工作场景。'}" Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 7.8}" /></StackPanel></Grid>
+                                </StackPanel>
+                            </Border>
+                            <Border x:Name="ExperimentalChargeCard" presentation:ThemeScope.AccentSurface="True"
+                                    Margin="0,12,0,0" Padding="13,11" Background="#FFF7E8" BorderBrush="#E9BD61"
+                                    BorderThickness="1" CornerRadius="12">
+                                <StackPanel>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="50" /></Grid.ColumnDefinitions>
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding UiCopy.ExperimentalChargeTitle}" Foreground="{DynamicResource TextBrush}"
+                                                       FontSize="{presentation:UiFont 10.5}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                            <Border x:Name="ExperimentalChargeHelpIcon" Width="14" Height="14" CornerRadius="7" Margin="6,0,0,0"
+                                                    Background="Transparent" BorderBrush="#718095" BorderThickness="0.8" Cursor="Help" VerticalAlignment="Center"
+                                                    ToolTipService.InitialShowDelay="180" ToolTipService.ShowDuration="20000">
+                                                <Border.ToolTip>
+                                                    <ToolTip x:Name="ExperimentalChargeHelpTooltip" presentation:ThemeScope.AccentSurface="True"
+                                                             Background="#F1F7FF" BorderBrush="#90BFF2" Foreground="{DynamicResource TextBrush}"
+                                                             DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                                        <StackPanel MaxWidth="290">
+                                                            <TextBlock x:Name="ExperimentalChargeRiskText" Text="{Binding UiCopy.ExperimentalChargeRisk}"
+                                                                       Foreground="{DynamicResource TextBrush}" FontSize="{presentation:UiFont 8.5}" TextWrapping="Wrap" />
+                                                            <TextBlock Text="{Binding UiCopy.ExperimentalChargeNativeNotice}" TextWrapping="Wrap"
+                                                                       Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 8}" Margin="0,7,0,0" />
+                                                        </StackPanel>
+                                                    </ToolTip>
+                                                </Border.ToolTip>
+                                                <TextBlock Text="?" Foreground="#718095" FontSize="{presentation:UiFont 8}" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </Border>
+                                        </StackPanel>
+                                        <CheckBox x:Name="ExperimentalChargeToggle" Grid.Column="1" Style="{StaticResource SettingsToggleStyle}"
+                                                  IsChecked="{Binding Experiments.Charge.IsEnabled, Mode=OneWay}" IsEnabled="{Binding Experiments.Charge.CanToggle}"
+                                                  Click="ExperimentalChargeToggle_Click" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                    </Grid>
+                                    <TextBlock Text="{Binding UiCopy.ExperimentalChargeDefault}" Foreground="#8B6500"
+                                               FontSize="{presentation:UiFont 8}" TextWrapping="Wrap" Margin="0,3,0,0" />
+                                    <Slider x:Name="ExperimentalChargeLimitSlider" Minimum="0" Maximum="2" TickFrequency="1"
+                                            SmallChange="1" LargeChange="1" IsSnapToTickEnabled="True" TickPlacement="BottomRight" Margin="0,9,0,0"
+                                            Value="{Binding Experiments.Charge.SelectedLimitIndex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                            IsEnabled="{Binding Experiments.Charge.CanChooseLimit}"
+                                            PreviewMouseLeftButtonUp="ExperimentalChargeLimit_Commit" KeyUp="ExperimentalChargeLimit_KeyUp" />
+                                    <TickBar x:Name="ExperimentalChargeLimitTicks" Minimum="0" Maximum="2" TickFrequency="1"
+                                             Placement="Bottom" Height="5" ReservedSpace="10" Fill="#8B6500" IsHitTestVisible="False" />
+                                    <Grid Margin="0,2,0,0">
+                                        <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition /><ColumnDefinition /></Grid.ColumnDefinitions>
+                                        <TextBlock Text="60%" Foreground="{DynamicResource TextBrush}" FontSize="{presentation:UiFont 8.5}" HorizontalAlignment="Left" />
+                                        <TextBlock Grid.Column="1" Text="80%" Foreground="{DynamicResource TextBrush}" FontSize="{presentation:UiFont 8.5}" HorizontalAlignment="Center" />
+                                        <TextBlock Grid.Column="2" Text="100%" Foreground="{DynamicResource TextBrush}" FontSize="{presentation:UiFont 8.5}" HorizontalAlignment="Right" />
+                                    </Grid>
+                                    <TextBlock x:Name="ExperimentalChargeNoLimitText" Text="{Binding UiCopy.ExperimentalChargeNoLimit}"
+                                               Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 8}" TextWrapping="Wrap" Margin="0,4,0,0">
+                                        <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed" /><Style.Triggers>
+                                            <DataTrigger Binding="{Binding Experiments.Charge.SelectedLimitPercent}" Value="100"><Setter Property="Visibility" Value="Visible" /></DataTrigger>
+                                        </Style.Triggers></Style></TextBlock.Style>
+                                    </TextBlock>
+                                    <TextBlock x:Name="ExperimentalChargeDelayText" Text="{Binding UiCopy.ExperimentalChargeDelay}"
+                                               Foreground="#D9363E" FontSize="{presentation:UiFont 8}" TextWrapping="Wrap" Margin="0,8,0,0" />
+                                    <Button x:Name="ExperimentalChargeRecoverButton" Content="{Binding UiCopy.ExperimentalChargeRecover}"
+                                            Height="34" Margin="0,7,0,0" FontSize="{presentation:UiFont 8.7}"
+                                            Background="#FFFFFF" BorderBrush="#CBD7E6"
+                                            IsEnabled="{Binding Experiments.Charge.CanRecover}" Click="ExperimentalChargeRecover_Click">
+                                        <Button.Style><Style TargetType="Button" BasedOn="{StaticResource IconButtonStyle}">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Style.Triggers><DataTrigger Binding="{Binding Experiments.Charge.RecoveryPending}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
+                                        </Style></Button.Style>
+                                    </Button>
+                                    <TextBlock x:Name="ExperimentalChargeStatusText" Text="{presentation:UiText Value={Binding Experiments.Charge.StatusText}}"
+                                               Foreground="{DynamicResource TextBrush}" FontSize="{presentation:UiFont 8}"
+                                               TextWrapping="Wrap" Margin="0,8,0,0" />
                                 </StackPanel>
                             </Border>
                         </StackPanel>

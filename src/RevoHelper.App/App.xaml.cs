@@ -5,6 +5,7 @@ using RevoHelper.App.Settings;
 using RevoHelper.App.Lifecycle;
 using RevoHelper.App.SystemControl;
 using RevoHelper.App.Monitoring;
+using RevoHelper.App.Charging;
 using RevoHelper.Core.Control;
 using RevoHelper.Core.Control.DynamicPower;
 using RevoHelper.Core.Dashboard;
@@ -49,6 +50,8 @@ public partial class App : Application
     private SwitchableCpuPolicyController? directCpuPolicyController;
     private PlatformAwareCpuPolicyController? platformAwareCpuPolicyController;
     private ExperimentalControlsViewModel? experiments;
+    private ExperimentalChargeClient? experimentalCharge;
+    private SessionChargeController? sessionCharge;
     private WindowsProcessorFrequencyLimitController? processorFrequencyLimitController;
     private WindowsProcessorBoostController? processorBoostController;
     private PerformanceMonitorController? performanceMonitor;
@@ -59,6 +62,13 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        if (ExperimentalChargeHelperHost.IsHelper(e.Args))
+        {
+            previewOnly = true; // No settings, single-instance UI or vendor initialization.
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            Shutdown(ExperimentalChargeHelperHost.Run(e.Args));
+            return;
+        }
         if (e.Args is ["--snapshot-preview", var outputDirectory])
         {
             previewOnly = true;
@@ -67,6 +77,7 @@ public partial class App : Application
             Shutdown();
             return;
         }
+        var manualChargeLimit = ManualExperimentalChargeLaunch.ReadLimit(e.Args);
         var launchedFromWindowsStartup = StartupCommand.IsStartupLaunch(e.Args);
         var settingsPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -89,7 +100,7 @@ public partial class App : Application
 
         var controlConflictDetector = new ControlConflictDetector();
         var controlConflicts = controlConflictDetector.Detect();
-        if (controlConflicts.Count > 0 && !launchedFromWindowsStartup)
+        if (controlConflicts.Count > 0 && !launchedFromWindowsStartup && manualChargeLimit is null)
         {
             var conflictList = string.Join("\n", controlConflicts.Select(conflict => $"• {conflict.DisplayName}"));
             MessageBox.Show(
@@ -116,7 +127,8 @@ public partial class App : Application
         {
             settings = settings with
             {
-                StartWithWindows = StartupRegistrationSynchronizer.Synchronize(startupRegistration)
+                // Experimental exports must not migrate the stable version's startup task.
+                StartWithWindows = startupRegistration.IsEnabled()
             };
         }
         catch (Exception exception)
@@ -177,7 +189,7 @@ public partial class App : Application
         {
             settings = settings with
             {
-                StartWithWindows = StartupRegistrationSynchronizer.Synchronize(startupRegistration)
+                StartWithWindows = startupRegistration.IsEnabled()
             };
         }
         catch (Exception exception)
@@ -186,11 +198,16 @@ public partial class App : Application
             RuntimeDiagnosticLog.Write("startup-registration", $"{exception.GetType().Name}: {exception.Message}");
         }
 
+        experimentalCharge = new ExperimentalChargeClient();
+        experimentalCharge.InspectPendingRecovery();
+        sessionCharge = new SessionChargeController(experimentalCharge,
+            () => System.Windows.Forms.SystemInformation.PowerStatus.PowerLineStatus == System.Windows.Forms.PowerLineStatus.Online);
         experiments = new ExperimentalControlsViewModel(
             dynamicPowerController,
             new BootWaterTaskManager(new WindowsBootWaterTaskPlatform(), WindowsBootWaterTaskPlatform.InstalledPath),
             action => { if (!Dispatcher.HasShutdownStarted) Dispatcher.BeginInvoke(
-                System.Windows.Threading.DispatcherPriority.Background, action); });
+                System.Windows.Threading.DispatcherPriority.Background, action); },
+            chargeController: sessionCharge);
         var viewModel = new MainWindowViewModel(
             dashboard,
             settings,
@@ -227,6 +244,8 @@ public partial class App : Application
         capabilityCpuBackends = new WindowsCpuBackendProbe().Probe(dashboard.Identity.Cpu);
         RefreshRuntimeCapabilities(viewModel);
         window.Show();
+        if (manualChargeLimit is int manualLimit)
+            _ = ApplyExplicitChargeLaunchAsync(viewModel, manualLimit);
         viewModel.CapabilityRecheckRequested += () =>
         {
             StartDeferredHardwareDiscovery(viewModel);
@@ -247,6 +266,7 @@ public partial class App : Application
         StartTelemetry(viewModel);
         StartOemStatus(viewModel);
         _ = viewModel.TryAutoConnectLiquidCoolingAsync(CancellationToken.None);
+        _ = viewModel.MonitorLiquidCoolingAsync(applicationLifetime.Token);
         StartRuntimeCapabilityProbe(gcuStatusSource, gpuOutputController, viewModel);
         _ = InitializePlatformModeWhenReadyAsync(viewModel);
         _ = InitializePerformancePolicyWhenReadyAsync(viewModel);
@@ -390,6 +410,7 @@ public partial class App : Application
     {
         if (previewOnly) { base.OnExit(e); return; }
         isExiting = true;
+        sessionCharge?.RequestStop("程序退出，独立监护继续恢复原值。");
         applicationLifetime.Cancel();
         hardwareDiscovery?.Dispose();
         directBackendProbe?.Dispose();
@@ -415,6 +436,8 @@ public partial class App : Application
                 RuntimeDiagnosticLog.Write("frequency-recovery", "Exit recovery incomplete; dependent recovery journals retained for next launch.");
         }
         experiments?.Dispose();
+        sessionCharge?.Dispose();
+        experimentalCharge?.Dispose();
         if (platformAwareCpuPolicyController is not null)
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
@@ -479,6 +502,15 @@ public partial class App : Application
                 return ValueTask.CompletedTask;
             },
             telemetryCancellation.Token);
+    }
+
+    private static async Task ApplyExplicitChargeLaunchAsync(MainWindowViewModel viewModel, int limit)
+    {
+        // The command-line switch is an explicit, risk-accepting manual launch,
+        // not a saved preference. Ordinary double-click/startup never enters here.
+        await viewModel.OpenBatteryAsync(CancellationToken.None);
+        viewModel.Experiments.Charge.SelectedLimitPercent = limit;
+        await viewModel.Experiments.Charge.EnableAsync();
     }
 
     public void ShowPerformanceMonitorSettings(Window owner)
@@ -646,6 +678,8 @@ public partial class App : Application
     {
         if (mainViewModel is null) return;
         var powerLineStatus = System.Windows.Forms.SystemInformation.PowerStatus.PowerLineStatus;
+        _ = UpdateChargePowerAvailabilityAsync(e.Mode != PowerModes.Suspend
+            && powerLineStatus == System.Windows.Forms.PowerLineStatus.Online);
         var sourceChanged = powerLineStatus != lastPowerLineStatus;
         if (e.Mode is PowerModes.Suspend or PowerModes.Resume || powerLineStatus != lastPowerLineStatus)
             _ = experiments?.PauseAutomaticallyAsync("供电或睡眠状态发生变化，动态节能已暂停。");
@@ -661,6 +695,18 @@ public partial class App : Application
         {
             Dispatcher.BeginInvoke(() =>
                 _ = ApplyAutomaticRefreshRateForCurrentPowerSourceAsync(mainViewModel));
+        }
+    }
+
+    private async Task UpdateChargePowerAvailabilityAsync(bool available)
+    {
+        if (isExiting || sessionCharge is null) return;
+        try { await sessionCharge.SetPowerAvailableAsync(available, applicationLifetime.Token); }
+        catch (OperationCanceledException) when (applicationLifetime.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            sessionCharge.RequestStop("供电状态处理未完成，停止限充并保留恢复记录。");
+            RuntimeDiagnosticLog.Write("charge-power-session", $"{exception.GetType().Name}: {exception.Message}");
         }
     }
 
