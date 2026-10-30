@@ -3,7 +3,7 @@ using System.Collections.ObjectModel;
 namespace RevoHelper.Hardware.Windows.BatteryCharge;
 
 /// <summary>
-/// Explicitly invoked, serialized transport for one reviewed firmware only.
+/// Explicitly invoked, serialized transport for the narrow charge-control interface.
 /// Construction performs no WMI, native calls, reads or writes. This class never
 /// enables a session, holds an override, retries, or touches persistent storage.
 /// </summary>
@@ -13,12 +13,15 @@ public sealed class ReviewedChargeTransport : IReviewedChargeTransport
     private readonly Action<TimeSpan> throttle;
     private readonly TimeSpan timeout;
     private IReviewedChargeBackend? backend;
-    private ChargeMachineIdentity? identity;
+    // Kept only for compatibility with serialized leases from older versions.
+    // Charge control does not query SMBIOS or use these labels as authorization.
+    private static readonly ChargeMachineIdentity UnspecifiedIdentity = new("", "", "", -1, -1);
     private string? instanceName;
     private bool initialized;
     private bool disposed;
     private volatile bool timedOut;
     private bool uncertainWrite;
+    private bool originRejected;
 
     public ReviewedChargeTransport() : this(null, null, null) { }
 
@@ -37,25 +40,34 @@ public sealed class ReviewedChargeTransport : IReviewedChargeTransport
         lock (gate)
         {
             CheckUsable();
-            Dictionary<ushort, uint> registers;
+            EnsureInitialized();
             try
             {
-                registers = EnsureInitialized() ?? ReadIdentityRegisters();
-                if (!ReviewedChargeProtocol.SnapshotIdentityMatches(identity, registers))
-                    throw new InvalidDataException("Live EC project/version no longer matches the reviewed identity.");
+                var registers = new Dictionary<ushort, uint>();
+                foreach (var address in ReviewedChargeProtocol.SnapshotAddresses)
+                    registers.Add(address, ReadRaw(address));
+                var telemetry = InvokeBounded(() => backend!.ReadBatteryTelemetry(timeout));
+                ReviewedChargeProtocol.ValidateTelemetry(telemetry);
+                return new(UnspecifiedIdentity, new ReadOnlyDictionary<ushort, uint>(registers), telemetry.WindowsPercent,
+                    telemetry.PowerOnline, telemetry.Charging, telemetry.Discharging, telemetry.ChargeRateMw,
+                    telemetry.RemainingCapacity, DateTimeOffset.UtcNow, instanceName);
             }
-            catch
+            catch { initialized = false; throw; }
+        }
+    }
+
+    public void VerifySessionOrigin(ChargeEcSnapshot original)
+    {
+        lock (gate)
+        {
+            CheckUsable();
+            EnsureInitialized();
+            if (!string.Equals(instanceName, ReviewedChargeProtocol.SessionInstance(original), StringComparison.OrdinalIgnoreCase))
             {
+                originRejected = true;
                 initialized = false;
-                throw;
+                throw new InvalidDataException("The selected WMI route differs from this session; no control calls were issued.");
             }
-            foreach (var address in ReviewedChargeProtocol.SnapshotAddresses)
-                if (!registers.ContainsKey(address)) registers.Add(address, ReadRaw(address));
-            var telemetry = InvokeBounded(() => backend!.ReadBatteryTelemetry(timeout));
-            ReviewedChargeProtocol.ValidateTelemetry(telemetry);
-            return new(identity!, new ReadOnlyDictionary<ushort, uint>(registers), telemetry.WindowsPercent,
-                telemetry.PowerOnline, telemetry.Charging, telemetry.Discharging, telemetry.ChargeRateMw,
-                telemetry.RemainingCapacity, DateTimeOffset.UtcNow);
         }
     }
 
@@ -101,39 +113,17 @@ public sealed class ReviewedChargeTransport : IReviewedChargeTransport
         }
     }
 
-    private Dictionary<ushort, uint>? EnsureInitialized()
+    private void EnsureInitialized()
     {
-        if (initialized) return null;
+        if (initialized) return;
         backend ??= new SystemManagementReviewedChargeBackend();
-        identity = InvokeBounded(() => backend.ReadMachineIdentity(timeout));
-        if (!ReviewedChargeProtocol.ProfileMatches(identity))
-            throw new InvalidDataException("Machine/BIOS/EC identity is not the exact reviewed profile; no EC methods were called.");
         if (!InvokeBounded(backend.IsAdministrator))
             throw new UnauthorizedAccessException("Explicit administrator launch is required; automatic elevation is not attempted.");
         var signature = InvokeBounded(() => backend.ReadInterfaceSignature(timeout));
         if (!ReviewedChargeProtocol.WmiSignatureMatches(signature))
             throw new InvalidDataException("WMI GUID/method/signature does not match the reviewed protocol.");
         instanceName = ReviewedChargeProtocol.SelectReviewedInstance(InvokeBounded(() => backend.ReadInterfaceInstances(timeout)));
-        var registers = ReadIdentityRegisters();
-        if (!ReviewedChargeProtocol.SnapshotIdentityMatches(identity, registers))
-            throw new InvalidDataException("Live EC project/version bytes differ from the reviewed profile; no control registers were read.");
         initialized = true;
-        return registers;
-    }
-
-    private Dictionary<ushort, uint> ReadIdentityRegisters()
-    {
-        var first = ReadRaw(0x0740);
-        if (ReviewedChargeProtocol.DecodeByte(first) != 0x1A)
-            throw new InvalidDataException("EC project differs from the reviewed project.");
-        var second = ReadRaw(0x0740);
-        if (ReviewedChargeProtocol.DecodeByte(second) != 0x1A)
-            throw new InvalidDataException("Repeated EC project reads differ.");
-        return new()
-        {
-            [0x0740] = first, [0x0454] = ReadRaw(0x0454),
-            [0x0455] = ReadRaw(0x0455), [0x047D] = ReadRaw(0x047D)
-        };
     }
 
     private uint ReadRaw(ushort address) => InvokePacket(ReviewedChargeProtocol.EncodeRead(address));
@@ -176,6 +166,7 @@ public sealed class ReviewedChargeTransport : IReviewedChargeTransport
         ObjectDisposedException.ThrowIf(disposed, this);
         if (timedOut) throw new InvalidOperationException("Transport is quarantined after a deadline; no further calls are issued.");
         if (uncertainWrite) throw new InvalidOperationException("Transport is quarantined after an unconfirmed write; independent recovery is required.");
+        if (originRejected) throw new InvalidOperationException("Transport belongs to a different session route; no further calls are issued.");
     }
 
     public void Dispose()

@@ -165,7 +165,7 @@ public sealed class ReleasePresentationTests
         var project = XDocument.Load(Locate("src", "RevoHelper.App", "RevoHelper.App.csproj"));
         Assert.Equal("1.0.2", project.Descendants("Version").Single().Value);
         Assert.Equal("1.0.2.0", project.Descendants("AssemblyVersion").Single().Value);
-        Assert.Equal("1.0.2.4", project.Descendants("FileVersion").Single().Value);
+        Assert.Equal("1.0.2.5", project.Descendants("FileVersion").Single().Value);
         Assert.Equal("1.0.2+20261030", project.Descendants("InformationalVersion").Single().Value);
         Assert.Empty(project.Descendants("Content"));
     }

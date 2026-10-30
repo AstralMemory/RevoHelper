@@ -58,8 +58,11 @@ public sealed class Snapshot4AnnouncementTests
         Assert.Contains("V1.0.2", copy.Notice);
         Assert.DoesNotContain(language == "en-US" ? "has been publicly released" : "已正式发布", copy.Release);
         Assert.Contains("60% / 80% / 100%", copy.Notice);
-        Assert.Contains("N.1.18MRO24", copy.Notice);
-        Assert.Contains("1.25", copy.Notice);
+        Assert.Contains(language == "en-US" ? "MECHREVO YAOSHI in tests" : "机械革命耀世实测", copy.Notice);
+        Assert.Contains(language == "en-US" ? "not model" : "不按品牌或型号限制", copy.Notice);
+        Assert.Contains(language == "en-US" ? "original values" : "原值检查", copy.Notice);
+        Assert.DoesNotContain("MRO24", copy.Notice);
+        Assert.DoesNotContain("1.25", copy.Notice);
         Assert.Contains(language == "en-US" ? "off by default" : "默认关闭", copy.Notice);
         Assert.Contains(language == "en-US" ? "remain unverified" : "尚待验证", copy.Notice);
         foreach (var risk in language == "en-US" ? new[] { "platform state", "fans", "power", "keys" } : new[] { "平台状态", "风扇", "功耗", "按键" })

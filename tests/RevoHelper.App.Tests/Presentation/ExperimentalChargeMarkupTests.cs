@@ -33,7 +33,12 @@ public sealed class ExperimentalChargeMarkupTests
         var toggle = Named(document, "ExperimentalChargeToggle");
         Assert.Equal("{Binding Experiments.Charge.CanToggle}", (string?)toggle.Attribute("IsEnabled"));
         Assert.Equal("{Binding Experiments.Charge.IsEnabled, Mode=OneWay}", (string?)toggle.Attribute("IsChecked"));
-        Assert.Equal("{StaticResource SettingsToggleStyle}", (string?)toggle.Attribute("Style"));
+        var toggleStyle = Assert.Single(toggle.Descendants(), element => element.Name.LocalName == "Style");
+        Assert.Equal("{StaticResource SettingsToggleStyle}", (string?)toggleStyle.Attribute("BasedOn"));
+        var disabledTrigger = Assert.Single(toggleStyle.Descendants(), element => element.Name.LocalName == "Trigger" &&
+            (string?)element.Attribute("Property") == "IsEnabled" && (string?)element.Attribute("Value") == "False");
+        Assert.Contains(disabledTrigger.Elements(), element => element.Name.LocalName == "Setter" &&
+            (string?)element.Attribute("Property") == "Opacity" && (string?)element.Attribute("Value") == "0.45");
         Assert.Equal("ExperimentalChargeToggle_Click", (string?)toggle.Attribute("Click"));
         Assert.Null(toggle.Attribute("ToolTip"));
         Assert.Equal("{Binding Experiments.Charge.CanUseNativeCareModes}",
@@ -61,9 +66,15 @@ public sealed class ExperimentalChargeMarkupTests
         {
             Assert.NotEmpty(copy.ExperimentalChargeDefault);
             Assert.NotEmpty(copy.ExperimentalChargeConfirmQuestion);
-            Assert.Contains("MRO24", copy.ExperimentalChargeRisk);
-            Assert.Contains("1.25", copy.ExperimentalChargeRisk);
+            Assert.DoesNotContain("MRO24", copy.ExperimentalChargeRisk);
+            Assert.DoesNotContain("1.25", copy.ExperimentalChargeRisk);
         }
+        Assert.Contains("已在机械革命耀世实测", LocalizedUiCopy.Chinese.ExperimentalChargeRisk);
+        Assert.Contains("不按品牌或型号限制", LocalizedUiCopy.Chinese.ExperimentalChargeRisk);
+        Assert.Contains("接口和原值检查", LocalizedUiCopy.Chinese.ExperimentalChargeRisk);
+        Assert.Contains("Tested on MECHREVO YAOSHI", LocalizedUiCopy.English.ExperimentalChargeRisk);
+        Assert.Contains("no brand or model restriction", LocalizedUiCopy.English.ExperimentalChargeRisk);
+        Assert.Contains("interface and original-value checks", LocalizedUiCopy.English.ExperimentalChargeRisk);
         foreach (var word in new[] { "风扇", "功耗", "按键", "自动保存", "最小化", "隐藏到托盘继续", "拔电", "睡眠", "真正退出", "不能保证" })
             Assert.Contains(word, LocalizedUiCopy.Chinese.ExperimentalChargeRisk);
         foreach (var word in new[] { "fans", "power", "keys", "automatically save", "Minimizing", "hiding to the tray keeps", "Unplugging", "sleeping", "Actual exit", "not all side effects" })
@@ -97,7 +108,7 @@ public sealed class ExperimentalChargeMarkupTests
         {
             "默认关闭；仅手动启用。本功能会覆盖平台状态。",
             "发现未确认恢复的实验会话。请先使用恢复按钮，不自动启用。",
-            "正在启动独立监护并检查本机固件。", "正在检查本机固件与原值；尚未启用。",
+            "正在启动独立监护并检查控制接口。", "正在检查控制接口与原值；尚未确认生效。",
             "正在停止实验性限充并恢复原值。", "正在核对旧会话并恢复原值。",
             "没有需要恢复的实验会话；保持关闭。", "实验未启用，原值未改动。",
             "实验性限充运行中：已达上限，当前未充电。", "实验性限充运行中：低于上限，正在充电。",
@@ -114,8 +125,10 @@ public sealed class ExperimentalChargeMarkupTests
             Assert.DoesNotContain(english, character => character is >= '\u4e00' and <= '\u9fff');
             Assert.Equal(message, UiTextCatalog.Translate(message, "zh-CN"));
         }
-        Assert.Equal("Enabling experimental charge limiting failed: Only this machine's verified MRO24 / EC 1.25 firmware is supported.",
-            UiTextCatalog.Translate("启用实验性限充失败：仅支持已验证的MRO24 / EC1.25本机固件。", "en-US"));
+        Assert.Equal("Applying charge limiting; effectiveness has not been confirmed.",
+            UiTextCatalog.Translate("正在应用限充，尚未确认生效。", "en-US"));
+        Assert.Equal("Enabling experimental charge limiting failed: unknown native detail",
+            UiTextCatalog.Translate("启用实验性限充失败：unknown native detail", "en-US"));
     }
 
     [Fact]
@@ -124,6 +137,7 @@ public sealed class ExperimentalChargeMarkupTests
         foreach (var message in new[]
         {
             "限充未连接；默认关闭。",
+            "正在应用限充，尚未确认生效。",
             "已开启：100% 不限制，按原生策略充电；未保持平台覆盖。",
             "限充已关闭；100% 透传模式没有平台覆盖需要恢复。",
             "正在停止限充并恢复原值。", "恢复未确认；请先使用恢复按钮，不继续启用或换档。",

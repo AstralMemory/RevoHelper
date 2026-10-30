@@ -22,13 +22,27 @@ public sealed class ReviewedChargeTransportTests
         Assert.Empty(backend.Calls);
     }
 
-    [Fact]
-    public void WrongSystemIdentityStopsBeforeWmiMetadataOrEcMethods()
+    [Theory]
+    [InlineData("AURORA X Series", "N.1.18MRO24", 1, 25)]
+    [InlineData("YAOSHI Series", "N.1.20OTHER", 1, 25)]
+    [InlineData("WU JIE Series", "OTHER-BIOS", 2, 99)]
+    public void DifferentModelBiosAndEcNumbersDoNotRejectAnOtherwiseValidProtocolSnapshot(
+        string model, string biosVersion, int ecMajor, int ecMinor)
     {
-        var backend = new FakeBackend { Identity = ReviewedChargeProtocolTests.ReviewedIdentity with { EcMinor = 26 } };
+        var backend = new FakeBackend
+        {
+            Identity = new("MECHREVO", model, biosVersion, ecMajor, ecMinor)
+        };
         using var transport = Create(backend);
-        Assert.Throws<InvalidDataException>(() => transport.ReadSnapshot());
-        Assert.Equal(["identity"], backend.Calls);
+
+        var snapshot = transport.ReadSnapshot();
+
+        Assert.Equal((byte)7, snapshot.Byte(0x07C3));
+        Assert.Equal((byte)0, snapshot.Byte(0x07B9));
+        Assert.True(snapshot.PowerOnline);
+        Assert.Equal(75, snapshot.WindowsPercent);
+        Assert.Equal(0, backend.WriteCount);
+        Assert.DoesNotContain("identity", backend.Calls);
     }
 
     [Fact]
@@ -36,7 +50,7 @@ public sealed class ReviewedChargeTransportTests
     {
         var backend = new FakeBackend { Administrator = false }; using var transport = Create(backend);
         Assert.Throws<UnauthorizedAccessException>(() => transport.ReadSnapshot());
-        Assert.Equal(["identity", "administrator"], backend.Calls);
+        Assert.Equal(["administrator"], backend.Calls);
     }
 
     [Fact]
@@ -45,60 +59,69 @@ public sealed class ReviewedChargeTransportTests
         var backend = new FakeBackend(); backend.Signature = backend.Signature with { MethodId = 5 };
         using var transport = Create(backend);
         Assert.Throws<InvalidDataException>(() => transport.ReadSnapshot());
-        Assert.Equal(["identity", "administrator", "signature"], backend.Calls);
+        Assert.Equal(["administrator", "signature"], backend.Calls);
     }
 
     [Fact]
     public void AmbiguousOrInactiveInstancesAreNeverProbed()
     {
-        var backend = new FakeBackend(); backend.Instances = backend.Instances[..9];
+        var backend = new FakeBackend();
+        backend.Instances = [new(@"ACPI\PNP0C14\1_0", true), new(@"ACPI\PNP0C14\2_0", true)];
         using var transport = Create(backend);
         Assert.Throws<InvalidDataException>(() => transport.ReadSnapshot());
         Assert.Empty(backend.Packets);
     }
 
     [Fact]
-    public void InitialSnapshotConfirmsProjectTwiceThenVersionBeforeOtherRegisters()
+    public void InitialSnapshotReadsOnlyFixedControlsWithoutIdentityOrVersionProbes()
     {
         var backend = new FakeBackend(); var waits = new List<TimeSpan>();
         using var transport = new ReviewedChargeTransport(backend, waits.Add);
         var snapshot = transport.ReadSnapshot();
-        Assert.Equal(new ushort[] { 0x0740, 0x0740, 0x0454, 0x0455, 0x047D },
-            backend.Packets.Take(5).Select(packet => (ushort)packet).ToArray());
-        Assert.Equal(ReviewedChargeProtocol.SnapshotAddresses.Count + 1, backend.Packets.Count);
+        Assert.Equal(ReviewedChargeProtocol.SnapshotAddresses, backend.Packets.Select(packet => (ushort)packet).ToArray());
+        Assert.Equal(10, backend.Packets.Count);
         Assert.All(backend.Packets, packet => Assert.Equal(0x0100UL, packet >> 32));
         Assert.All(backend.InstanceNames, instance => Assert.Equal(@"ACPI\PNP0C14\1_0", instance));
         Assert.All(backend.Timeouts, timeout => Assert.Equal(TimeSpan.FromSeconds(3), timeout));
         Assert.All(waits, wait => Assert.Equal(TimeSpan.FromMilliseconds(10), wait));
         Assert.Equal(backend.Packets.Count, waits.Count);
-        Assert.True(ReviewedChargeProtocol.SnapshotIdentityMatches(snapshot));
+        Assert.DoesNotContain("identity", backend.Calls);
+        Assert.Equal(@"ACPI\PNP0C14\1_0", snapshot.InterfaceInstanceName);
         Assert.Equal((byte)7, snapshot.Byte(0x07C3));
         Assert.Equal(75, snapshot.WindowsPercent);
         Assert.True(snapshot.PowerOnline);
         Assert.Equal(30000u, snapshot.ChargeRateMw);
     }
 
-    [Fact]
-    public void WrongProjectStopsImmediatelyAndWrongVersionStopsBeforeControlRegisters()
+    [Theory]
+    [InlineData(1)] [InlineData(9)] [InlineData(10)]
+    public void UniqueActiveLogicalZeroWorksWithDifferentInterfaceInstanceCounts(int count)
     {
-        var backend = new FakeBackend(); backend.Registers[0x0740] = 0x1B;
-        using (var transport = Create(backend))
-            Assert.Throws<InvalidDataException>(() => transport.ReadSnapshot());
-        Assert.Single(backend.Packets);
-        backend = new FakeBackend(); backend.Registers[0x0454] = 0x58;
-        using (var transport = Create(backend))
-            Assert.Throws<InvalidDataException>(() => transport.ReadSnapshot());
-        Assert.DoesNotContain(backend.Packets, packet => (ushort)packet == 0x07C3);
+        var backend = new FakeBackend
+        {
+            Instances = Enumerable.Range(0, count).Reverse()
+                .Select(i => new ChargeWmiInstance($@"ACPI\PNP0C14\1_{i}", true)).ToArray()
+        };
+        using var transport = Create(backend);
+        var snapshot = transport.ReadSnapshot();
+        Assert.Equal(@"ACPI\PNP0C14\1_0", snapshot.InterfaceInstanceName);
+        Assert.Equal(10, backend.Packets.Count);
+        Assert.Equal(0, backend.WriteCount);
     }
 
     [Fact]
-    public void UnstableProjectConfirmationStopsWithoutReadingVersions()
+    public void AlternativeLogicalZeroIsTheOnlyChannelUsedForSnapshotAndOwnedWrite()
     {
-        var backend = new FakeBackend(); var count = 0;
-        backend.OnRead = address => address == 0x0740 && ++count == 2 ? 0x1Bu : backend.Registers[address];
+        var backend = new FakeBackend
+        {
+            Instances = [new(@"ACPI\PNP0C14\1_0", false), new(@"ACPI\PNP0C14\2_0", true)]
+        };
         using var transport = Create(backend);
-        Assert.Throws<InvalidDataException>(() => transport.ReadSnapshot());
-        Assert.Equal(2, backend.Packets.Count);
+        var snapshot = transport.ReadSnapshot();
+        transport.WriteOwnedByte(0x07C3, 7, 4);
+        Assert.Equal(@"ACPI\PNP0C14\2_0", snapshot.InterfaceInstanceName);
+        Assert.All(backend.InstanceNames, name => Assert.Equal(@"ACPI\PNP0C14\2_0", name));
+        Assert.Equal(1, backend.WriteCount);
     }
 
     [Theory]
@@ -198,14 +221,72 @@ public sealed class ReviewedChargeTransportTests
     }
 
     [Fact]
-    public void SubsequentSnapshotIdentityFailureInvalidatesWriteInitialization()
+    public void SubsequentSnapshotDoesNotReintroduceIdentityOrProjectVersionChecks()
     {
         var backend = new FakeBackend(); using var transport = Create(backend);
-        transport.ReadSnapshot(); backend.Registers[0x0454] = 0x58;
-        Assert.Throws<InvalidDataException>(() => transport.ReadSnapshot());
-        var count = backend.Calls.Count;
+        transport.ReadSnapshot();
+        backend.Identity = new("OTHER", "OTHER Series", "OTHER-BIOS", 0, 0);
+        backend.Registers[0x0740] = 0xFEFEFEFE;
+        backend.Registers[0x0454] = 0xFEFEFEFE;
+        backend.Registers[0x0455] = 0xFEFEFEFE;
+        backend.Registers[0x047D] = 0xFEFEFEFE;
+        var snapshot = transport.ReadSnapshot();
+        Assert.Equal(20, backend.Packets.Count);
+        Assert.Equal((byte)7, snapshot.Byte(0x07C3));
+        Assert.DoesNotContain("identity", backend.Calls);
+        Assert.All(backend.Packets, packet => Assert.Contains((ushort)packet, ReviewedChargeProtocol.SnapshotAddresses));
+    }
+
+    [Theory]
+    [InlineData(null, "ACPI\\PNP0C14\\1_0")]
+    [InlineData("ACPI\\PNP0C14\\2_0", "ACPI\\PNP0C14\\2_0")]
+    public void RecoveryOriginBindsOnlyTheInterfaceWithoutReadingFullSnapshotOrBatteryTelemetry(
+        string? originalRoute, string currentRoute)
+    {
+        var backend = new FakeBackend
+        {
+            Instances = [new(currentRoute, true)],
+            TelemetryError = new InvalidOperationException("Recovery must not depend on battery telemetry")
+        };
+        using var transport = Create(backend);
+        var original = Origin(originalRoute);
+
+        transport.VerifySessionOrigin(original);
+
+        Assert.Empty(backend.Packets);
+        Assert.DoesNotContain("identity", backend.Calls);
+        Assert.DoesNotContain("telemetry", backend.Calls);
+        transport.WriteOwnedByte(0x07C3, 7, 4);
+        Assert.Equal(1, backend.WriteCount);
+        Assert.All(backend.InstanceNames, name => Assert.Equal(currentRoute, name));
+    }
+
+    [Theory]
+    [InlineData(false)] [InlineData(true)]
+    public void RecoveryRouteMismatchInvalidatesEvenAnAlreadyInitializedTransportAndNeverWrites(bool initializeFirst)
+    {
+        var backend = new FakeBackend { Instances = [new(@"ACPI\PNP0C14\2_0", true)] };
+        using var transport = Create(backend);
+        if (initializeFirst) transport.ReadSnapshot();
+        var packets = backend.Packets.Count;
+
+        Assert.Throws<InvalidDataException>(() => transport.VerifySessionOrigin(Origin(null)));
+        Assert.Equal(packets, backend.Packets.Count);
+        var calls = backend.Calls.Count;
         Assert.Throws<InvalidOperationException>(() => transport.WriteOwnedByte(0x07C3, 7, 4));
-        Assert.Equal(count, backend.Calls.Count); Assert.Equal(0, backend.WriteCount);
+        Assert.Equal(calls, backend.Calls.Count);
+        Assert.Equal(0, backend.WriteCount);
+    }
+
+    [Fact]
+    public void RecoverySignatureMismatchDoesNotReadControlsOrAllowAWrite()
+    {
+        var backend = new FakeBackend(); backend.Signature = backend.Signature with { OutputName = "ReturnValue" };
+        using var transport = Create(backend);
+        Assert.Throws<InvalidDataException>(() => transport.VerifySessionOrigin(Origin(null)));
+        Assert.Empty(backend.Packets);
+        Assert.Throws<InvalidOperationException>(() => transport.WriteOwnedByte(0x07C3, 7, 4));
+        Assert.Equal(0, backend.WriteCount);
     }
 
     [Fact]
@@ -213,6 +294,7 @@ public sealed class ReviewedChargeTransportTests
     {
         var backend = new FakeBackend(); var transport = Create(backend); transport.Dispose();
         Assert.Throws<ObjectDisposedException>(() => transport.ReadSnapshot());
+        Assert.Throws<ObjectDisposedException>(() => transport.VerifySessionOrigin(Origin(null)));
         Assert.Throws<ObjectDisposedException>(() => transport.ReadByte(0x07C3));
         Assert.Throws<ObjectDisposedException>(() => transport.WriteOwnedByte(0x07C3, 7, 4));
         Assert.Equal(["dispose"], backend.Calls);
@@ -232,7 +314,7 @@ public sealed class ReviewedChargeTransportTests
     {
         var backend = new FakeBackend();
         using var entered = new ManualResetEventSlim(); using var release = new ManualResetEventSlim();
-        backend.IdentityDelay = () => { entered.Set(); release.Wait(TimeSpan.FromSeconds(2)); };
+        backend.SignatureDelay = () => { entered.Set(); release.Wait(TimeSpan.FromSeconds(2)); };
         using var transport = new ReviewedChargeTransport(backend, _ => { }, TimeSpan.FromMilliseconds(50));
         try
         {
@@ -248,6 +330,10 @@ public sealed class ReviewedChargeTransportTests
     }
 
     private static ReviewedChargeTransport Create(FakeBackend backend) => new(backend, _ => { });
+
+    private static ChargeEcSnapshot Origin(string? route) => new(
+        new("OTHER", "OTHER Series", "OTHER-BIOS", 9, 99), new Dictionary<ushort, uint>(),
+        null, false, false, false, 0, null, DateTimeOffset.UnixEpoch, InterfaceInstanceName: route);
 
     private sealed class FakeBackend : IReviewedChargeBackend
     {
@@ -269,14 +355,15 @@ public sealed class ReviewedChargeTransportTests
         public readonly List<TimeSpan> Timeouts = [];
         public Func<ushort, uint?>? OnRead;
         public Action<ushort>? AfterWrite;
-        public Action? IdentityDelay;
+        public Action? SignatureDelay;
+        public Exception? TelemetryError;
         public uint? WriteResponse = 0;
         public int WriteCount;
         public ChargeMachineIdentity ReadMachineIdentity(TimeSpan timeout)
-        { Calls.Add("identity"); Timeouts.Add(timeout); IdentityDelay?.Invoke(); return Identity; }
+        { Calls.Add("identity"); throw new InvalidOperationException($"Machine identity must not be queried: {Identity}"); }
         public bool IsAdministrator() { Calls.Add("administrator"); return Administrator; }
         public ChargeWmiSignature ReadInterfaceSignature(TimeSpan timeout)
-        { Calls.Add("signature"); Timeouts.Add(timeout); return Signature; }
+        { Calls.Add("signature"); Timeouts.Add(timeout); SignatureDelay?.Invoke(); return Signature; }
         public IReadOnlyList<ChargeWmiInstance> ReadInterfaceInstances(TimeSpan timeout)
         { Calls.Add("instances"); Timeouts.Add(timeout); return Instances; }
         public uint? InvokeGetSetULong(string instanceName, ulong packet, TimeSpan timeout)
@@ -287,7 +374,7 @@ public sealed class ReviewedChargeTransportTests
             WriteCount++; Registers[address] = (byte)(packet >> 16); AfterWrite?.Invoke(address); return WriteResponse;
         }
         public ReviewedChargeTelemetry ReadBatteryTelemetry(TimeSpan timeout)
-        { Calls.Add("telemetry"); Timeouts.Add(timeout); return Telemetry; }
+        { Calls.Add("telemetry"); Timeouts.Add(timeout); if (TelemetryError is not null) throw TelemetryError; return Telemetry; }
         public void Dispose() { Calls.Add("dispose"); }
     }
 }

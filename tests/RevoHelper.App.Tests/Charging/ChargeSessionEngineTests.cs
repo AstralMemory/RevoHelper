@@ -23,12 +23,11 @@ public sealed class ChargeSessionEngineTests
     }
 
     [Theory]
-    [InlineData(0x0740, 0x1B)] [InlineData(0x0454, 0x58)] [InlineData(0x0455, 1)]
-    [InlineData(0x047D, 1)] [InlineData(0x07C3, 4)] [InlineData(0x0770, 4)]
+    [InlineData(0x07C3, 4)] [InlineData(0x0770, 4)]
     [InlineData(0x07B9, 80)] [InlineData(0x07B9, 0x100)] [InlineData(0x07D0, 60)]
     [InlineData(0x9164, 80)] [InlineData(0x07A6, 0x18)] [InlineData(0x0742, 0x26)]
     [InlineData(0x0490, 0x0E)] [InlineData(0x0490, 0x0B)]
-    public void InitialStateNeverTakesOverAnExistingSettingOrDifferentFirmware(int address, uint value)
+    public void InitialStateNeverTakesOverAnExistingControlSetting(int address, uint value)
     {
         var fixture = new Fixture(); fixture.Registers[(ushort)address] = value;
         Assert.Throws<InvalidOperationException>(() => ChargeSessionEngine.ValidateInitial(fixture.Snapshot()));
@@ -36,13 +35,60 @@ public sealed class ChargeSessionEngineTests
     }
 
     [Fact]
-    public void InitialWrongMachineOrDisconnectedPowerIsRejected()
+    public void InitialDifferentSystemLabelsAreAcceptedButDisconnectedPowerIsRejected()
     {
         var fixture = new Fixture();
-        Assert.Throws<InvalidOperationException>(() => ChargeSessionEngine.ValidateInitial(
-            fixture.Snapshot() with { Identity = fixture.Identity with { EcMinor = 26 } }));
+        ChargeSessionEngine.ValidateInitial(fixture.Snapshot() with
+        {
+            Identity = new("MECHREVO", "AURORA X Series", "OTHER-BIOS", 2, 99)
+        });
+        Assert.Empty(fixture.Writes);
         fixture.Online = false;
         Assert.Throws<InvalidOperationException>(() => ChargeSessionEngine.ValidateInitial(fixture.Snapshot()));
+    }
+
+    [Fact]
+    public void DifferentLaptopCanApplyAndRestoreWithoutAnyFirmwareIdentityRegisters()
+    {
+        var fixture = new Fixture { Identity = new("MECHREVO", "WU JIE Series", "OTHER-BIOS", 2, 99) };
+        foreach (var address in new ushort[] { 0x0740, 0x0454, 0x0455, 0x047D }) fixture.Registers.Remove(address);
+        fixture.AfterWait = () => fixture.Stop = true;
+        var result = fixture.Run(60);
+        Assert.True(result.CriticalRestored);
+        Assert.Equal(new byte[] { 60, 4, 0, 7 }, fixture.Writes.Select(write =>
+            write.Address == 0x07B9 ? (byte)(write.Target & 0x7F) : write.Target));
+    }
+
+    [Fact]
+    public void AChangedInterfaceRouteBeforeRunIsRejectedBeforeAnyWrite()
+    {
+        var fixture = new Fixture(); var original = fixture.Snapshot();
+        fixture.InterfaceInstanceName = @"ACPI\PNP0C14\2_0";
+        Assert.Throws<InvalidDataException>(() => fixture.Run(original: original));
+        Assert.Empty(fixture.Writes);
+    }
+
+    [Fact]
+    public void RecoveryDoesNotWriteToADifferentInterfaceRoute()
+    {
+        var fixture = new Fixture(); var original = fixture.Snapshot(); fixture.MakeActive(80);
+        fixture.InterfaceInstanceName = @"ACPI\PNP0C14\2_0";
+        var result = fixture.Recover(original);
+        Assert.False(result.CriticalRestored);
+        Assert.Empty(fixture.Writes);
+        Assert.Equal(4u, fixture.Registers[0x07C3]);
+        Assert.Equal(80u, fixture.Registers[0x07B9]);
+    }
+
+    [Theory]
+    [InlineData(null, @"ACPI\PNP0C14\1_0")]
+    [InlineData(@"ACPI\PNP0C14\2_0", @"ACPI\PNP0C14\2_0")]
+    public void RecoverySupportsLegacyDefaultAndExplicitAlternativeRoutes(string? savedRoute, string liveRoute)
+    {
+        var fixture = new Fixture { InterfaceInstanceName = liveRoute };
+        var original = fixture.Snapshot() with { InterfaceInstanceName = savedRoute }; fixture.MakeActive(80);
+        var result = fixture.Recover(original);
+        Assert.True(result.CriticalRestored);
     }
 
     [Theory]
@@ -301,7 +347,8 @@ public sealed class ChargeSessionEngineTests
 
     private sealed class Fixture
     {
-        public readonly ChargeMachineIdentity Identity = new("MECHREVO", "YAOSHI Series", "N.1.18MRO24", 1, 25);
+        public ChargeMachineIdentity Identity = new("MECHREVO", "YAOSHI Series", "N.1.18MRO24", 1, 25);
+        public string InterfaceInstanceName = ReviewedChargeProtocol.LogicalZeroInstance;
         public readonly Dictionary<ushort, uint> Registers = new()
         {
             [0x0740] = 0x011A, [0x0454] = 0x59, [0x0455] = 0, [0x047D] = 0,
@@ -331,7 +378,7 @@ public sealed class ChargeSessionEngineTests
         public ChargeSessionEngine Engine => new(CreateTransport);
 
         public ChargeEcSnapshot Snapshot() => new(Identity, new Dictionary<ushort, uint>(Registers), Soc,
-            Online, Charging, false, Rate, 90000, DateTimeOffset.UtcNow);
+            Online, Charging, false, Rate, 90000, DateTimeOffset.UtcNow, InterfaceInstanceName);
 
         public ChargeRecoveryResult Run(int limit = 80, ChargeEcSnapshot? original = null) =>
             Engine.Run(original ?? Snapshot(), limit, () => Stop, CheckOwners,
@@ -384,6 +431,12 @@ public sealed class ChargeSessionEngineTests
         {
             private bool disposed;
             private bool quarantined;
+            public void VerifySessionOrigin(ChargeEcSnapshot original)
+            {
+                Check();
+                if (!string.Equals(owner.InterfaceInstanceName, ReviewedChargeProtocol.SessionInstance(original), StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("Simulated session route changed.");
+            }
             public ChargeEcSnapshot ReadSnapshot() { Check(); return owner.Snapshot(); }
             public uint ReadByte(ushort address)
             {

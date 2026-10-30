@@ -2408,9 +2408,19 @@
                                                 <TextBlock Text="?" Foreground="#718095" FontSize="{presentation:UiFont 8}" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                             </Border>
                                         </StackPanel>
-                                        <CheckBox x:Name="ExperimentalChargeToggle" Grid.Column="1" Style="{StaticResource SettingsToggleStyle}"
+                                        <CheckBox x:Name="ExperimentalChargeToggle" Grid.Column="1"
                                                   IsChecked="{Binding Experiments.Charge.IsEnabled, Mode=OneWay}" IsEnabled="{Binding Experiments.Charge.CanToggle}"
-                                                  Click="ExperimentalChargeToggle_Click" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                                  Click="ExperimentalChargeToggle_Click" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                            <CheckBox.Style>
+                                                <Style TargetType="CheckBox" BasedOn="{StaticResource SettingsToggleStyle}">
+                                                    <Style.Triggers>
+                                                        <Trigger Property="IsEnabled" Value="False">
+                                                            <Setter Property="Opacity" Value="0.45" />
+                                                        </Trigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </CheckBox.Style>
+                                        </CheckBox>
                                     </Grid>
                                     <TextBlock Text="{Binding UiCopy.ExperimentalChargeDefault}" Foreground="#8B6500"
                                                FontSize="{presentation:UiFont 8}" TextWrapping="Wrap" Margin="0,3,0,0" />

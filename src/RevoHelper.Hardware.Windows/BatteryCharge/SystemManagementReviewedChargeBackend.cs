@@ -10,16 +10,8 @@ namespace RevoHelper.Hardware.Windows.BatteryCharge;
 internal sealed class SystemManagementReviewedChargeBackend : IReviewedChargeBackend
 {
     private string? logicalZeroPath;
+    private string? selectedInstanceName;
     private bool disposed;
-
-    public ChargeMachineIdentity ReadMachineIdentity(TimeSpan timeout)
-    {
-        var system = RequireOne(Query(@"root\cimv2", "SELECT Manufacturer,Model FROM Win32_ComputerSystem", timeout), "computer system");
-        var bios = RequireOne(Query(@"root\cimv2",
-            "SELECT SMBIOSBIOSVersion,EmbeddedControllerMajorVersion,EmbeddedControllerMinorVersion FROM Win32_BIOS", timeout), "BIOS");
-        return new(RequireString(system, "Manufacturer"), RequireString(system, "Model"), RequireString(bios, "SMBIOSBIOSVersion"),
-            checked((int)RequireUInt(bios, "EmbeddedControllerMajorVersion")), checked((int)RequireUInt(bios, "EmbeddedControllerMinorVersion")));
-    }
 
     public bool IsAdministrator()
     {
@@ -50,19 +42,20 @@ internal sealed class SystemManagementReviewedChargeBackend : IReviewedChargeBac
     {
         var rows = Query(@"root\wmi", "SELECT * FROM AcpiTest_MULong", timeout);
         var instances = rows.Select(row => new ChargeWmiInstance(RequireString(row, "InstanceName"), RequireBool(row, "Active"))).ToArray();
-        ReviewedChargeProtocol.SelectReviewedInstance(instances);
+        var selected = ReviewedChargeProtocol.SelectReviewedInstance(instances);
         var zero = rows.Single(row => string.Equals(RequireString(row, "InstanceName"),
-            ReviewedChargeProtocol.LogicalZeroInstance, StringComparison.OrdinalIgnoreCase));
+            selected, StringComparison.OrdinalIgnoreCase));
         logicalZeroPath = RequireString(zero, "__RELPATH");
         if (new ManagementPath(logicalZeroPath).ClassName != "AcpiTest_MULong")
             throw new InvalidDataException("WMI instance path does not address the reviewed class.");
+        selectedInstanceName = selected;
         return instances;
     }
 
     public uint? InvokeGetSetULong(string instanceName, ulong packet, TimeSpan timeout)
     {
         CheckDisposed();
-        if (instanceName != ReviewedChargeProtocol.LogicalZeroInstance || logicalZeroPath is null)
+        if (!string.Equals(instanceName, selectedInstanceName, StringComparison.OrdinalIgnoreCase) || logicalZeroPath is null)
             throw new InvalidOperationException("Only the previously reviewed logical-zero instance may be invoked.");
         using var target = new ManagementObject(new ManagementScope(@"root\wmi"), new ManagementPath(logicalZeroPath),
             new ObjectGetOptions { Timeout = timeout });
@@ -146,7 +139,7 @@ internal sealed class SystemManagementReviewedChargeBackend : IReviewedChargeBac
         ?? throw new InvalidDataException($"Required WMI qualifier {name} is missing.");
 
     private void CheckDisposed() => ObjectDisposedException.ThrowIf(disposed, this);
-    public void Dispose() { disposed = true; logicalZeroPath = null; }
+    public void Dispose() { disposed = true; logicalZeroPath = null; selectedInstanceName = null; }
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

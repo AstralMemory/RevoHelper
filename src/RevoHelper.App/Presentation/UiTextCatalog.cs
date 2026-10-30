@@ -118,6 +118,7 @@ public static class UiTextCatalog
 程序退出，限充已关闭并请求恢复原值。	The app is exiting; charge limiting is off and restoration of the original values was requested.
 供电状态处理未完成，停止限充并保留恢复记录。	Power-state handling did not complete; stop charge limiting and retain the recovery record.
 限充未连接；默认关闭。	Charge limiting is not connected; off by default.
+正在应用限充，尚未确认生效。	Applying charge limiting; effectiveness has not been confirmed.
 真正退出程序，独立监护继续恢复限充原值。	Actually exiting the app; the independent guardian continues restoring the original charge-limit state.
 已开启：100% 不限制，按原生策略充电；未保持平台覆盖。	Enabled: 100% sets no charge limit and follows the native charging policy; no platform override is held.
 限充已关闭；100% 透传模式没有平台覆盖需要恢复。	Charge limiting is off; 100% pass-through has no platform override to restore.
@@ -138,8 +139,8 @@ public static class UiTextCatalog
 实验性限充未连接；默认关闭。	Experimental charge limiting is not connected; off by default.
 默认关闭；仅手动启用。本功能会覆盖平台状态。	Off by default; enable manually only. This feature overrides the platform state.
 发现未确认恢复的实验会话。请先使用恢复按钮，不自动启用。	An experimental session has unconfirmed restoration. Use Restore first; it will not be enabled automatically.
-正在启动独立监护并检查本机固件。	Starting the independent guardian and checking this machine's firmware.
-正在检查本机固件与原值；尚未启用。	Checking this machine's firmware and original values; not enabled yet.
+正在启动独立监护并检查控制接口。	Starting the independent guardian and checking the control interface.
+正在检查控制接口与原值；尚未确认生效。	Checking the control interface and original values; effectiveness has not been confirmed.
 正在停止实验性限充并恢复原值。	Stopping experimental charge limiting and restoring the original values.
 正在核对旧会话并恢复原值。	Checking the previous session and restoring the original values.
 没有需要恢复的实验会话；保持关闭。	No experimental session needs restoration; remaining off.
@@ -158,7 +159,6 @@ public static class UiTextCatalog
 独立监护未启动，未确认启用。	The independent guardian did not start; enabling is not confirmed.
 监护启动超时，已请求停止；请检查恢复状态。	The guardian start timed out and stop was requested; check restoration status.
 原监护或工作进程仍在恢复，不并行写入。	The original guardian or worker is still restoring; no parallel writes will be made.
-仅支持已验证的MRO24 / EC1.25本机固件。	Only this machine's verified MRO24 / EC 1.25 firmware is supported.
 请先恢复原生工作站养护档及原始阈值；不强制接管。	Restore the native workstation care profile and original threshold first; they will not be forcibly taken over.
 请连接电源并确认电池状态有效后，再手动启用。	Connect AC and confirm a valid battery state before enabling manually.
 平台或阈值被外部改变；停止实验，不反复覆盖。	The platform or threshold changed externally; stop the experiment without repeatedly overwriting it.

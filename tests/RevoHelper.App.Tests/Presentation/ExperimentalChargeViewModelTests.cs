@@ -87,6 +87,53 @@ public sealed class ExperimentalChargeViewModelTests
         Assert.Equal(80, backend.Status.LimitPercent);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task EnablingImmediatelyShowsAnOnButDisabledSwitchWithoutClaimingHardwareSuccess(bool fail)
+    {
+        var backend = new FakeController
+        {
+            EnableHold = new(TaskCreationOptions.RunContinuationsAsynchronously),
+            EnableError = fail ? new InvalidOperationException("apply failed") : null
+        };
+        using var vm = new ExperimentalChargeViewModel(backend);
+        var enabling = vm.SetEnabledAsync(true);
+        try
+        {
+            // These states must be observable immediately, before the backend confirms anything.
+            Assert.True(vm.IsEnabled);
+            Assert.True(vm.IsBusy);
+            Assert.False(vm.CanToggle);
+            Assert.False(vm.CanChooseLimit);
+            Assert.False(backend.Status.Enabled);
+            Assert.Contains("正在应用", vm.StatusText);
+            Assert.Contains("尚未确认生效", vm.StatusText);
+        }
+        finally { backend.EnableHold.TrySetResult(); await enabling; }
+        Assert.False(vm.IsBusy);
+        Assert.Equal(!fail, vm.IsEnabled);
+        Assert.Equal(!fail, backend.Status.Enabled);
+        if (fail)
+        {
+            Assert.True(vm.RecoveryPending);
+            Assert.Contains("apply failed", vm.StatusText);
+            Assert.False(vm.CanToggle);
+        }
+    }
+
+    [Fact]
+    public async Task AFailedApplyKeepsTheUiOffEvenIfTheBackendNeedsRestoration()
+    {
+        var backend = new FakeController { EnableError = new InvalidOperationException("partial apply"), EnableErrorLeavesEnabled = true };
+        using var vm = new ExperimentalChargeViewModel(backend);
+        await vm.SetEnabledAsync(true);
+        Assert.False(vm.IsEnabled);
+        Assert.True(vm.RecoveryPending);
+        Assert.False(vm.CanUseNativeCareModes);
+        Assert.True(backend.Status.Enabled); // The UI must not mutate or invent backend state.
+    }
+
     [Fact]
     public async Task BackendFailureIsShownAndRequiresExplicitRecovery()
     {
@@ -111,7 +158,8 @@ public sealed class ExperimentalChargeViewModelTests
         using var vm = new ExperimentalChargeViewModel(backend);
         await vm.EnableAsync();
         await vm.StopAsync();
-        Assert.True(vm.IsEnabled);
+        Assert.False(vm.IsEnabled);
+        Assert.True(backend.Status.Enabled);
         Assert.True(vm.RecoveryPending);
         Assert.Contains("无法恢复", vm.StatusText);
         Assert.False(vm.CanUseNativeCareModes);
@@ -317,7 +365,8 @@ public sealed class ExperimentalChargeViewModelTests
         Assert.Equal(0, backend.Stops);
         Assert.Equal(0, backend.StopRequests);
         Assert.Equal(0, dynamic.Preparations);
-        Assert.True(vm.Charge.IsEnabled);
+        Assert.Equal(!recoveryPending, vm.Charge.IsEnabled);
+        Assert.True(backend.Status.Enabled);
         Assert.Equal(recoveryPending, vm.Charge.RecoveryPending);
     }
 
@@ -426,6 +475,7 @@ public sealed class ExperimentalChargeViewModelTests
         public bool StopLeavesRecoveryPending;
         public readonly List<string> Calls = [];
         public Exception? EnableError;
+        public bool EnableErrorLeavesEnabled;
         public Exception? StopError;
         public TaskCompletionSource? EnableHold;
         public TaskCompletionSource? StopHold;
@@ -438,7 +488,11 @@ public sealed class ExperimentalChargeViewModelTests
             Calls.Add("enable:" + limitPercent);
             EnableEntered.TrySetResult();
             if (EnableHold is not null) await EnableHold.Task;
-            if (EnableError is not null) throw EnableError;
+            if (EnableError is not null)
+            {
+                if (EnableErrorLeavesEnabled) Set(new(Enabled: true, LimitPercent: limitPercent));
+                throw EnableError;
+            }
             Set(new(Enabled: true, LimitPercent: limitPercent, Message: "正在限充"));
         }
         public async Task StopAsync(string reason, CancellationToken token = default)

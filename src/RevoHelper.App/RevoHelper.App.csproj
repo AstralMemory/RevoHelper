@@ -18,8 +18,9 @@
     <DebugSymbols>false</DebugSymbols>
     <Version>1.0.2</Version>
     <AssemblyVersion>1.0.2.0</AssemblyVersion>
-    <FileVersion>1.0.2.4</FileVersion>
+    <FileVersion>1.0.2.5</FileVersion>
     <InformationalVersion>1.0.2+20261030</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>

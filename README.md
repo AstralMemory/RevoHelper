@@ -21,7 +21,7 @@
 - **性能监控横条**：通过可置顶的外置小横条显示 FPS，以及 CPU / GPU 的温度、使用率、功耗和频率；不向游戏或程序注入代码，也不限于在游戏中使用。
 - **显卡输出与屏幕设置**：优化显卡输出模式切换后的重启交互，并提供更多刷新率档位；具体选项取决于机型与屏幕支持情况。
 - **灯光与常用设置**：集中调整支持的键盘、灯带、LOGO 和水冷灯光，已开始制作面向自定义的设计（灯光这项还在开发）
-- **实验性充电上限**：在“电源”页底部手动开启，提供 60% / 80% / 100% 三档；100% 先解除已有实验限制，再按笔记本原生策略充电，关闭开关则完全退出本功能。仅对匹配的适配项开放。
+- **实验性充电上限**：在“电源”页底部手动开启，提供 60% / 80% / 100% 三档；100% 先解除已有实验限制，再按笔记本原生策略充电，关闭开关则完全退出本功能。不按型号预先拒绝，可手动尝试；不保证每台实际生效。
 - **水冷控制智能重连**：已连接设备意外断开后，最多保留 10 分钟的同设备重连机会，尝试间隔至少 3 秒。主动断开、更换设备或注水／重置会取消对应重连。
 - **更低的性能开销**：本机观察中，启动时内存占用峰值接近 200 MB，转入后台后约为 70 MB；实际占用随运行状态而变化。
 - **其他工具**：支持定时关机、动态节能（动态省电模式）等功能。
@@ -30,8 +30,8 @@
 
 - **并不与官方控制台冲突**：两边同时修改同一设置时，以电脑实际生效的结果为准。RevoHelper完全可以在退出官方控制台后继续使用。
 - **风扇曲线**：官方的预设通常无法调整风扇曲线，所以仅作参考；需要修改时请使用支持的自定义模式。
-- **电池保护与限充**：官方保护模式与“任意指定充电百分比上限”不是同一功能。实验性限充默认关闭，切换或应用可能需要 15–30 秒，不会主动将电池放电至目标值。最小化或隐藏到托盘时继续；拔电或睡眠时暂停并尝试恢复原值，接电或唤醒后仅在同一进程安全确认后继续。手动关闭、真正退出或健康／恢复异常不会自动重新启用。
-- **限充适配与副作用**：60% / 80% 目前仅在开发者的 MECHREVO YAOSHI Series（BIOS N.1.18MRO24、EC 1.25）验证有效，不能推广到全部机型与固件。该路径使用共享平台状态，可能连带影响风扇、功耗和按键，固件也可能自行保存设置；不能承诺所有副作用都可恢复。
+- **电池保护与限充**：官方保护模式与“任意指定充电百分比上限”不是同一功能。实验性限充默认关闭；点击开启后立即显示开启意图，处理期间控件灰显加载，不代表已经实际停充。切换或应用可能需要 15–30 秒，不会主动将电池放电至目标值。最小化或隐藏到托盘时继续；拔电或睡眠时暂停并尝试恢复原值，接电或唤醒后仅在同一进程安全确认后继续。手动关闭、真正退出或健康／恢复异常不会自动重新启用。
+- **限充适配与副作用**：耀世开发机已有 60% 停充、低于 80% 继续充电及恢复后复充的实测，不代表每台机器均有效。仍保留必要协议、原值、回读与恢复检查。该路径使用共享平台状态，可能连带影响风扇、功耗和按键，固件也可能自行保存设置；不能承诺零风险或所有副作用都可恢复。
 - **显卡输出切换**：需要重启电脑，重启前请先保存工作；RevoHelper 不会强制或突然重启电脑。
 - **参数调整**：功耗与频率受机型限制，超频可能导致不稳定。手动 CPU 频率限制在程序运行期间生效，正常退出时恢复。
 - **水冷启动组件**：BootWater 已内置；只有需要登录前连接水冷并主动点击“安装／修复”时，才会在系统目录部署辅助组件，用于开机后自动连接水冷设备。
@@ -96,7 +96,7 @@ The following images preview the application interface (The UI text in the image
 - **Performance monitoring bar:** Display FPS and CPU / GPU temperatures, utilization, power and clock speeds in an external bar that can stay on top. It does not inject code into games or applications and is not limited to use in games.
 - **GPU output and display settings:** Improved restart handling after switching GPU output modes, with more refresh-rate options. Available options depend on the laptop and display.
 - **Lighting and common settings:** Adjust supported keyboard, light-bar, logo and liquid-cooler lighting in one place, without being limited to the official default presets.
-- **Experimental charge limits:** Enable the feature manually at the bottom of the Power page and choose 60%, 80% or 100%. 100% first removes any existing experimental limit, then follows the laptop's native charging policy; turning the switch off exits the feature completely. Available only for matching supported configurations.
+- **Experimental charge limits:** Enable the feature manually at the bottom of the Power page and choose 60%, 80% or 100%. 100% first removes any existing experimental limit, then follows the laptop's native charging policy; turning the switch off exits the feature completely. Models are not rejected in advance; you can try it manually, but effectiveness is not guaranteed on every laptop.
 - **Liquid-cooling control and reconnection:** A Smart Control switch and four manual strategies—Quieter, Quiet, Balanced and Maximum—are available. After an unexpected disconnect, reconnection to the same previously connected device is attempted for up to 10 minutes, at intervals of at least 3 seconds. Manual disconnection, changing devices, priming or resetting cancels the corresponding reconnection attempt.
 - **Lower overhead:** On the developer's system, memory usage peaks at nearly 200 MB during startup and drops to around 70 MB in the background. Actual usage varies with operating conditions.
 - **Other tools:** Scheduled shutdown, dynamic power saving and other features.
@@ -105,8 +105,8 @@ The following images preview the application interface (The UI text in the image
 
 - **Coexistence with the official control panel:** If both applications change the same setting, the result that actually takes effect on the laptop is what matters.
 - **Fan curves:** Fan curves in the official preset modes usually cannot be adjusted and are therefore shown for reference only. Use a supported Custom mode to modify them.
-- **Battery protection and charge limiting:** Official protection modes and setting an arbitrary charging-percentage limit are different features. Experimental charge limiting is off by default; switching or applying may take 15–30 seconds, and it does not actively discharge the battery to the target. Limiting continues while minimized or hidden to the tray. Unplugging or sleeping pauses control and attempts to restore the original values; reconnecting or waking resumes only after safety checks within the same process. Manual off, actual exit, health faults or unconfirmed restoration prevent automatic resumption.
-- **Charge-limit compatibility and side effects:** The 60%/80% settings have currently been verified only on the developer's MECHREVO YAOSHI Series with BIOS N.1.18MRO24 and EC 1.25; this does not establish support for all models or firmware. This path shares platform state and may affect fans, power and keys. Firmware may also save settings automatically; restoration of every side effect cannot be guaranteed.
+- **Battery protection and charge limiting:** Official protection modes and setting an arbitrary charging-percentage limit are different features. Experimental charge limiting is off by default. The switch immediately shows the requested on state, with controls greyed out while applying; this does not mean charging has already stopped. Switching or applying may take 15–30 seconds, and it does not actively discharge the battery to the target. Limiting continues while minimized or hidden to the tray. Unplugging or sleeping pauses control and attempts to restore the original values; reconnecting or waking resumes only after safety checks within the same process. Manual off, actual exit, health faults or unconfirmed restoration prevent automatic resumption.
+- **Charge-limit compatibility and side effects:** Testing on the developer's YAOSHI laptop has shown charging stopping at the 60% setting, continuing below 80%, and resuming after restoration; this does not establish effectiveness on every laptop. Necessary protocol, original-value, readback and recovery checks remain. This path shares platform state and may affect fans, power and keys. Firmware may also save settings automatically; zero risk or restoration of every side effect cannot be guaranteed.
 - **GPU output switching:** A restart is required. Save your work before restarting; RevoHelper will not force or unexpectedly trigger a restart.
 - **Parameter adjustments:** Power and frequency settings are subject to the laptop's limits. Overclocking can cause instability. Manual CPU frequency limits apply while the application is running and are restored on normal exit.
 - **Liquid-cooling startup helper:** BootWater is bundled. The helper is deployed to the system directory only when you need to connect the cooler before sign-in and explicitly click “Install / Repair.” It is used to connect the liquid-cooling device automatically after startup.

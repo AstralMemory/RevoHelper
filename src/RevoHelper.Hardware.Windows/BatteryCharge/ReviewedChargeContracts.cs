@@ -11,7 +11,8 @@ public sealed record ChargeEcSnapshot(
     bool Discharging,
     uint ChargeRateMw,
     uint? RemainingCapacity,
-    DateTimeOffset ObservedAt)
+    DateTimeOffset ObservedAt,
+    string? InterfaceInstanceName = null)
 {
     public byte Byte(ushort address) => Registers.TryGetValue(address, out var raw)
         ? ReviewedChargeProtocol.DecodeByte(raw)
@@ -20,6 +21,7 @@ public sealed record ChargeEcSnapshot(
 
 public interface IReviewedChargeTransport : IDisposable
 {
+    void VerifySessionOrigin(ChargeEcSnapshot original);
     ChargeEcSnapshot ReadSnapshot();
     uint ReadByte(ushort address);
     void WriteOwnedByte(ushort address, byte expected, byte target);
@@ -29,7 +31,6 @@ public interface IReviewedChargeTransport : IDisposable
 // or hardware access. The production implementation is internal and lazy.
 public interface IReviewedChargeBackend : IDisposable
 {
-    ChargeMachineIdentity ReadMachineIdentity(TimeSpan timeout);
     bool IsAdministrator();
     ChargeWmiSignature ReadInterfaceSignature(TimeSpan timeout);
     IReadOnlyList<ChargeWmiInstance> ReadInterfaceInstances(TimeSpan timeout);

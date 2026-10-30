@@ -161,7 +161,7 @@ if ($published.PSIsContainer -or $published.Extension -ine '.exe' -or $published
     throw 'PublishExe 必须是已有的普通主 EXE 文件。'
 }
 $version = [Diagnostics.FileVersionInfo]::GetVersionInfo($publishedPath)
-if ($version.ProductVersion -cne '1.0.2+20261030' -or $version.FileVersion -cne '1.0.2.4') {
+if ($version.ProductVersion -cne '1.0.2+20261030' -or $version.FileVersion -cne '1.0.2.5') {
     throw "输入版本不符：$($version.ProductVersion) / $($version.FileVersion)"
 }
 

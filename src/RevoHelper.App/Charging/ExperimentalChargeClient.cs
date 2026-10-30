@@ -77,7 +77,7 @@ public sealed class ExperimentalChargeClient : IExperimentalChargeController, ID
             files = new(Guid.NewGuid().ToString("N"));
             stopEvent = new(false, EventResetMode.ManualReset, files.StopName);
             using var self = Process.GetCurrentProcess();
-            SetStatus(new(Busy: true, LimitPercent: limitPercent, Message: "正在启动独立监护并检查本机固件。", SessionId: files.SessionId));
+            SetStatus(new(Busy: true, LimitPercent: limitPercent, Message: "正在启动独立监护并检查控制接口。", SessionId: files.SessionId));
             guardian = ChargeSessionFiles.Launch("--experimental-charge-guardian", files.SessionId,
                 limitPercent, self.Id, self.StartTime.ToUniversalTime().Ticks);
             if (generation != Volatile.Read(ref stopGeneration)) stopEvent.Set();

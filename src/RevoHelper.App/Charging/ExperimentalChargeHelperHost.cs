@@ -39,7 +39,7 @@ public static class ExperimentalChargeHelperHost
         using var legacy = Acquire(@"Global\RevoHelperNativeBatteryThresholdTrial");
         using var stop = new EventWaitHandle(false, EventResetMode.ManualReset, files.StopName);
         using var start = new EventWaitHandle(false, EventResetMode.ManualReset, files.StartName);
-        files.SaveStatus(new("Starting", "正在检查本机固件与原值；尚未启用。", limit));
+        files.SaveStatus(new("Starting", "正在检查控制接口与原值；尚未确认生效。", limit));
         if (!ChargeSessionFiles.IsProcess(owner, ownerTicks) || stop.WaitOne(0))
         { files.SaveStatus(new("Restored", "实验未启用，原值未改动。", limit)); return 1; }
         ChargeEcSnapshot original;

@@ -29,7 +29,10 @@ public sealed class ExperimentalChargeViewModel : INotifyPropertyChanged, IDispo
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
-    public bool IsEnabled => controller?.Status.Enabled == true;
+    // The switch represents the requested UI state while applying, not proof of a
+    // firmware change. The controller's status is never mutated for presentation.
+    public bool IsEnabled => !disposed && !RecoveryPending &&
+        (controller?.Status.Enabled == true || (desiredEnabled && Volatile.Read(ref operations) != 0));
     public bool IsBusy => Volatile.Read(ref operations) != 0 || controller?.Status.Busy == true;
     public bool RecoveryPending => recoveryFailed || controller?.Status.RecoveryPending == true;
     public bool CanToggle => controller is not null && !disposed && !IsBusy && !RecoveryPending;
@@ -42,7 +45,10 @@ public sealed class ExperimentalChargeViewModel : INotifyPropertyChanged, IDispo
     public bool IsSixtySelected => SelectedLimitPercent == 60;
     public bool IsEightySelected => SelectedLimitPercent == 80;
     public bool IsHundredSelected => SelectedLimitPercent == 100;
-    public string StatusText => operationError ?? controller?.Status.Message ?? "限充未连接；默认关闭。";
+    public string StatusText => operationError ??
+        (desiredEnabled && Volatile.Read(ref operations) != 0
+            ? "正在应用限充，尚未确认生效。"
+            : controller?.Status.Message ?? "限充未连接；默认关闭。");
 
     public int SelectedLimitPercent
     {

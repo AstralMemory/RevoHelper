@@ -6,26 +6,16 @@ public sealed class ReviewedChargeProtocolTests
 {
     internal static ChargeMachineIdentity ReviewedIdentity => new("MECHREVO", "YAOSHI Series", "N.1.18MRO24", 1, 25);
 
-    internal static Dictionary<ushort, uint> IdentityRegisters() => new()
-    {
-        [0x0740] = 0x011A, [0x0454] = 0x59, [0x0455] = 0, [0x047D] = 0
-    };
-
     [Fact]
-    public void ProfileIsExactAndDoesNotTreatMarketingFamilyAsCompatibility()
+    public void SnapshotReadSetContainsOnlyControlsAndNeverProjectsOrVersionBytes()
     {
-        var identity = ReviewedIdentity;
-        Assert.True(ReviewedChargeProtocol.ProfileMatches(identity));
-        Assert.False(ReviewedChargeProtocol.ProfileMatches(identity with { Manufacturer = "mechrevo" }));
-        Assert.False(ReviewedChargeProtocol.ProfileMatches(identity with { Model = "YAOSHI" }));
-        Assert.False(ReviewedChargeProtocol.ProfileMatches(identity with { BiosVersion = "N.1.18MRO25" }));
-        Assert.False(ReviewedChargeProtocol.ProfileMatches(identity with { EcMajor = 2 }));
-        Assert.False(ReviewedChargeProtocol.ProfileMatches(identity with { EcMinor = 24 }));
-        Assert.False(ReviewedChargeProtocol.ProfileMatches(null));
+        Assert.Equal(new ushort[]
+        {
+            0x0742, 0x0770, 0x07C3, 0x07A6, 0x07B9, 0x07D0, 0x0490, 0x0497, 0x04AB, 0x9164
+        }, ReviewedChargeProtocol.SnapshotAddresses);
     }
 
     [Theory]
-    [InlineData(0x0740)] [InlineData(0x0454)] [InlineData(0x0455)] [InlineData(0x047D)]
     [InlineData(0x0742)] [InlineData(0x0770)] [InlineData(0x07C3)] [InlineData(0x07A6)]
     [InlineData(0x07B9)] [InlineData(0x07D0)] [InlineData(0x0490)] [InlineData(0x0497)]
     [InlineData(0x04AB)] [InlineData(0x9164)]
@@ -36,6 +26,7 @@ public sealed class ReviewedChargeProtocolTests
 
     [Theory]
     [InlineData(0)] [InlineData(0x0741)] [InlineData(0x087F)] [InlineData(0xFFFF)]
+    [InlineData(0x0740)] [InlineData(0x0454)] [InlineData(0x0455)] [InlineData(0x047D)]
     public void ArbitraryReadIsRejected(int address) =>
         Assert.Throws<ArgumentOutOfRangeException>(() => ReviewedChargeProtocol.EncodeRead((ushort)address));
 
@@ -70,40 +61,61 @@ public sealed class ReviewedChargeProtocolTests
     public void SnapshotByteRejectsMissingAndFailedRegisters()
     {
         var snapshot = new ChargeEcSnapshot(ReviewedIdentity,
-            new Dictionary<ushort, uint> { [0x0740] = 0x811A, [0x07B9] = 0xFEFEFEFE },
+            new Dictionary<ushort, uint> { [0x0742] = 0x811A, [0x07B9] = 0xFEFEFEFE },
             75, true, true, false, 30000, 90000, DateTimeOffset.UtcNow);
-        Assert.Equal((byte)0x1A, snapshot.Byte(0x0740));
+        Assert.Equal((byte)0x1A, snapshot.Byte(0x0742));
         Assert.Throws<KeyNotFoundException>(() => snapshot.Byte(0x9164));
         Assert.Throws<InvalidDataException>(() => snapshot.Byte(0x07B9));
     }
 
     [Fact]
-    public void SnapshotIdentityRequiresAllFourVersionProjectBytes()
+    public void SnapshotRouteIsOptionalForLegacyRecordsAndCanRecordAnAlternativeInterface()
     {
-        var registers = IdentityRegisters();
-        Assert.True(ReviewedChargeProtocol.SnapshotIdentityMatches(ReviewedIdentity, registers));
-        foreach (var address in registers.Keys.ToArray())
-        {
-            var missing = IdentityRegisters(); missing.Remove(address);
-            Assert.False(ReviewedChargeProtocol.SnapshotIdentityMatches(ReviewedIdentity, missing));
-            var wrong = IdentityRegisters(); wrong[address] ^= 1;
-            Assert.False(ReviewedChargeProtocol.SnapshotIdentityMatches(ReviewedIdentity, wrong));
-            var failed = IdentityRegisters(); failed[address] = 0xFEFEFEFE;
-            Assert.False(ReviewedChargeProtocol.SnapshotIdentityMatches(ReviewedIdentity, failed));
-        }
+        var legacy = new ChargeEcSnapshot(new("OTHER", "OTHER Series", "OTHER-BIOS", 9, 99),
+            new Dictionary<ushort, uint>(), null, false, false, false, 0, null, DateTimeOffset.UtcNow);
+        Assert.Null(legacy.InterfaceInstanceName);
+        Assert.Equal(@"ACPI\PNP0C14\2_0", (legacy with { InterfaceInstanceName = @"ACPI\PNP0C14\2_0" }).InterfaceInstanceName);
+    }
+
+    [Theory]
+    [InlineData(1)] [InlineData(9)] [InlineData(10)]
+    public void UniqueActiveLogicalZeroIsSelectedIndependentlyOfInstanceCountOrOrder(int count)
+    {
+        var instances = Enumerable.Range(0, count).Reverse()
+            .Select(i => new ChargeWmiInstance($@"ACPI\PNP0C14\1_{i}", true)).ToArray();
+        Assert.Equal(@"ACPI\PNP0C14\1_0", ReviewedChargeProtocol.SelectReviewedInstance(instances));
     }
 
     [Fact]
-    public void CompleteActiveTenInstanceLayoutSelectsLogicalZeroRegardlessOfOrder()
+    public void AlternativeActiveLogicalZeroIsSelectedWithoutProbingInactiveOrUnrelatedInstances()
     {
-        var instances = Enumerable.Range(0, 10).Reverse()
-            .Select(i => new ChargeWmiInstance($@"ACPI\PNP0C14\1_{i}", true)).ToArray();
-        Assert.Equal(@"ACPI\PNP0C14\1_0", ReviewedChargeProtocol.SelectReviewedInstance(instances));
-        Assert.Throws<InvalidDataException>(() => ReviewedChargeProtocol.SelectReviewedInstance(instances[..9]));
+        ChargeWmiInstance[] instances =
+        [
+            new(@"ACPI\PNP0C14\1_0", false), new(@"ACPI\PNP0C14\2_0", true),
+            new(@"ACPI\PNP0C14\2_1", true), new("unrelated-instance", true)
+        ];
+        Assert.Equal(@"ACPI\PNP0C14\2_0", ReviewedChargeProtocol.SelectReviewedInstance(instances));
+    }
+
+    [Fact]
+    public void MultipleActiveLogicalZeroCandidatesIncludingDuplicateNamesAreAmbiguous()
+    {
         Assert.Throws<InvalidDataException>(() => ReviewedChargeProtocol.SelectReviewedInstance(
-            instances.Select((instance, i) => i == 0 ? instance with { Active = false } : instance).ToArray()));
+            [new(@"ACPI\PNP0C14\1_0", true), new(@"ACPI\PNP0C14\2_0", true)]));
         Assert.Throws<InvalidDataException>(() => ReviewedChargeProtocol.SelectReviewedInstance(
-            instances.Select((instance, i) => i == 0 ? instances[1] : instance).ToArray()));
+            [new(@"ACPI\PNP0C14\1_0", true), new(@"ACPI\PNP0C14\1_0", true)]));
+    }
+
+    [Theory]
+    [InlineData("ACPI\\PNP0C14\\1_0", false)]
+    [InlineData("ACPI\\PNP0C14\\1_1", true)]
+    [InlineData("ACPI\\PNP0C14\\other_0", true)]
+    [InlineData("ACPI\\PNP0C14\\1_00", true)]
+    [InlineData("other", true)]
+    public void MissingOrMalformedActiveLogicalZeroIsRejected(string name, bool active)
+    {
+        Assert.Throws<InvalidDataException>(() => ReviewedChargeProtocol.SelectReviewedInstance([new(name, active)]));
+        Assert.Throws<InvalidDataException>(() => ReviewedChargeProtocol.SelectReviewedInstance([]));
     }
 
     [Fact]

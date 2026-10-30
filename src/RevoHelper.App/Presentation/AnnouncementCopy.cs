@@ -31,7 +31,7 @@ public sealed record AnnouncementCopy(
         LocalizedUiCopy.NormalizeLanguageCode(language) == "en-US"
             ? new("About & announcements", "Version & notes", "Version", version,
                 "Updated", UpdateDate, "Developer announcement",
-                "V1.0.2 adds 60% / 80% / 100% charge control, off by default. 60% and 80% stopped charging in tests on MECHREVO YAOSHI (N.1.18MRO24, EC 1.25); shared platform state may affect fans, power and keys. 100% restores native charging. Water cooling retries unexpected disconnects every 3 seconds for 10 minutes. Long-term behavior and a full charge to the cutoff remain unverified.",
+                "V1.0.2 adds 60% / 80% / 100% charge control, off by default. 60% / 80% stopped charging on MECHREVO YAOSHI in tests; checks use interface and original values, not model. Shared platform state may affect fans, power and keys. 100% uses native charging. Water cooling retries the same device every 3s for 10 minutes. Long-term use and charging to cutoff remain unverified.",
                 "Project", "Downloads", "Feedback", "Back to settings",
                 "Release & source code",
                 "RevoHelper's own code uses MIT; third-party components retain their own licenses. See GitHub Releases for publicly available versions. This build does not unlock GPU power limits or certify hardware compatibility.",
@@ -46,7 +46,7 @@ public sealed record AnnouncementCopy(
                 "This page is bundled with the app and never fetches announcements in the background. Instructions and third-party licenses are included in the release package.")
             : new("关于与公告", "版本、更新和使用提醒", "当前版本", version,
                 "更新日期", UpdateDate, "开发者公告",
-                "V1.0.2 新增充电上限开关及 60% / 80% / 100% 三档，默认关闭。100% 恢复原生充电，不持续覆盖平台状态。60% 和 80% 已实测停充；限充使用共享平台状态，可能影响风扇、功耗和按键。目前仅通过 MECHREVO YAOSHI、N.1.18MRO24 BIOS、EC 1.25 机型验证。水冷意外断开后，可在10分钟内每3秒尝试重连同一设备。长期行为及完整从低电量充至上限后停充的过程仍尚待验证。",
+                "V1.0.2 新增充电上限开关及 60% / 80% / 100% 三档，默认关闭。100% 恢复原生充电，不持续覆盖平台状态。60% 和 80% 已在机械革命耀世实测停充；限充使用共享平台状态，可能影响风扇、功耗和按键。不按品牌或型号限制，仍需通过接口和原值检查。水冷意外断开后，可在10分钟内每3秒尝试重连同一设备。长期行为及完整从低电量充至上限后停充的过程仍尚待验证。",
                 "GitHub 项目", "下载与更新", "问题反馈", "返回设置",
                 "发布与开源",
                 "自有代码采用 MIT 协议，第三方组件保留各自许可。公开版本以 GitHub Releases 为准。本版没有 GPU 功耗解锁，也不代表机型硬件兼容性认证。",

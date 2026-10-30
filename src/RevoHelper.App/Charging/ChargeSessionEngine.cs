@@ -13,7 +13,6 @@ public sealed class ChargeSessionEngine(Func<IReviewedChargeTransport> createTra
 {
     public static void ValidateInitial(ChargeEcSnapshot s)
     {
-        if (!ReviewedChargeProtocol.SnapshotIdentityMatches(s)) throw new InvalidOperationException("仅支持已验证的MRO24 / EC1.25本机固件。");
         foreach (var pair in new (ushort Address, byte Value)[] { (0x07C3, 7), (0x0770, 255), (0x07B9, 0), (0x07D0, 0), (0x9164, 0) })
             if (s.Byte(pair.Address) != pair.Value) throw new InvalidOperationException($"原始状态0x{pair.Address:X4}已改变；不接管已有设置。");
         if (s.Registers[0x07B9] > 255 || (s.Byte(0x07A6) & 0x30) != 0x20 || (s.Byte(0x0742) & 4) != 0)
@@ -24,7 +23,8 @@ public sealed class ChargeSessionEngine(Func<IReviewedChargeTransport> createTra
 
     public static void ValidateActive(ChargeEcSnapshot s, ChargeEcSnapshot original, int limit)
     {
-        if (!ReviewedChargeProtocol.SnapshotIdentityMatches(s) || s.Byte(0x07C3) != 4 || s.Byte(0x0770) != 255
+        if (!string.Equals(ReviewedChargeProtocol.SessionInstance(s), ReviewedChargeProtocol.SessionInstance(original), StringComparison.OrdinalIgnoreCase)
+            || s.Byte(0x07C3) != 4 || s.Byte(0x0770) != 255
             || s.Byte(0x07D0) != 0 || (s.Byte(0x07A6) & 0x30) != 0x20
             || (s.Byte(0x0742) & 0xFB) != (original.Byte(0x0742) & 0xFB)
             || (s.Byte(0x07B9) & 0x7F) != limit || s.Byte(0x9164) is var cache && cache != 0 && cache != limit)
@@ -44,6 +44,7 @@ public sealed class ChargeSessionEngine(Func<IReviewedChargeTransport> createTra
         try
         {
             using var transport = createTransport();
+            transport.VerifySessionOrigin(original);
             var fresh = transport.ReadSnapshot();
             ValidateInitial(fresh);
             if ((fresh.Byte(0x0742) & 0xFB) != (original.Byte(0x0742) & 0xFB))
@@ -95,7 +96,7 @@ public sealed class ChargeSessionEngine(Func<IReviewedChargeTransport> createTra
         try
         {
             // Fresh channels ensure a failed B9 operation cannot quarantine C3 recovery.
-            using var transport = createTransport();
+            using var transport = OpenRecoveryTransport();
             var raw = transport.ReadByte(0x07B9);
             if (raw > 255) throw new InvalidOperationException("阈值读取失败或格式改变。");
             var value = (byte)(raw & 0x7F);
@@ -109,7 +110,7 @@ public sealed class ChargeSessionEngine(Func<IReviewedChargeTransport> createTra
                 for (var i = 0; i < 2; i++)
                 {
                     wait();
-                    using var cache = createTransport();
+                    using var cache = OpenRecoveryTransport();
                     if (ReviewedChargeProtocol.DecodeByte(cache.ReadByte(0x9164)) == 0) break;
                 }
         }
@@ -124,7 +125,7 @@ public sealed class ChargeSessionEngine(Func<IReviewedChargeTransport> createTra
         {
             try
             {
-                using var transport = createTransport();
+                using var transport = OpenRecoveryTransport();
                 var value = ReviewedChargeProtocol.DecodeByte(transport.ReadByte(0x07C3));
                 if (platformAttempted && value == 4)
                 {
@@ -139,7 +140,7 @@ public sealed class ChargeSessionEngine(Func<IReviewedChargeTransport> createTra
         {
             try
             {
-                using var transport = createTransport();
+                using var transport = OpenRecoveryTransport();
                 var raw = transport.ReadByte(address);
                 return (address != 0x07B9 || raw <= 255) && check(ReviewedChargeProtocol.DecodeByte(raw));
             }
@@ -147,6 +148,20 @@ public sealed class ChargeSessionEngine(Func<IReviewedChargeTransport> createTra
         }
         void TryJournal(string phase, ushort address, int from, int to)
         { try { journal(phase, address, from, to); } catch (Exception) { /* Never prevent restoration. */ } }
+
+        IReviewedChargeTransport OpenRecoveryTransport()
+        {
+            var transport = createTransport();
+            try
+            {
+                // Bind the saved route, not a laptop label or firmware-version guess.
+                // This does not depend on full battery telemetry, so a failed B9 read
+                // still cannot prevent a fresh, independently owned C3 restoration.
+                transport.VerifySessionOrigin(original);
+                return transport;
+            }
+            catch { transport.Dispose(); throw; }
+        }
     }
 
     private static void SetThreshold(IReviewedChargeTransport transport, byte expectedLow, byte targetLow)

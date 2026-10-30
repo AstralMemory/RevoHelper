@@ -1,8 +1,8 @@
 namespace RevoHelper.Hardware.Windows.BatteryCharge;
 
 /// <summary>
-/// Independently encoded facts reviewed against this machine's local ACPI and EC
-/// observations. This is not a generic Uniwill EC API or a compatibility claim.
+/// Narrow control protocol and owned write transitions. Laptop model, BIOS names
+/// and a developer machine's EC project/version are not eligibility criteria.
 /// </summary>
 public static class ReviewedChargeProtocol
 {
@@ -12,25 +12,13 @@ public static class ReviewedChargeProtocol
     public static readonly TimeSpan EcCallSpacing = TimeSpan.FromMilliseconds(10);
 
     public static IReadOnlyList<ushort> SnapshotAddresses { get; } = Array.AsReadOnly<ushort>(
-        [0x0740, 0x0454, 0x0455, 0x047D, 0x0742, 0x0770, 0x07C3,
+        [0x0742, 0x0770, 0x07C3,
          0x07A6, 0x07B9, 0x07D0, 0x0490, 0x0497, 0x04AB, 0x9164]);
 
-    public static bool ProfileMatches(ChargeMachineIdentity? identity) => identity is
-    {
-        Manufacturer: "MECHREVO", Model: "YAOSHI Series", BiosVersion: "N.1.18MRO24", EcMajor: 1, EcMinor: 25
-    };
-
-    public static bool SnapshotIdentityMatches(ChargeEcSnapshot snapshot) =>
-        SnapshotIdentityMatches(snapshot.Identity, snapshot.Registers);
-
-    public static bool SnapshotIdentityMatches(ChargeMachineIdentity? identity, IReadOnlyDictionary<ushort, uint> registers)
-    {
-        if (!ProfileMatches(identity)) return false;
-        return Matches(0x0740, 0x1A) && Matches(0x0454, 0x59) && Matches(0x0455, 0) && Matches(0x047D, 0);
-
-        bool Matches(ushort address, byte value) => registers.TryGetValue(address, out var raw)
-            && raw != FailureSentinel && (byte)raw == value;
-    }
+    // Old leases were always created through this one fixed route. New leases
+    // explicitly retain whichever single compatible route was actually selected.
+    public static string SessionInstance(ChargeEcSnapshot snapshot) =>
+        snapshot.InterfaceInstanceName ?? LogicalZeroInstance;
 
     public static byte DecodeByte(uint raw)
     {
@@ -70,11 +58,15 @@ public static class ReviewedChargeProtocol
 
     public static string SelectReviewedInstance(IReadOnlyList<ChargeWmiInstance> instances)
     {
-        var names = instances.Select(instance => instance.InstanceName).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (instances.Count != 10 || names.Count != 10 || instances.Any(instance => !instance.Active)
-            || Enumerable.Range(0, 10).Any(i => !names.Contains($@"ACPI\PNP0C14\1_{i}")))
-            throw new InvalidDataException("WMI layout differs from the complete reviewed active 1_0..1_9 layout; no instance is probed.");
-        return LogicalZeroInstance;
+        var candidates = instances.Where(instance => instance.Active &&
+            System.Text.RegularExpressions.Regex.IsMatch(instance.InstanceName ?? string.Empty,
+                @"^ACPI\\PNP0C14\\[0-9]+_0$",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase |
+                System.Text.RegularExpressions.RegexOptions.CultureInvariant)).ToArray();
+        if (candidates.Length != 1 || instances.Count(instance => string.Equals(instance.InstanceName,
+                candidates[0].InstanceName, StringComparison.OrdinalIgnoreCase)) != 1)
+            throw new InvalidDataException("A single active compatible logical-zero WMI instance is required; no instances were probed.");
+        return candidates[0].InstanceName;
     }
 
     public static void ValidateTelemetry(ReviewedChargeTelemetry telemetry)
