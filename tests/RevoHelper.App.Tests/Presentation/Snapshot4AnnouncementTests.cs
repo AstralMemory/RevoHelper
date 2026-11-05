@@ -90,9 +90,10 @@ public sealed class Snapshot4AnnouncementTests
     {
         var copy = AnnouncementCopy.For(language, version);
         Assert.Equal(version, copy.Version);
+        // 【禁止修改】这是产品负责人指定的固定公告。发版时不要为了通过测试而改这里或改公告。
         Assert.Equal(language == "en-US"
-            ? "RevoHelper is a lightweight, free third-party control center for MECHREVO laptops. V1.0.0 adds an external performance monitor, dark mode and interface improvements. Check GitHub Releases for publicly available downloads."
-            : "RevoHelper 是轻量、免费的机械革命第三方控制台。V1.0.0 新增外置性能监控、深色模式并完善界面体验；公开下载请以 GitHub Releases 为准。",
+            ? "RevoHelper is a lightweight, free and open-source third-party control panel for MECHREVO laptops. It extends the functionality of the official control panel, with lower overhead and faster startup."
+            : "轻量、免费且开源的机械革命笔记本第三方控制台。在官方控制台的功能基础上拓展更多功能，且性能开销更低、启动更快。",
             copy.Notice);
     }
 

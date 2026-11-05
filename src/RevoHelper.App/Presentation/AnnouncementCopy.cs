@@ -18,9 +18,13 @@ public sealed record AnnouncementCopy(
     public const string DownloadsUrl = ProjectUrl + "/releases";
     public const string FeedbackUrl = ProjectUrl + "/issues";
 
-    // The developer's own wording, fixed for every release. Release notes belong on GitHub.
-    public const string DeveloperNoticeChinese = "RevoHelper 是轻量、免费的机械革命第三方控制台。V1.0.0 新增外置性能监控、深色模式并完善界面体验；公开下载请以 GitHub Releases 为准。";
-    public const string DeveloperNoticeEnglish = "RevoHelper is a lightweight, free third-party control center for MECHREVO laptops. V1.0.0 adds an external performance monitor, dark mode and interface improvements. Check GitHub Releases for publicly available downloads.";
+    // 【禁止修改】开发者公告的内容由产品负责人指定，永久固定。
+    // 无论发布什么版本，AI 或开发者都不得改写、替换这两段文字，也不得加入版本号或更新内容。
+    // 更新内容写到 GitHub Release 和更新日志。只有产品负责人明确要求时才能改动。
+    // DO NOT EDIT: the product owner fixed this wording for every release. Do not rewrite it
+    // or add version numbers or release notes. Release notes belong on GitHub and in the changelog.
+    public const string DeveloperNoticeChinese = "轻量、免费且开源的机械革命笔记本第三方控制台。在官方控制台的功能基础上拓展更多功能，且性能开销更低、启动更快。";
+    public const string DeveloperNoticeEnglish = "RevoHelper is a lightweight, free and open-source third-party control panel for MECHREVO laptops. It extends the functionality of the official control panel, with lower overhead and faster startup.";
 
     // Only these developer-controlled destinations can be opened by page buttons.
     public static string? LinkFor(string? action) => action switch
