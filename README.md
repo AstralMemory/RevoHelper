@@ -48,7 +48,7 @@
 
 开发与维护：[Astral Memory](https://github.com/AstralMemory)。
 
-本项目采用 **Vibe Coding** 开发方式：仅代码主要由Agent（ChatGPT）辅助编写，开发者则完全负责产品逻辑、方案与改动审批、UI 设计、实际测试和迭代维护。
+本项目采用 **Vibe Coding** 开发方式：仅代码主要由Agent（ChatGPT/Claude）辅助编写，开发者则完全负责产品逻辑、方案与改动审批、UI 设计、实际测试和迭代维护。
 
 程序承诺永久免费使用。V1.0.3 应用源码已在本仓库公开，自有代码采用 [MIT 许可证](./LICENSE)，第三方组件遵循各自许可证，详见 [第三方声明](./THIRD_PARTY_NOTICES.md)。
 
