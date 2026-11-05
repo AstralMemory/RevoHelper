@@ -33,7 +33,9 @@ public sealed class ProfileSwitchFeedbackTests
         release.SetResult(new(true, "confirmed"));
         Assert.True(await switching);
         Assert.False(vm.IsPlatformSwitchPending);
-        Assert.Equal([true, false], pendingNotifications);
+        // The first notification marks the request as accepted; the target and
+        // delay notice appear only when its preparation is complete.
+        Assert.Equal([false, true, false], pendingNotifications);
         Assert.Equal(new PlatformModeSelection(PlatformMode.Balanced), platform.Current);
         Assert.Equal(platform.Current, vm.ConfirmedPlatformSelection);
     }
@@ -89,7 +91,7 @@ public sealed class ProfileSwitchFeedbackTests
     }
 
     [Fact]
-    public async Task RapidClicksShowTheLatestTargetAndSkipSupersededQueuedWrites()
+    public async Task RapidClicksShowTheLatestTargetOnlyOnceItStartsAndSkipSupersededQueuedWrites()
     {
         var release = NewCompletion<ControlResult>();
         var latestRelease = NewCompletion<ControlResult>();
@@ -98,23 +100,31 @@ public sealed class ProfileSwitchFeedbackTests
             OnApply = (_, call, _) => call == 1 ? release.Task : latestRelease.Task
         };
         var vm = Create(platform);
+        // A strategy request needs reported support; otherwise it is rejected
+        // before it can supersede the queued custom request.
+        vm.ApplyRuntimeCapabilities(new(vm.Dashboard.Identity,
+            new Dictionary<HardwareFeature, HardwareFeatureCapability>(),
+            Enum.GetValues<PlatformMode>().ToHashSet(), []));
         await vm.InitializePlatformModeAsync(default);
+        var limit = TimeSpan.FromSeconds(2);
         var first = vm.ApplyPlatformProfileAsync("balanced", default);
         var superseded = vm.ApplyCustomProfileAsync(2, default);
         var latest = vm.ApplyTurboStrategyAsync(TurboStrategy.HighEfficiency, default);
 
-        Assert.Equal("turbo", vm.SelectedProfileId);
-        Assert.Equal(TurboStrategy.HighEfficiency, vm.SelectedTurboStrategy);
-        Assert.True(vm.IsPlatformSwitchPending);
+        Assert.Equal("balanced", vm.SelectedProfileId);
+        Assert.False(vm.IsPlatformSwitchPending);
         Assert.Single(platform.Writes);
         release.SetResult(new(true, "old confirmed"));
 
-        Assert.True(await first);
-        Assert.False(await superseded);
+        Assert.True(await first.WaitAsync(limit));
+        Assert.False(await superseded.WaitAsync(limit));
+        await WaitUntil(() => platform.Writes.Count == 2);
+        Assert.Equal("turbo", vm.SelectedProfileId);
+        Assert.Equal(TurboStrategy.HighEfficiency, vm.SelectedTurboStrategy);
         Assert.True(vm.IsPlatformSwitchPending);
         Assert.False(latest.IsCompleted);
         latestRelease.SetResult(new(true, "latest confirmed"));
-        Assert.True(await latest);
+        Assert.True(await latest.WaitAsync(limit));
         Assert.False(vm.IsPlatformSwitchPending);
         Assert.Equal([new(PlatformMode.Balanced), new PlatformModeSelection(PlatformMode.TurboHigh)], platform.Writes);
         Assert.Equal("turbo", vm.SelectedProfileId);
@@ -133,9 +143,8 @@ public sealed class ProfileSwitchFeedbackTests
         await vm.InitializePlatformModeAsync(default);
         var first = vm.ApplyPlatformProfileAsync("balanced", default);
         var latest = vm.ApplyCustomProfileAsync(3, default);
-        Assert.Equal("custom", vm.SelectedProfileId);
-        Assert.Equal(3, vm.SelectedCustomProfileIndex);
-        Assert.True(vm.IsPlatformSwitchPending);
+        Assert.Equal("balanced", vm.SelectedProfileId);
+        Assert.False(vm.IsPlatformSwitchPending);
 
         release.SetResult(new(true, "first confirmed"));
 
@@ -211,14 +220,18 @@ public sealed class ProfileSwitchFeedbackTests
     {
         var release = NewCompletion<ControlResult>();
         var platform = new Platform { OnApply = (_, _, _) => release.Task };
-        var vm = Create(platform);
+        var vm = CreatePolicy(platform, new Cpu());
         await vm.InitializePlatformModeAsync(default);
+        Assert.True(vm.IsPerformanceApplyEnabled);
         var first = vm.ApplyPlatformProfileAsync("balanced", default);
         using var cancellation = new CancellationTokenSource();
         var latest = vm.ApplyCustomProfileAsync(2, cancellation.Token);
         cancellation.Cancel();
         Assert.False(latest.IsCompleted);
-        Assert.True(vm.IsPlatformSwitchPending);
+        // The delay notice belongs to a target that has started, but controls
+        // stay locked while the earlier switch is still running.
+        Assert.False(vm.IsPlatformSwitchPending);
+        Assert.False(vm.IsPerformanceApplyEnabled);
 
         release.SetResult(new(true, "first confirmed"));
 
@@ -380,6 +393,12 @@ public sealed class ProfileSwitchFeedbackTests
     }
 
     private static TaskCompletionSource<T> NewCompletion<T>() => new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    private static async Task WaitUntil(Func<bool> condition)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        while (!condition()) await Task.Delay(5, timeout.Token);
+    }
 
     private static MainWindowViewModel Create(IPlatformModeController platform) => new(
         HomeDashboardFactory.Create(new MachineIdentity("MECHREVO", "test", "test", "CPU", ""), []),
