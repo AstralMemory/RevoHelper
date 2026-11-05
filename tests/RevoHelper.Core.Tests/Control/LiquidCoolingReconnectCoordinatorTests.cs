@@ -79,6 +79,20 @@ public sealed class LiquidCoolingReconnectCoordinatorTests
         Assert.Equal(deadline, f.Coordinator.Deadline);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData(false)]
+    public async Task UnknownOrDeniedPermissionNeverAutomaticallyReconnects(bool? permission)
+    {
+        var f = new Fixture(); f.DisconnectAfterConfirmedConnection();
+        f.Now += TimeSpan.FromSeconds(3);
+        f.Current = State(false) with { CanControl = permission };
+
+        await f.Attempt();
+
+        Assert.Empty(f.Targets);
+    }
+
     [Fact]
     public void DeadlineExpiresEvenWhileAllLaterReadsAreUnavailable()
     {

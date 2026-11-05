@@ -5,6 +5,109 @@ namespace RevoHelper.Core.Tests.Control;
 public sealed class PerformanceScheduleControllerTests
 {
     [Fact]
+    public async Task ApplyAsync_RejectedStrategyRetainsConfirmedBasicModeWithoutApplyingOtherPoliciesOrRollback()
+    {
+        var calls = new List<string>();
+        var actual = new PlatformModeSelection(PlatformMode.TurboQuiet);
+        var platform = new FakePlatformController(new(PlatformMode.Balanced), calls)
+        {
+            RejectedButConfirmedPlatform = actual
+        };
+        var boost = new FakeBoostController(new(ProcessorBoostMode.EfficientEnabled, ProcessorBoostMode.EfficientEnabled), calls);
+        var cpu = new FakeCpuController(new(45, 65, null), calls);
+        var frequency = new FakeFrequencyController(ProcessorFrequencyLimitPolicy.Uniform(0), calls);
+        var target = new PerformanceSchedule(new(PlatformMode.TurboHigh), new(60, 90, null),
+            new(ProcessorBoostMode.Aggressive, ProcessorBoostMode.Aggressive), ProcessorFrequencyLimitPolicy.Uniform(0));
+
+        var result = await new PerformanceScheduleController(platform, cpu, boost, frequency)
+            .ApplyAsync(target, false, CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(actual, result.ConfirmedPlatform);
+        Assert.Null(result.Readback);
+        Assert.Equal(actual, platform.Current);
+        Assert.Equal(["read-platform", "read-boost", "read-cpu", "read-frequency", "set-platform"], calls);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_BasicTurboConfirmedHighClearsPreviousFrequencyCapWithoutReapplyingStrategy()
+    {
+        var calls = new List<string>();
+        var platform = new FakePlatformController(new(PlatformMode.TurboHigh), calls);
+        var boost = new FakeBoostController(new(ProcessorBoostMode.EfficientEnabled, ProcessorBoostMode.EfficientEnabled), calls);
+        var cpu = new FakeCpuController(null, calls);
+        var frequency = new FakeFrequencyController(ProcessorFrequencyLimitPolicy.Uniform(3400), calls);
+        var target = new PerformanceSchedule(platform.Current, null,
+            new(ProcessorBoostMode.Aggressive, ProcessorBoostMode.Aggressive), ProcessorFrequencyLimitPolicy.Uniform(0));
+
+        var result = await new PerformanceScheduleController(platform, cpu, boost, frequency)
+            .ApplyAsync(target, true, CancellationToken.None);
+
+        Assert.True(result.Succeeded, result.Reason);
+        Assert.Equal(target, result.Readback);
+        Assert.DoesNotContain("set-platform", calls);
+        Assert.Single(calls, call => call == "set-frequency");
+    }
+
+    [Fact]
+    public async Task Diagnostics_IdentifyZeroFrequencyRejectionAndSubsequentRollback()
+    {
+        var calls = new List<string>();
+        var entries = new List<(string Area, string Message)>();
+        var platform = new FakePlatformController(new(PlatformMode.Office), calls);
+        var boost = new FakeBoostController(new(ProcessorBoostMode.EfficientEnabled, ProcessorBoostMode.EfficientEnabled), calls);
+        var cpu = new FakeCpuController(null, calls);
+        var zero = ProcessorFrequencyLimitPolicy.Uniform(0);
+        var frequency = new FakeFrequencyController(zero, calls) { RejectNextTarget = zero };
+        var controller = new PerformanceScheduleController(platform, cpu, boost, frequency,
+            (area, message) => entries.Add((area, message)));
+        var target = new PerformanceSchedule(new(PlatformMode.Balanced), null,
+            new(ProcessorBoostMode.Aggressive, ProcessorBoostMode.Aggressive), zero);
+
+        var result = await controller.ApplyAsync(target, false, CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(new PlatformModeSelection(PlatformMode.Office), platform.Current);
+        Assert.All(entries, entry => Assert.Equal("performance-schedule", entry.Area));
+        Assert.Contains(entries, entry => entry.Message.Contains("stage=frequency-apply result=rejected", StringComparison.Ordinal)
+            && entry.Message.Contains("simulated frequency failure", StringComparison.Ordinal)
+            && entry.Message.Contains("AC=0", StringComparison.Ordinal));
+        Assert.Contains(entries, entry => entry.Message.Contains("stage=rollback result=rejected", StringComparison.Ordinal)
+            && entry.Message.Contains("simulated frequency failure", StringComparison.Ordinal));
+        Assert.Equal(2, calls.Count(call => call == "set-platform"));
+        Assert.Equal(2, calls.Count(call => call == "set-frequency"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Diagnostics_ThrowingSinkDoesNotChangeScheduleCommandsOrResult(bool rejectFrequency)
+    {
+        async Task<(PerformanceScheduleResult Result, string[] Calls, PlatformModeSelection Mode)> Run(
+            Action<string, string>? sink)
+        {
+            var calls = new List<string>();
+            var platform = new FakePlatformController(new(PlatformMode.Office), calls);
+            var boost = new FakeBoostController(new(ProcessorBoostMode.EfficientEnabled, ProcessorBoostMode.EfficientEnabled), calls);
+            var cpu = new FakeCpuController(null, calls);
+            var frequency = new FakeFrequencyController(ProcessorFrequencyLimitPolicy.Uniform(2600), calls)
+            { RejectNextTarget = rejectFrequency ? ProcessorFrequencyLimitPolicy.Uniform(0) : null };
+            var controller = new PerformanceScheduleController(platform, cpu, boost, frequency, sink);
+            var result = await controller.ApplyAsync(new(new(PlatformMode.Balanced), null,
+                new(ProcessorBoostMode.Aggressive, ProcessorBoostMode.Aggressive), ProcessorFrequencyLimitPolicy.Uniform(0)),
+                false, CancellationToken.None);
+            return (result, [.. calls], platform.Current);
+        }
+
+        var baseline = await Run(null);
+        var observed = await Run((_, _) => throw new InvalidOperationException("simulated diagnostic sink failure"));
+
+        Assert.Equal(baseline.Result, observed.Result);
+        Assert.Equal(baseline.Calls, observed.Calls);
+        Assert.Equal(baseline.Mode, observed.Mode);
+    }
+
+    [Fact]
     public async Task ApplyAsync_AppliesPlatformThenBoostThenPowerAndVerifiesAllReadbacks()
     {
         var calls = new List<string>();
@@ -222,10 +325,129 @@ public sealed class PerformanceScheduleControllerTests
             $"Target profile was not restored before returning to the original profile: {string.Join(", ", calls)}");
     }
 
+    [Fact]
+    public async Task RetainOnFailure_KeepsSelectedModeAndDoesNotWritePreviousProfileValuesBack()
+    {
+        var calls = new List<string>();
+        var turbo = new PlatformModeSelection(PlatformMode.TurboQuiet);
+        var platform = new FakePlatformController(turbo, calls);
+        var officeBoost = new ProcessorBoostPolicy(ProcessorBoostMode.EfficientEnabled, ProcessorBoostMode.EfficientEnabled);
+        var boost = new FakeBoostController(officeBoost, calls) { RejectNextTarget = new(ProcessorBoostMode.Aggressive, ProcessorBoostMode.Aggressive) };
+        var frequency = new FakeFrequencyController(ProcessorFrequencyLimitPolicy.Uniform(3400), calls);
+        var target = new PerformanceSchedule(turbo, null,
+            new(ProcessorBoostMode.Aggressive, ProcessorBoostMode.Aggressive), ProcessorFrequencyLimitPolicy.Uniform(0));
+
+        var result = await new PerformanceScheduleController(platform, new FakeCpuController(null, calls), boost, frequency)
+            .ApplyAsync(target, true, CancellationToken.None, retainSelectedPlatformOnFailure: true);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(turbo, result.ConfirmedPlatform);
+        Assert.Contains("已保留", result.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("已恢复", result.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("set-platform", calls);
+        Assert.DoesNotContain("set-frequency", calls);
+        Assert.Single(calls, call => call == "set-boost");
+    }
+
+    [Fact]
+    public async Task RetainOnFailure_RestoresOnlyCpuValuesItWrote()
+    {
+        var calls = new List<string>();
+        var turbo = new PlatformModeSelection(PlatformMode.TurboQuiet);
+        var originalCpu = new CpuPolicy(35, 55, null);
+        var cpu = new FakeCpuController(originalCpu, calls);
+        var targetFrequency = ProcessorFrequencyLimitPolicy.Uniform(0);
+        var frequency = new FakeFrequencyController(ProcessorFrequencyLimitPolicy.Uniform(3400), calls) { RejectNextTarget = targetFrequency };
+        var target = new PerformanceSchedule(turbo, new(45, 65, null),
+            new(ProcessorBoostMode.Aggressive, ProcessorBoostMode.Aggressive), targetFrequency);
+
+        var result = await new PerformanceScheduleController(
+                new FakePlatformController(turbo, calls), cpu,
+                new FakeBoostController(new(ProcessorBoostMode.EfficientEnabled, ProcessorBoostMode.EfficientEnabled), calls), frequency)
+            .ApplyAsync(target, true, CancellationToken.None, retainSelectedPlatformOnFailure: true);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(turbo, result.ConfirmedPlatform);
+        Assert.Equal(originalCpu, await cpu.ReadCpuPolicyAsync(CancellationToken.None));
+        Assert.Single(calls, call => call == "set-frequency");
+    }
+
+    [Fact]
+    public async Task RetainOnFailure_WhenLiveModeAlreadyChanged_ReportsItWithoutWriting()
+    {
+        var calls = new List<string>();
+        var actual = new PlatformModeSelection(PlatformMode.TurboHigh);
+        var target = new PerformanceSchedule(new(PlatformMode.TurboQuiet), null,
+            new(ProcessorBoostMode.Aggressive, ProcessorBoostMode.Aggressive), ProcessorFrequencyLimitPolicy.Uniform(0));
+
+        var result = await new PerformanceScheduleController(
+                new FakePlatformController(actual, calls), new FakeCpuController(null, calls),
+                new FakeBoostController(new(ProcessorBoostMode.EfficientEnabled, ProcessorBoostMode.EfficientEnabled), calls),
+                new FakeFrequencyController(ProcessorFrequencyLimitPolicy.Uniform(3400), calls))
+            .ApplyAsync(target, true, CancellationToken.None, retainSelectedPlatformOnFailure: true);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(actual, result.ConfirmedPlatform);
+        Assert.DoesNotContain(calls, call => call.StartsWith("set-", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Rollback_RestoresModeThroughCapturedPointAndReportsStrategyItCouldNotRestore(bool strategyStayedOn)
+    {
+        var calls = new List<string>();
+        var original = new PlatformModeSelection(PlatformMode.TurboQuiet);
+        var platform = new RestorePointPlatformController(original, calls)
+        {
+            ConfirmedAfterRestore = strategyStayedOn ? new(PlatformMode.TurboHigh) : original
+        };
+        var zero = ProcessorFrequencyLimitPolicy.Uniform(0);
+        var frequency = new FakeFrequencyController(zero, calls) { RejectNextTarget = ProcessorFrequencyLimitPolicy.Uniform(4100) };
+        var target = new PerformanceSchedule(new(PlatformMode.Balanced), null,
+            new(ProcessorBoostMode.Aggressive, ProcessorBoostMode.Aggressive), ProcessorFrequencyLimitPolicy.Uniform(4100));
+
+        var result = await new PerformanceScheduleController(platform, new FakeCpuController(null, calls),
+                new FakeBoostController(new(ProcessorBoostMode.EfficientEnabled, ProcessorBoostMode.EfficientEnabled), calls), frequency)
+            .ApplyAsync(target, false, CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(new PlatformRestorePoint(original, false), platform.Restored);
+        Assert.Equal(strategyStayedOn, result.Reason.Contains("子策略未回到原状态", StringComparison.Ordinal));
+    }
+
+    private sealed class RestorePointPlatformController(PlatformModeSelection current, List<string> calls) : IPlatformModeController
+    {
+        public PlatformModeSelection? ConfirmedAfterRestore { get; init; }
+        public PlatformRestorePoint? Restored { get; private set; }
+
+        public ValueTask<PlatformModeSelection?> ReadPlatformModeAsync(CancellationToken cancellationToken) =>
+            ValueTask.FromResult<PlatformModeSelection?>(current);
+
+        public ValueTask<PlatformRestorePoint?> CaptureRestorePointAsync(CancellationToken cancellationToken) =>
+            ValueTask.FromResult<PlatformRestorePoint?>(new(current, false));
+
+        public ValueTask<ControlResult> SetPlatformModeAsync(PlatformModeSelection selection, CancellationToken cancellationToken)
+        {
+            calls.Add("set-platform");
+            current = selection;
+            return ValueTask.FromResult(new ControlResult(true, "ok"));
+        }
+
+        public ValueTask<ControlResult> RestorePlatformModeAsync(PlatformRestorePoint point, CancellationToken cancellationToken)
+        {
+            calls.Add("restore-platform");
+            Restored = point;
+            current = point.Selection;
+            return ValueTask.FromResult(new ControlResult(true, "ok") { ConfirmedPlatform = ConfirmedAfterRestore });
+        }
+    }
+
     private sealed class FakePlatformController(PlatformModeSelection current, List<string> calls) : IPlatformModeController
     {
         public PlatformModeSelection Current => current;
         public Action? AfterSet { get; set; }
+        public PlatformModeSelection? RejectedButConfirmedPlatform { get; init; }
         public ValueTask<PlatformModeSelection?> ReadPlatformModeAsync(CancellationToken cancellationToken)
         {
             calls.Add("read-platform");
@@ -235,6 +457,14 @@ public sealed class PerformanceScheduleControllerTests
         public ValueTask<ControlResult> SetPlatformModeAsync(PlatformModeSelection selection, CancellationToken cancellationToken)
         {
             calls.Add("set-platform");
+            if (RejectedButConfirmedPlatform is { } actual)
+            {
+                current = actual;
+                return ValueTask.FromResult(new ControlResult(false, "strategy unconfirmed; basic mode retained")
+                {
+                    ConfirmedPlatform = actual
+                });
+            }
             current = selection;
             AfterSet?.Invoke();
             return ValueTask.FromResult(new ControlResult(true, "ok"));
@@ -243,6 +473,8 @@ public sealed class PerformanceScheduleControllerTests
 
     private sealed class FakeBoostController(ProcessorBoostPolicy current, List<string> calls) : IProcessorBoostController
     {
+        public ProcessorBoostPolicy? RejectNextTarget { get; init; }
+
         public ValueTask<ProcessorBoostPolicy> ReadAsync(CancellationToken cancellationToken)
         {
             calls.Add("read-boost");
@@ -252,6 +484,8 @@ public sealed class PerformanceScheduleControllerTests
         public ValueTask<ControlResult> ApplyAsync(ProcessorBoostPolicy policy, CancellationToken cancellationToken)
         {
             calls.Add("set-boost");
+            if (policy == RejectNextTarget)
+                return ValueTask.FromResult(ControlResult.Rejected("simulated boost failure"));
             current = policy;
             return ValueTask.FromResult(new ControlResult(true, "ok"));
         }

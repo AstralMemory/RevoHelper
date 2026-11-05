@@ -54,9 +54,49 @@ public sealed class GcuGpuOutputModeTests
         Assert.Equal(GpuOutputMode.Discrete, channel.Status.Mode);
     }
 
-    private sealed class FakeCapabilities(bool direct, bool integrated) : IGpuOutputModeCapabilitySource
+    [Theory]
+    // Live GCU answer decides, whatever the registry says.
+    [InlineData(true, null, true)]
+    [InlineData(true, false, true)]
+    [InlineData(false, true, false)]
+    // GCU silent: an explicit registry value speaks, and missing values stay attemptable.
+    [InlineData(null, true, true)]
+    [InlineData(null, false, false)]
+    [InlineData(null, null, true)]
+    public async Task Controller_DistinguishesMissingSupportInformationFromExplicitNo(
+        bool? live, bool? machine, bool allowed)
     {
-        public GpuOutputModeCapabilities Read() => new(direct, direct, integrated);
+        var channel = new FakeChannel(new(GpuOutputMode.Hybrid, live, live));
+        var controller = new GcuGpuOutputModeController(channel, new FakeCapabilities(machine, machine));
+
+        var state = await controller.ReadStateAsync(CancellationToken.None);
+        var discrete = await controller.SetModeAsync(GpuOutputMode.Discrete, CancellationToken.None);
+        var integrated = await controller.SetModeAsync(GpuOutputMode.Integrated, CancellationToken.None);
+
+        Assert.Equal(allowed, state!.Capabilities.SupportsDiscrete);
+        Assert.Equal(allowed, state.Capabilities.SupportsIntegrated);
+        Assert.Equal(allowed, discrete.Succeeded);
+        Assert.Equal(allowed, integrated.Succeeded);
+        Assert.Equal(allowed ? [GpuOutputMode.Discrete, GpuOutputMode.Integrated] : [], channel.Writes);
+    }
+
+    [Theory]
+    [InlineData(1, true)]
+    [InlineData(0, false)]
+    [InlineData(1L, true)]
+    [InlineData(0L, false)]
+    [InlineData("1", true)]
+    [InlineData("true", true)]
+    [InlineData("0", false)]
+    [InlineData("false", false)]
+    [InlineData("unexpected", null)]
+    [InlineData(null, null)]
+    public void RegistryFlag_MissingOrUnreadableIsUnknownNotUnsupported(object? value, bool? expected) =>
+        Assert.Equal(expected, WindowsGpuOutputModeCapabilitySource.ParseFlag(value));
+
+    private sealed class FakeCapabilities(bool? direct, bool? integrated) : IGpuOutputModeCapabilitySource
+    {
+        public GpuOutputMachineSupport Read() => new(direct, integrated);
     }
 
     private sealed class FakeChannel(GcuGpuOutputModeStatus status) : IGcuGpuOutputModeChannel

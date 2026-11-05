@@ -43,6 +43,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
     private readonly Func<DateTimeOffset> utcNow;
     private readonly PerformanceScheduleController? scheduleController;
     private readonly Func<TimeSpan, CancellationToken, Task> verificationDelay;
+    private readonly Action<string, string>? diagnostic;
     private readonly Dictionary<string, FanCurveTable> fanReadbacksByProfile = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, FanCurveTable> fanDraftsByProfile = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, CpuPowerLimitProfile> powerReadbacksByProfile = new(StringComparer.OrdinalIgnoreCase);
@@ -84,12 +85,14 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
     private bool isApplyingPerformancePolicy;
     private bool isApplyingPlatformMode;
     private long platformRequestRevision;
+    private long platformCommandRevision = -1;
     private PlatformModeSelection? confirmedPlatformSelection;
     private readonly SemaphoreSlim performanceTransitionGate = new(1, 1);
     private volatile bool isShuttingDown;
     private PlatformModeSelection? pendingFrequencyObservation;
     private long pendingFrequencyObservationRevision;
     private PlatformModeSelection? lastSynchronizedPlatformSelection;
+    private PlatformModeSelection? modeOnlyPlatformSelection;
     private long platformObservationRevision;
     private LocalizedUiCopy localizedUiCopy;
     private GpuOutputMode selectedGpuOutputMode = GpuOutputMode.Hybrid;
@@ -100,7 +103,6 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
     private int selectedMaximumProcessorFrequencyMhz = 3100;
     private string processorFrequencyLimitStatusText = "等待读取当前 Windows 频率上限";
     private RuntimeCapabilitySnapshot? runtimeCapabilities;
-    private IReadOnlySet<PlatformMode>? confirmedDisplayModes;
     private bool isManagingConflictServices;
     private string conflictServiceOperationStatusText = "选择服务后可临时停止或恢复运行。";
     private bool isOfficialConsoleRunning;
@@ -136,7 +138,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
     private int? liquidCoolingPumpDutyPercent;
     private string? selectedLiquidCoolingDeviceId;
     private string? liquidCoolingFirmwareVersion;
-    private bool liquidCoolingCanControl;
+    private bool? liquidCoolingCanControl = false;
     private bool isLiquidCoolingPriming;
     private bool? liquidCoolingMeterNormal;
     private bool isLiquidCoolingBusy;
@@ -214,7 +216,8 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
         Func<DateTimeOffset>? utcNow = null,
         ExperimentalControlsViewModel? experiments = null,
         IFanBoostController? fanBoostController = null,
-        IShutdownScheduler? shutdownScheduler = null)
+        IShutdownScheduler? shutdownScheduler = null,
+        Action<string, string>? diagnostic = null)
     {
         Experiments = experiments ?? new();
         Dashboard = dashboard;
@@ -255,6 +258,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
         liquidCoolingReconnect = new(this.utcNow);
         this.officialConsoleRunningProbe = officialConsoleRunningProbe ?? (() => false);
         this.verificationDelay = verificationDelay ?? Task.Delay;
+        this.diagnostic = diagnostic;
         RestoreSavedLightingProfile();
         if (cpuPolicyController is not null && boostController is not null && platformModeController is not null)
         {
@@ -262,13 +266,19 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
                 platformModeController,
                 cpuPolicyController,
                 boostController,
-                frequencyLimitController ?? new NullProcessorFrequencyLimitController());
+                frequencyLimitController ?? new NullProcessorFrequencyLimitController(),
+                diagnostic: diagnostic);
         }
         LoadSavedPerformanceProfiles(settings.PerformanceProfiles);
         SwitchFrequencyDraftForCurrentProfile();
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
+    private void TraceControl(string area, string message)
+    {
+        try { diagnostic?.Invoke(area, message); }
+        catch (Exception) { /* Diagnostics cannot alter control outcomes. */ }
+    }
     public event Action? CapabilityRecheckRequested;
     private bool isCapabilityDetectionBusy;
 
@@ -400,10 +410,12 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
         try
         {
             UpdateConflictServices(await conflictServiceManager.DetectAsync(cancellationToken));
+            TraceControl("intel-services", "snapshot " + string.Join(",", ConflictServices.Select(service => $"{service.ServiceName}={service.NativeState}")));
         }
         catch (Exception exception)
         {
             ConflictServiceOperationStatusText = $"服务检测失败：{exception.Message}";
+            TraceControl("intel-services", ConflictServiceOperationStatusText);
         }
     }
 
@@ -426,22 +438,44 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
         RefreshConflictServiceActionProperties();
         try
         {
-            if (restore)
+            string? failure = null;
+            var command = restore ? "start" : "stop";
+            TraceControl("intel-services", $"manual {command} requested={string.Join(",", serviceNames)}");
+            try
             {
-                await conflictServiceManager.RestoreAsync(serviceNames, cancellationToken);
+                if (restore)
+                    await conflictServiceManager.RestoreAsync(serviceNames, cancellationToken);
+                else
+                    await conflictServiceManager.StopAsync(serviceNames, cancellationToken);
             }
-            else
+            catch (Exception exception)
             {
-                await conflictServiceManager.StopAsync(serviceNames, cancellationToken);
+                failure = $"服务{(restore ? "恢复" : "停止")}失败：{exception.Message}";
             }
-            await RefreshConflictServicesAsync(cancellationToken);
-            ConflictServiceOperationStatusText = restore
+            // A partially completed or cancelled operation can still have changed
+            // earlier services. Refresh without reusing the cancelled command token.
+            try
+            {
+                using var refreshTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                var statuses = await conflictServiceManager.DetectAsync(refreshTimeout.Token).WaitAsync(refreshTimeout.Token);
+                UpdateConflictServices(statuses);
+                TraceControl("intel-services", "after " + command + " " + string.Join(",",
+                    statuses.Select(service => $"{service.ServiceName}={service.NativeState}")));
+                var expected = restore ? "Running" : "Stopped";
+                var unconfirmed = serviceNames.Where(name => !statuses.Any(service =>
+                    service.ServiceName.Equals(name, StringComparison.OrdinalIgnoreCase) &&
+                    service.IsInstalled && service.NativeState.Equals(expected, StringComparison.OrdinalIgnoreCase))).ToArray();
+                if (failure is null && unconfirmed.Length > 0)
+                    failure = "服务状态尚未确认：" + string.Join("、", unconfirmed) + "。";
+            }
+            catch (Exception exception)
+            {
+                failure = (failure is null ? "" : failure + "；") + $"服务检测失败：{exception.Message}";
+            }
+            ConflictServiceOperationStatusText = failure ?? (restore
                 ? "所选服务已恢复运行，并已重新检测状态。"
-                : "所选服务已停止，并已重新检测状态。";
-        }
-        catch (Exception exception)
-        {
-            ConflictServiceOperationStatusText = $"服务{(restore ? "恢复" : "停止")}失败：{exception.Message}";
+                : "所选服务已停止，并已重新检测状态。");
+            TraceControl("intel-services", $"manual {command} result={ConflictServiceOperationStatusText}");
         }
         finally
         {
@@ -553,27 +587,22 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
 
     public string MachineName => Dashboard.Identity.ProductName;
 
-    public bool CanUseOfficeMode => SupportsPlatformMode(PlatformMode.Office);
-    public bool ShowOfficeMode => IsModeVisible(PlatformMode.Office);
-    public bool ShowBalancedMode => IsModeVisible(PlatformMode.Balanced);
-    public bool ShowTurboMode => IsModeVisible(PlatformMode.TurboQuiet) || IsModeVisible(PlatformMode.TurboHigh);
-    public bool ShowTurboStrategies => IsModeVisible(PlatformMode.TurboQuiet) && IsModeVisible(PlatformMode.TurboHigh);
+    public bool CanUseOfficeMode => CanAttemptPlatformMode(PlatformMode.Office);
+    // A partial status/profile list is not a complete inventory of supported modes.
+    // Keep typed base commands available for explicit manual attempts.
+    public bool ShowOfficeMode => true;
+    public bool ShowBalancedMode => true;
+    public bool ShowTurboMode => true;
+    public bool ShowTurboStrategies => runtimeCapabilities?.SupportedPlatformModes.Contains(PlatformMode.TurboHigh) == true;
     public string TurboModeDescription => ShowTurboStrategies ? UiCopy.TurboDescription
         : SelectedUiLanguageCode == "en-US" ? "OEM performance preset" : "固件性能预设";
-    public bool ShowCustomMode => IsModeVisible(PlatformMode.Custom);
-    public bool HasTwoPresetModes => confirmedDisplayModes is { Count: 2 } modes &&
-        modes.Contains(PlatformMode.Office) && modes.Contains(PlatformMode.Balanced);
-    public int PresetRowSpan => HasTwoPresetModes ? 2 : 1;
-    public string OfficeModeTitle => HasTwoPresetModes
-        ? SelectedUiLanguageCode == "en-US" ? "Balanced" : "平衡模式" : UiCopy.OfficeTitle;
-    public string BalancedModeTitle => HasTwoPresetModes
-        ? SelectedUiLanguageCode == "en-US" ? "Performance" : "性能模式" : UiCopy.BalancedTitle;
-    public string OfficeModeDescription => HasTwoPresetModes
-        ? SelectedUiLanguageCode == "en-US" ? "OEM balanced preset" : "固件平衡预设" : UiCopy.OfficeDescription;
-    public string BalancedModeDescription => HasTwoPresetModes
-        ? SelectedUiLanguageCode == "en-US" ? "OEM performance preset" : "固件性能预设" : UiCopy.BalancedDescription;
-
-    private bool IsModeVisible(PlatformMode mode) => confirmedDisplayModes?.Contains(mode) ?? true;
+    public bool ShowCustomMode => true;
+    public bool HasTwoPresetModes => false;
+    public int PresetRowSpan => 1;
+    public string OfficeModeTitle => UiCopy.OfficeTitle;
+    public string BalancedModeTitle => UiCopy.BalancedTitle;
+    public string OfficeModeDescription => UiCopy.OfficeDescription;
+    public string BalancedModeDescription => UiCopy.BalancedDescription;
 
     private void RefreshModePresentation()
     {
@@ -583,10 +612,10 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
             nameof(BalancedModeDescription), nameof(CurrentFanProfileLabel) }) OnPropertyChanged(property);
         NotifyCapabilityReasons();
     }
-    public bool CanUseBalancedMode => SupportsPlatformMode(PlatformMode.Balanced);
-    public bool CanUseTurboQuietMode => SupportsPlatformMode(PlatformMode.TurboQuiet);
-    public bool CanUseTurboHighMode => SupportsPlatformMode(PlatformMode.TurboHigh);
-    public bool CanUseCustomMode => SupportsPlatformMode(PlatformMode.Custom);
+    public bool CanUseBalancedMode => CanAttemptPlatformMode(PlatformMode.Balanced);
+    public bool CanUseTurboQuietMode => CanAttemptPlatformMode(PlatformMode.TurboQuiet);
+    public bool CanUseTurboHighMode => CanAttemptPlatformMode(PlatformMode.TurboHigh);
+    public bool CanUseCustomMode => CanAttemptPlatformMode(PlatformMode.Custom);
     public bool CanOpenFanAdjustment => SupportsFeature(HardwareFeature.OemFanCurves);
     public string OfficeModeTooltip => CanUseOfficeMode ? OfficeModeDescription : ModeAvailabilityReason();
     public string BalancedModeTooltip => CanUseBalancedMode ? BalancedModeDescription : ModeAvailabilityReason();
@@ -644,10 +673,8 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
     public void ApplyRuntimeCapabilities(RuntimeCapabilitySnapshot snapshot)
     {
         runtimeCapabilities = snapshot;
-        // No evidence is not evidence of an unsupported mode. Keep the last confirmed layout
-        // through transport outages; capability gates still control whether commands are allowed.
-        if (snapshot.SupportedPlatformModes.Count > 0)
-            confirmedDisplayModes = new HashSet<PlatformMode>(snapshot.SupportedPlatformModes);
+        // Observed capabilities still govern dependent parameter editing. They do
+        // not veto explicit base-mode requests or hide commands not yet observed.
         RefreshModePresentation();
         OnPropertyChanged(nameof(CanUseOfficeMode));
         OnPropertyChanged(nameof(CanUseBalancedMode));
@@ -688,6 +715,14 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
     private bool SupportsPlatformMode(PlatformMode mode) =>
         runtimeCapabilities?.SupportedPlatformModes.Contains(mode) ?? true;
 
+    private bool CanAttemptPlatformMode(PlatformMode mode) =>
+        platformModeController is not null && !isShuttingDown && mode switch
+        {
+            PlatformMode.Office or PlatformMode.Balanced or PlatformMode.TurboQuiet or PlatformMode.Custom => true,
+            PlatformMode.TurboHigh => ShowTurboStrategies,
+            _ => false
+        };
+
     private string CapabilityReason(HardwareFeature feature)
     {
         if (runtimeCapabilities is null ||
@@ -704,8 +739,8 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
             CapabilityDiagnostic.OtherManufacturer => "当前设备未识别为机械革命，暂不开放 OEM 控制。",
             CapabilityDiagnostic.ControlChainIncomplete => "官方控制组件未确认完整；请确认官方控制台及其服务可用后重新检测。",
             CapabilityDiagnostic.AwaitingEvidence when feature == HardwareFeature.OemPlatformModes =>
-                "已识别官方控制组件，尚未收到可用档位；请确认服务连接后重新检测。",
-            CapabilityDiagnostic.AwaitingEvidence => "控制链存在，但尚未收到此功能的运行时证据。",
+                "尚未收到可用档位信息；基础档位仍可手动尝试。",
+            CapabilityDiagnostic.AwaitingEvidence => "尚未收到此功能的运行时证据。",
             _ => string.IsNullOrWhiteSpace(capability.Reason) ? "当前设备未确认支持此功能。" : capability.Reason
         };
     }
@@ -725,11 +760,12 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
 
     public bool IsReadOnlyPreview => true;
 
-    public bool IsPlatformSwitchPending => isApplyingPlatformMode;
+    public bool IsPlatformSwitchPending => isApplyingPlatformMode &&
+        Volatile.Read(ref platformCommandRevision) == Volatile.Read(ref platformRequestRevision);
 
-    public string ReleaseVersionText => "V1.0.2";
+    public string ReleaseVersionText => "V1.0.3";
 
-    public string ReleaseBadgeText => "V1.0.2";
+    public string ReleaseBadgeText => "V1.0.3";
 
     public string AppVersionText => $"RevoHelper {ReleaseVersionText} · {UiCopy.OpenSourceAndFree}";
 
@@ -1105,10 +1141,10 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
 
     public bool CanScanLiquidCooling => !IsLiquidCoolingBusy && !IsLiquidCoolingPriming;
     public bool CanConnectLiquidCooling => !IsLiquidCoolingBusy && !IsLiquidCoolingConnected &&
-        !IsLiquidCoolingPriming && liquidCoolingCanControl && !string.IsNullOrWhiteSpace(SelectedLiquidCoolingDeviceId);
-    public bool CanDisconnectLiquidCooling => !IsLiquidCoolingBusy && !IsLiquidCoolingPriming && IsLiquidCoolingConnected && liquidCoolingCanControl;
-    public bool CanPrimeLiquidCooling => !IsLiquidCoolingBusy && !IsLiquidCoolingPriming && IsLiquidCoolingConnected && liquidCoolingCanControl;
-    public bool CanResetLiquidCooling => !IsLiquidCoolingBusy && !IsLiquidCoolingPriming && liquidCoolingCanControl;
+        !IsLiquidCoolingPriming && liquidCoolingCanControl != false && !string.IsNullOrWhiteSpace(SelectedLiquidCoolingDeviceId);
+    public bool CanDisconnectLiquidCooling => !IsLiquidCoolingBusy && !IsLiquidCoolingPriming && IsLiquidCoolingConnected && liquidCoolingCanControl != false;
+    public bool CanPrimeLiquidCooling => !IsLiquidCoolingBusy && !IsLiquidCoolingPriming && IsLiquidCoolingConnected && liquidCoolingCanControl == true;
+    public bool CanResetLiquidCooling => !IsLiquidCoolingBusy && !IsLiquidCoolingPriming && liquidCoolingCanControl == true;
     public bool CanControlLiquidCoolingStrategy => !IsLiquidCoolingBusy && !IsLiquidCoolingPriming && IsLiquidCoolingConnected;
 
     public bool IsLiquidCoolingAutoConnectEnabled
@@ -1374,38 +1410,61 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
                 return;
             }
 
+            StartupRegistrationState? previous = null;
+            var registrationCompleted = false;
+            var stage = "读取启动项原配置";
             try
             {
+                previous = startupRegistration.CaptureState();
+                stage = "写入启动项";
                 startupRegistration.SetEnabled(value);
-                var confirmed = startupRegistration.IsEnabled();
-                if (confirmed != value)
-                {
-                    StatusMessage = "启动项写入后未确认目标状态 · 未修改界面设置";
-                    return;
-                }
-                if (TrySaveSettings(applicationSettings with { StartWithWindows = value }))
-                {
-                    StatusMessage = value ? "已启用随 Windows 启动" : "已关闭随 Windows 启动";
-                    OnPropertyChanged();
-                }
-                else
+                registrationCompleted = true;
+                stage = "确认启动项";
+                if (startupRegistration.IsEnabled() != value)
+                    throw new InvalidOperationException("启动项写入后未确认目标状态");
+                stage = "保存本地设置";
+                var updated = applicationSettings with { StartWithWindows = value };
+                settingsStore.Save(updated);
+                applicationSettings = updated;
+                OnPropertyChanged();
+                StatusMessage = value ? "已启用随 Windows 启动" : "已关闭随 Windows 启动";
+                TraceControl("startup", $"set enabled={value} confirmed and saved");
+            }
+            catch (Exception exception)
+            {
+                TraceControl("startup", $"{stage} failed requested={value} error={exception}");
+                var recovery = "";
+                // SetEnabled owns rollback of a partially failed registration. Once it
+                // succeeds, later confirmation/persistence failures restore the full
+                // original task and legacy values, not a new inverse registration.
+                if (registrationCompleted && previous is not null)
                 {
                     try
                     {
-                        startupRegistration.SetEnabled(!value);
-                        StatusMessage = "启动项设置失败 · 未修改现有状态";
+                        startupRegistration.RestoreState(previous);
+                        recovery = " · 已恢复原启动项配置";
                     }
-                    catch (Exception)
+                    catch (Exception restoreException)
                     {
-                        applicationSettings = applicationSettings with { StartWithWindows = value };
-                        OnPropertyChanged();
-                        StatusMessage = "启动项已修改 · 本地设置保存及回滚失败";
+                        recovery = " · 原启动项配置恢复失败";
+                        TraceControl("startup", $"restore failed error={restoreException}");
                     }
                 }
-            }
-            catch (Exception)
-            {
-                StatusMessage = "启动项设置失败 · 未修改现有状态";
+                string actualState;
+                try
+                {
+                    var actual = startupRegistration.IsEnabled();
+                    applicationSettings = applicationSettings with { StartWithWindows = actual };
+                    OnPropertyChanged();
+                    actualState = actual ? "当前已启用" : "当前未启用";
+                    TraceControl("startup", $"after failure actual-enabled={actual}");
+                }
+                catch (Exception readException)
+                {
+                    actualState = "当前启动项状态无法确认";
+                    TraceControl("startup", $"after failure read failed error={readException}");
+                }
+                StatusMessage = $"{stage}失败 · {exception.GetBaseException().Message}{recovery} · {actualState}";
             }
         }
     }
@@ -1492,17 +1551,19 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
         StatusMessage = "性能监控设置已展开";
     }
 
-    private async Task<bool> PauseDynamicForManualControlAsync()
+    private async Task<bool> PauseDynamicForManualControlAsync(CancellationToken cancellationToken = default)
     {
-        if (await Experiments.PauseForManualControlAsync()) return true;
+        var prepared = await Experiments.PauseForManualControlAsync(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (prepared) return true;
         StatusMessage = ManualControlBlockedMessage;
         return false;
     }
 
     private string ManualControlBlockedMessage => Experiments.Charge.RecoveryPending
-        ? "限充恢复未完成，请在电源设置中恢复原值后再调整。"
+        ? $"性能调整未执行：限充恢复未完成。{Experiments.Charge.StatusText}"
         : Experiments.Charge.IsBusy
-            ? "限充正在切换或恢复，请等待完成后再调整。"
+            ? "性能调整未执行：限充正在切换或恢复，请等待完成后再调整。"
             : "动态频率恢复未完成，请在更多方案中重试恢复后再调整。";
 
     public void OpenMoreProfiles() => ActiveDrawer = HomeDrawer.MoreProfiles;
@@ -2252,15 +2313,12 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
         {
             "office" => new PlatformModeSelection(PlatformMode.Office),
             "balanced" => new PlatformModeSelection(PlatformMode.Balanced),
-            "turbo" => new PlatformModeSelection(
-                SelectedTurboStrategy is TurboStrategy.HighEfficiency && CanUseTurboHighMode
-                    ? PlatformMode.TurboHigh
-                    : PlatformMode.TurboQuiet),
+            "turbo" => new PlatformModeSelection(PlatformMode.TurboQuiet),
             "custom" => new PlatformModeSelection(PlatformMode.Custom, SelectedCustomProfileIndex),
             _ => null
         };
         if (selection is null) return false;
-        return await ApplyPlatformSelectionAsync(selection, cancellationToken);
+        return await ApplyPlatformSelectionAsync(selection, cancellationToken, basicTurbo: profileId == "turbo");
     }
 
     public Task<bool> ApplyTurboStrategyAsync(TurboStrategy strategy, CancellationToken cancellationToken) =>
@@ -2281,25 +2339,28 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
 
     private async Task<bool> ApplyPlatformSelectionAsync(
         PlatformModeSelection selection,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool basicTurbo = false)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (isShuttingDown || platformModeController is null) return false;
-        if (!SupportsPlatformMode(selection.Mode))
+        if (!CanAttemptPlatformMode(selection.Mode))
         {
-            StatusMessage = "当前设备尚未返回该 OEM 性能档位的可用证据";
+            StatusMessage = "当前控制接口尚未确认支持该狂暴子策略；未发送指令。";
             return false;
         }
 
         var previousPresentation = confirmedPlatformSelection ?? CurrentPlatformSelection();
         var requestRevision = Interlocked.Increment(ref platformRequestRevision);
+        TraceControl("performance-request", $"request={requestRevision} target={selection.Mode}:{selection.ProfileIndex} confirmed={confirmedPlatformSelection?.Mode} chargePending={Experiments.Charge.RecoveryPending} dynamicPending={Experiments.HasRecoveryPending}");
         Interlocked.Increment(ref platformObservationRevision);
         isApplyingPlatformMode = true;
         OnPropertyChanged(nameof(IsPlatformSwitchPending));
-        // This is presentation only. The confirmed selection is deliberately kept separate,
-        // and parameter writes stay behind the transition gate until hardware confirmation.
-        ApplyLivePlatformSelection(selection);
-        StatusMessage = "正在切换整机档位并等待 GCU 回读…";
+        // A request may first reconcile an orphaned session. Keep the previous
+        // selection and do not advertise a GCU switch before preparation succeeds.
+        StatusMessage = Experiments.Charge.RecoveryPending
+            ? "正在核对并恢复上次控制状态，尚未发送档位指令…"
+            : "正在准备切换整机档位…";
         NotifyCustomPerformanceAvailability();
         RefreshPerformanceProperties();
         var gateHeld = false;
@@ -2309,7 +2370,8 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
             gateHeld = true;
             // A newer click supersedes requests that have not started writing yet.
             if (isShuttingDown || requestRevision != Volatile.Read(ref platformRequestRevision)) return false;
-            var succeeded = await ApplyPlatformSelectionCoreAsync(selection, requestRevision, cancellationToken);
+            TraceControl("performance-request", $"request={requestRevision} gate-acquired");
+            var succeeded = await ApplyPlatformSelectionCoreAsync(selection, requestRevision, cancellationToken, basicTurbo);
             if (!succeeded && requestRevision == Volatile.Read(ref platformRequestRevision))
                 await RestorePlatformPresentationAsync(requestRevision, previousPresentation);
             return succeeded;
@@ -2332,6 +2394,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
         }
         finally
         {
+            TraceControl("performance-request", $"request={requestRevision} finished confirmed={confirmedPlatformSelection?.Mode}:{confirmedPlatformSelection?.ProfileIndex} latest={requestRevision == Volatile.Read(ref platformRequestRevision)} message={StatusMessage}");
             if (requestRevision == Volatile.Read(ref platformRequestRevision))
             {
                 isApplyingPlatformMode = false;
@@ -2346,42 +2409,112 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
     private async Task<bool> ApplyPlatformSelectionCoreAsync(
         PlatformModeSelection selection,
         long requestRevision,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool basicTurbo)
     {
         if (platformModeController is null) return false;
         bool IsLatestRequest() => requestRevision == Volatile.Read(ref platformRequestRevision);
+        var previousConfirmed = confirmedPlatformSelection;
+        PlatformModeSelection? retainedBasicTurbo = null;
         try
         {
-            if (!await PauseDynamicForManualControlAsync()) return false;
-            if (!IsLatestRequest()) return false;
-            if (!SupportsPlatformMode(selection.Mode))
+            if (!await PauseDynamicForManualControlAsync(cancellationToken))
             {
-                StatusMessage = "当前设备尚未返回该 OEM 性能档位的可用证据";
+                TraceControl("performance-request", $"request={requestRevision} prepare-blocked reason={StatusMessage} dynamic={Experiments.DynamicMessage}");
                 return false;
             }
-            StatusMessage = "正在切换整机档位并等待 GCU 回读…";
-            if (scheduleController is null)
+            TraceControl("performance-request", $"request={requestRevision} prepared");
+            if (!IsLatestRequest() || isShuttingDown) return false;
+            if (!CanAttemptPlatformMode(selection.Mode))
             {
-                var modeResult = await platformModeController.SetPlatformModeAsync(selection, cancellationToken);
+                StatusMessage = "当前控制接口尚未确认支持该狂暴子策略；未发送指令。";
+                return false;
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            Volatile.Write(ref platformCommandRevision, requestRevision);
+            OnPropertyChanged(nameof(IsPlatformSwitchPending));
+            // Optimistic presentation is allowed only after preparation. Hardware
+            // confirmation remains separate, and failures still read back/restore it.
+            ApplyLivePlatformSelection(selection);
+            StatusMessage = "正在切换整机档位并等待 GCU 回读…";
+            // An explicit typed mode command can be verified without knowing the
+            // starting mode or a capability list. Keep an unobserved target out
+            // of the combined PL/Boost/frequency scheduler and its prerequisites.
+            var modeOnly = scheduleController is null || !SupportsPlatformMode(selection.Mode) ||
+                await platformModeController.ReadPlatformModeAsync(cancellationToken) is null;
+            TraceControl("performance-request", $"request={requestRevision} route={(modeOnly ? "mode-only" : "schedule")}");
+            ControlResult? basicResult = null;
+            if (basicTurbo)
+            {
+                basicResult = await platformModeController.SetBasicTurboModeAsync(selection.ProfileIndex, cancellationToken);
+                TraceControl("performance-request", $"request={requestRevision} basic-turbo={basicResult.Succeeded} reason={basicResult.Reason}");
+                if (basicResult.ConfirmedPlatform is { } confirmed)
+                {
+                    ConfirmPlatformSelection(confirmed);
+                    if (IsLatestRequest()) ApplyLivePlatformSelection(confirmed);
+                }
+                if (!basicResult.Succeeded)
+                {
+                    if (IsLatestRequest()) StatusMessage = basicResult.Reason;
+                    return false;
+                }
+                // The base command can preserve either firmware Turbo strategy. Use
+                // its actual mode for the saved Boost/frequency policy, and do not
+                // turn a base-card click into a subsequent strategy write.
+                selection = basicResult.ConfirmedPlatform ??
+                    await platformModeController.ReadPlatformModeAsync(cancellationToken) ?? selection;
+                if (selection.Mode is not (PlatformMode.TurboQuiet or PlatformMode.TurboHigh))
+                {
+                    if (IsLatestRequest()) StatusMessage = "基础狂暴档位未确认，未应用后续策略。";
+                    return false;
+                }
+                ConfirmPlatformSelection(selection);
+                retainedBasicTurbo = selection;
+                if (IsLatestRequest()) ApplyLivePlatformSelection(selection);
+                if (!IsLatestRequest() || isShuttingDown) return true;
+            }
+            if (modeOnly)
+            {
+                var modeResult = basicResult ?? await platformModeController.SetPlatformModeAsync(selection, cancellationToken);
+                TraceControl("performance-request", $"request={requestRevision} mode-result={modeResult.Succeeded} reason={modeResult.Reason}");
+                if (modeResult.ConfirmedPlatform is { } confirmed)
+                {
+                    ConfirmPlatformSelection(confirmed);
+                    if (IsLatestRequest()) ApplyLivePlatformSelection(confirmed);
+                }
                 if (!modeResult.Succeeded)
                 {
-                    if (IsLatestRequest()) StatusMessage = modeResult.Reason;
+                    await ReconcileRetainedPlatformAsync(modeResult.ConfirmedPlatform, modeResult.Reason,
+                        requestRevision, cancellationToken);
                     return false;
                 }
                 ConfirmPlatformSelection(selection);
                 lastSynchronizedPlatformSelection = selection;
-                if (IsLatestRequest()) StatusMessage = modeResult.Reason;
-                return true;
+                modeOnlyPlatformSelection = selection;
+                if (!IsLatestRequest()) return true;
+                StatusMessage = modeResult.Reason;
+                if (!ShouldSyncFrequencyAfterModeOnly(previousConfirmed, selection)) return true;
+                var modeOnlySettlement = await TrySettleFrequencyAsync(
+                    CreateFrequencyPolicy(selection), requestRevision, cancellationToken);
+                TraceControl("performance-request", $"request={requestRevision} mode-only-frequency={modeOnlySettlement.Succeeded} reason={modeOnlySettlement.Reason}");
+                if (!IsLatestRequest()) return true;
+                if (!modeOnlySettlement.Succeeded)
+                    StatusMessage = $"{modeResult.Reason} · {modeOnlySettlement.Reason}";
+                return modeOnlySettlement.Succeeded;
             }
 
             var schedule = CreateSchedule(selection);
-            var result = await scheduleController.ApplyAsync(
-                schedule, platformAlreadySelected: false, cancellationToken);
+            var result = await scheduleController!.ApplyAsync(
+                schedule, platformAlreadySelected: basicTurbo, cancellationToken,
+                retainSelectedPlatformOnFailure: basicTurbo);
+            TraceControl("performance-request", $"request={requestRevision} schedule-result={result.Succeeded} reason={result.Reason}");
             if (!result.Succeeded)
             {
-                if (IsLatestRequest()) StatusMessage = result.Reason;
+                await ReconcileRetainedPlatformAsync(result.ConfirmedPlatform ?? retainedBasicTurbo, result.Reason,
+                    requestRevision, cancellationToken);
                 return false;
             }
+            modeOnlyPlatformSelection = null;
             ConfirmPlatformSelection(result.Readback?.Platform ?? selection);
             lastSynchronizedPlatformSelection = selection;
             if (!IsLatestRequest()) return true;
@@ -2389,6 +2522,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
             StatusMessage = "档位已切换，正在复查 Windows 频率策略…";
             var frequencySettlement = await SettleFrequencyAfterPlatformSwitchAsync(
                 schedule.Frequency, requestRevision, cancellationToken);
+            TraceControl("performance-request", $"request={requestRevision} frequency-settlement={frequencySettlement.Succeeded} reason={frequencySettlement.Reason}");
             if (!IsLatestRequest()) return true;
             SavePerformanceProfile(selection);
             StatusMessage = frequencySettlement.Succeeded
@@ -2398,10 +2532,63 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            TraceControl("performance-request", $"request={requestRevision} exception={exception.GetType().Name}: {exception.Message}");
+            if (retainedBasicTurbo is not null)
+            {
+                // The basic mode was already confirmed, so an unrelated policy read
+                // failure must not leave the previous profile's frequency cap behind.
+                await ReconcileRetainedPlatformAsync(retainedBasicTurbo,
+                    $"已保留当前整机档位，后续策略未完全应用：{exception.Message}",
+                    requestRevision, cancellationToken);
+                return false;
+            }
             if (IsLatestRequest()) StatusMessage = $"整机档位切换异常 · {exception.Message}";
             return false;
         }
     }
+
+    private async Task ReconcileRetainedPlatformAsync(PlatformModeSelection? actual, string reason,
+        long requestRevision, CancellationToken cancellationToken)
+    {
+        if (actual is not null)
+        {
+            ConfirmPlatformSelection(actual);
+            if (requestRevision != Volatile.Read(ref platformRequestRevision) || isShuttingDown) return;
+            ApplyLivePlatformSelection(actual);
+            // Keep the failed strategy's PL/Boost draft out of this path, while
+            // removing a prior Office cap or restoring the actual mode's saved cap.
+            var frequencyResult = await TrySettleFrequencyAsync(
+                CreateFrequencyPolicy(actual), requestRevision, cancellationToken);
+            if (!frequencyResult.Succeeded) reason += $" · {frequencyResult.Reason}";
+        }
+        if (requestRevision == Volatile.Read(ref platformRequestRevision)) StatusMessage = reason;
+    }
+
+    private async Task<ControlResult> TrySettleFrequencyAsync(
+        ProcessorFrequencyLimitPolicy expected,
+        long requestRevision,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await SettleFrequencyAfterPlatformSwitchAsync(expected, requestRevision, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return ControlResult.Rejected($"频率策略同步失败：{exception.Message}");
+        }
+    }
+
+    /// <summary>
+    /// A mode-only switch still must not leave a cap this app applied for the previous
+    /// profile. Without a saved setting on either side it touches nothing, so an unknown
+    /// or externally set Windows value is never replaced by a default.
+    /// </summary>
+    private bool ShouldSyncFrequencyAfterModeOnly(PlatformModeSelection? previous, PlatformModeSelection target) =>
+        frequencyLimitController is not null &&
+        (frequencyConfiguredByProfile.GetValueOrDefault(FrequencyProfileKey(target)) ||
+         previous is not null && previous != target &&
+         CreateFrequencyPolicy(previous) != ProcessorFrequencyLimitPolicy.Uniform(0));
 
     private void ConfirmPlatformSelection(PlatformModeSelection selection)
     {
@@ -2443,6 +2630,21 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
         if (isApplyingPlatformMode || isApplyingPerformancePolicy)
         {
             return false;
+        }
+
+        if (modeOnlyPlatformSelection is { } modeOnly)
+        {
+            if (modeOnly == selection)
+            {
+                // Status echoes/reconnects must not turn a verified mode-only
+                // request into an unsolicited application of old/default limits.
+                ConfirmPlatformSelection(selection);
+                ApplyLivePlatformSelection(selection);
+                return true;
+            }
+            // A genuinely different externally selected mode follows the existing
+            // per-profile frequency reconciliation path.
+            modeOnlyPlatformSelection = null;
         }
 
         // Repeated notifications for the same mode share the existing settle window.
@@ -3056,7 +3258,8 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
         }
     }
 
-    public async Task ApplyPerformancePolicyAsync(CancellationToken cancellationToken)
+    public async Task ApplyPerformancePolicyAsync(
+        CancellationToken cancellationToken, bool userRequestedFrequencyDisable = false)
     {
         var selection = CurrentPlatformSelection();
         var revision = Volatile.Read(ref platformObservationRevision);
@@ -3066,12 +3269,13 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
             // An editor event captured before a mode change must never reselect its old mode.
             if (isShuttingDown || selection != CurrentPlatformSelection() ||
                 revision != Volatile.Read(ref platformObservationRevision)) return;
-            await ApplyPerformancePolicyCoreAsync(cancellationToken);
+            await ApplyPerformancePolicyCoreAsync(cancellationToken, userRequestedFrequencyDisable);
         }
         finally { performanceTransitionGate.Release(); }
     }
 
-    private async Task ApplyPerformancePolicyCoreAsync(CancellationToken cancellationToken)
+    private async Task ApplyPerformancePolicyCoreAsync(
+        CancellationToken cancellationToken, bool userRequestedFrequencyDisable = false)
     {
         var selection = CurrentPlatformSelection();
         var requestRevision = Volatile.Read(ref platformRequestRevision);
@@ -3081,6 +3285,18 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
         {
             if (IsCurrentTarget()) StatusMessage = ManualControlBlockedMessage;
             return;
+        }
+        if (IsCurrentTarget() && userRequestedFrequencyDisable &&
+            !IsProcessorFrequencyLimitEnabled && frequencyLimitController is not null)
+        {
+            // Only the off click reaches this path. Initialization, observed OEM changes,
+            // schedule retries and ordinary slider edits cannot discard an unknown baseline.
+            var prepared = await frequencyLimitController.PrepareForExplicitDisableAsync(cancellationToken);
+            if (!prepared.Succeeded)
+            {
+                if (IsCurrentTarget()) StatusMessage = prepared.Reason;
+                return;
+            }
         }
         if (!IsCurrentTarget() || !IsPerformanceApplyEnabled || cpuPolicyController is null || boostController is null)
         {
@@ -5237,19 +5453,18 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
             CreateFrequencyPolicy(key));
     }
 
-    private ProcessorFrequencyLimitPolicy CreateFrequencyPolicy(PlatformModeSelection selection)
+    private ProcessorFrequencyLimitPolicy CreateFrequencyPolicy(PlatformModeSelection selection) =>
+        CreateFrequencyPolicy(FrequencyProfileKey(selection));
+
+    private static string FrequencyProfileKey(PlatformModeSelection selection) => selection.Mode switch
     {
-        var key = selection.Mode switch
-        {
-            PlatformMode.Office => "office:1",
-            PlatformMode.Balanced => "balanced:1",
-            PlatformMode.TurboQuiet => "turbo:Quiet",
-            PlatformMode.TurboHigh => "turbo:HighEfficiency",
-            PlatformMode.Custom => $"custom:{Math.Clamp(selection.ProfileIndex, 1, 3)}",
-            _ => throw new ArgumentOutOfRangeException(nameof(selection))
-        };
-        return CreateFrequencyPolicy(key);
-    }
+        PlatformMode.Office => "office:1",
+        PlatformMode.Balanced => "balanced:1",
+        PlatformMode.TurboQuiet => "turbo:Quiet",
+        PlatformMode.TurboHigh => "turbo:HighEfficiency",
+        PlatformMode.Custom => $"custom:{Math.Clamp(selection.ProfileIndex, 1, 3)}",
+        _ => throw new ArgumentOutOfRangeException(nameof(selection))
+    };
 
     private ProcessorFrequencyLimitPolicy CreateFrequencyPolicy(string key) =>
         ProcessorFrequencyLimitPolicy.Uniform((uint)(

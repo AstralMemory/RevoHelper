@@ -35,6 +35,45 @@ public sealed class WindowsProcessorFrequencyLimitController : IProcessorFrequen
         return ValueTask.FromResult(Read(scheme));
     }
 
+    public async ValueTask<ControlResult> PrepareForExplicitDisableAsync(CancellationToken cancellationToken)
+    {
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            try
+            {
+                await leaseStore.LoadAsync(cancellationToken).ConfigureAwait(false);
+                // A readable lease retains its real original values and normal session semantics.
+                return new(true, "频率恢复记录正常。");
+            }
+            catch (InvalidDataException)
+            {
+                var scheme = api.GetActiveScheme();
+                var before = Read(scheme);
+                var unlimited = ProcessorFrequencyLimitPolicy.Uniform(0);
+                await leaseStore.ArchiveCorruptAsync(cancellationToken).ConfigureAwait(false);
+
+                // This is the user's new reset target, NOT a guessed historical baseline.
+                // Persist before writing: if interrupted, recovery clears only fields still
+                // matching 'before', preserves external changes, and never reintroduces the cap.
+                await leaseStore.SaveAsync(new(1, scheme, unlimited, before), cancellationToken)
+                    .ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+                Write(scheme, unlimited);
+                api.SetActiveScheme(scheme);
+                if (Read(scheme) != unlimited)
+                    throw new InvalidDataException("解除频率上限后回读不一致，已保留恢复记录。");
+                await leaseStore.ClearAsync(cancellationToken).ConfigureAwait(false);
+                return new(true, "已保留损坏记录副本，并解除当前电源方案的频率上限。");
+            }
+        }
+        catch (Exception exception)
+        {
+            return ControlResult.Rejected($"解除残留频率上限失败：{exception.Message}");
+        }
+        finally { gate.Release(); }
+    }
+
     public async ValueTask<ControlResult> ApplyAsync(
         ProcessorFrequencyLimitPolicy policy,
         CancellationToken cancellationToken)
@@ -142,6 +181,10 @@ public sealed class WindowsProcessorFrequencyLimitController : IProcessorFrequen
 
                 return rollback.Result;
             }
+        }
+        catch (InvalidDataException exception)
+        {
+            return ControlResult.Rejected($"最大处理器频率读取或写入失败：{exception.Message} 可在性能调整中手动关闭频率限制以解除残留上限。");
         }
         catch (Exception exception)
         {

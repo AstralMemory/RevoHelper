@@ -52,7 +52,7 @@ public sealed class Snapshot4AnnouncementTests
     {
         var copy = AnnouncementCopy.For(language, "V1.0.2");
         Assert.Equal("V1.0.2", copy.Version);
-        Assert.Equal("2026-10-30", copy.UpdatedDate);
+        Assert.Equal("2026-11-05", copy.UpdatedDate);
         Assert.Contains("MIT", copy.Release);
         Assert.Contains("GitHub Releases", copy.Release);
         Assert.Contains("V1.0.2", copy.Notice);
@@ -86,6 +86,24 @@ public sealed class Snapshot4AnnouncementTests
         Assert.Equal("https://github.com/AstralMemory/RevoHelper/issues", AnnouncementCopy.LinkFor("feedback"));
         foreach (var unknown in new string?[] { null, "", "other", "PROJECT", "https://example.com", "../settings", "javascript:alert(1)" })
             Assert.Null(AnnouncementCopy.LinkFor(unknown));
+    }
+
+    [Theory]
+    [InlineData("zh-CN")]
+    [InlineData("en-US")]
+    public void Release103CopyDescribesTurboAndStartupFixesWithoutClaimingAllSwitchingFaultsFixed(string language)
+    {
+        var copy = AnnouncementCopy.For(language, "V1.0.3");
+        Assert.Equal("V1.0.3", copy.Version);
+        Assert.Contains("V1.0.3", copy.Notice);
+        Assert.Contains(language == "en-US" ? "basic Turbo mode" : "基础狂暴档位", copy.Notice);
+        Assert.Contains(language == "en-US" ? "startup configuration" : "完整配置", copy.Notice);
+        Assert.Contains("AMD CPU", copy.Notice);
+        Assert.Contains(language == "en-US" ? "still need AMD hardware testing" : "仍待 AMD 实机验证", copy.Notice);
+        Assert.Contains(language == "en-US" ? "service state verification" : "终态确认", copy.Notice);
+        Assert.Contains(language == "en-US" ? "still need diagnosis" : "仍待定位", copy.Notice);
+        Assert.Contains(language == "en-US" ? "manually turn off the frequency limit" : "手动关闭频率限制", copy.Notice);
+        Assert.DoesNotContain(language == "en-US" ? "has not been published" : "尚未发布", copy.Notice);
     }
 
     [Theory]

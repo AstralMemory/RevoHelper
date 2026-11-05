@@ -19,6 +19,11 @@ public interface IProcessorFrequencyLimitController
     ValueTask<ControlResult> ApplyAsync(
         ProcessorFrequencyLimitPolicy policy,
         CancellationToken cancellationToken);
+
+    // Only a direct user action may replace an unreadable recovery baseline.
+    // Ordinary profile synchronization and automatic recovery never call this.
+    ValueTask<ControlResult> PrepareForExplicitDisableAsync(CancellationToken cancellationToken) =>
+        ValueTask.FromResult(new ControlResult(true, "频率限制可以关闭。"));
 }
 
 public sealed record ProcessorFrequencyLimitLease(
@@ -36,4 +41,8 @@ public interface IProcessorFrequencyLimitLeaseStore
         CancellationToken cancellationToken);
 
     ValueTask ClearAsync(CancellationToken cancellationToken);
+
+    // Preserve unreadable evidence before replacing it with an explicit reset intent.
+    ValueTask ArchiveCorruptAsync(CancellationToken cancellationToken) =>
+        throw new NotSupportedException("当前恢复记录存储不支持保存损坏记录副本。");
 }

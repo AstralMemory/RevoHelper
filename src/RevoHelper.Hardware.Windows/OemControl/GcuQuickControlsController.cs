@@ -563,7 +563,7 @@ public sealed class GcuQuickControlsController : IQuickControlsController
         {
             var baseline = await ReadLiquidCoolingAsync(cancellationToken).ConfigureAwait(false);
             if (baseline?.Connected != true) return ControlResult.Rejected("水冷设备尚未连接，未启动注水模式。");
-            if (!baseline.CanControl) return ControlResult.Rejected("当前水冷状态不允许控制，未启动注水模式。");
+            if (baseline.CanControl != true) return ControlResult.Rejected("当前水冷状态不允许控制，未启动注水模式。");
             if (baseline.IsPriming) return new(true, "当前已经处于注水模式，请等待流程自动结束。");
             await channel.WriteLiquidCoolingAsync(
                 GcuQuickControlsCommand.LiquidCoolingAction(LiquidCoolingDeviceAction.InputWater), cancellationToken).ConfigureAwait(false);
@@ -609,7 +609,10 @@ public sealed class GcuQuickControlsController : IQuickControlsController
             if (baseline is null) return ControlResult.Rejected("GCU 未返回水冷状态，未发送连接命令。");
             if (baseline.Connected == connect)
                 return new(true, connect ? "水冷设备已经连接。" : "水冷设备已经断开。");
-            if (!baseline.CanControl) return ControlResult.Rejected("当前水冷状态不允许连接操作，未发送命令。");
+            if (baseline.IsPriming) return ControlResult.Rejected("水冷正在注水，未发送连接操作命令。");
+            // An omitted LC_action is not an explicit denial. Manual connection still
+            // requires a real GCU selection and confirmation from the same device.
+            if (baseline.CanControl == false) return ControlResult.Rejected("当前水冷状态不允许连接操作，未发送命令。");
             if (connect && string.IsNullOrWhiteSpace(baseline.SelectedDeviceId))
                 return ControlResult.Rejected("请先选择扫描到的水冷设备。");
 
@@ -617,9 +620,10 @@ public sealed class GcuQuickControlsController : IQuickControlsController
                 GcuQuickControlsCommand.LiquidCoolingAction(connect
                     ? LiquidCoolingDeviceAction.Connect
                     : LiquidCoolingDeviceAction.Disconnect), cancellationToken).ConfigureAwait(false);
-            var state = await WaitForLiquidCoolingStateAsync(
-                candidate => candidate?.Connected == connect, cancellationToken).ConfigureAwait(false);
-            return state?.Connected == connect
+            bool IsTarget(LiquidCoolingState? candidate) => candidate?.Connected == connect &&
+                (!connect || string.Equals(candidate.SelectedDeviceId, baseline.SelectedDeviceId, StringComparison.OrdinalIgnoreCase));
+            var state = await WaitForLiquidCoolingStateAsync(IsTarget, cancellationToken).ConfigureAwait(false);
+            return IsTarget(state)
                 ? new(true, connect ? "水冷设备已连接并回读确认。" : "水冷设备已断开并回读确认。")
                 : ControlResult.Rejected(connect ? "连接命令发送后未得到已连接状态。" : "断开命令发送后未得到已断开状态。");
         }

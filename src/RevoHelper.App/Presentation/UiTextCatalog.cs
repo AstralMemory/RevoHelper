@@ -150,6 +150,7 @@ public static class UiTextCatalog
 实验性限充运行中：等待充电状态确认。	Experimental charge limiting is active: waiting for charging status confirmation.
 工作进程已尝试恢复，监护正在复核。	The worker attempted restoration; the guardian is checking it.
 实验性限充已停止；平台、阈值和缓存观察已恢复，不能排除全部持久化副作用。	Experimental charge limiting stopped; the platform, threshold and observed cache match their original values. Persistent side effects cannot be ruled out.
+平台与实时阈值已恢复；固件缓存尚未确认一致，未写入缓存。	The platform and live threshold have been restored; the firmware cache has not been confirmed to match, and was not written.
 恢复尚未确认。请勿再次启用，保留诊断日志并使用恢复按钮。	Restoration is not confirmed. Do not enable again. Keep the diagnostic logs and use Restore.
 恢复尚未确认；独立监护可能仍在处理，请勿再次启用。	Restoration is not confirmed; the independent guardian may still be working. Do not enable again.
 独立监护已退出，但恢复尚未确认。请使用恢复按钮。	The independent guardian exited, but restoration is not confirmed. Use Restore.
@@ -421,6 +422,14 @@ XtuService、dptftcs 与 ipfsvc 属于 Intel 平台服务，不是机械革命�
 主题	Theme
 界面字号	Interface text size
 正在运行	Running
+正在启动	Starting
+正在停止	Stopping
+正在继续	Resuming
+正在暂停	Pausing
+已暂停	Paused
+状态不可用	Status unavailable
+所选服务已恢复运行，并已重新检测状态。	The selected services are running; their states have been rechecked.
+所选服务已停止，并已重新检测状态。	The selected services have stopped; their states have been rechecked.
 未运行	Not running
 未连接	Disconnected
 已连接	Connected
@@ -467,6 +476,9 @@ Windows 处理器策略或 OEM 功耗控制后端已确认可用。	Windows CPU 
 快捷设置状态	Shortcut settings status
 充电上限状态	Charge limit status
 正在检测…	Checking…
+当前控制接口尚未确认支持该狂暴子策略；未发送指令。	This Turbo sub-strategy has not been confirmed by the control interface; no command was sent.
+尚未收到可用档位信息；基础档位仍可手动尝试。	Mode information has not been reported; basic modes can still be tried manually.
+尚未收到此功能的运行时证据。	Runtime evidence for this feature has not been reported.
 正在重新检测设备与官方控制组件…	Rechecking the device and OEM control components…
 正在检测设备与档位，请稍候；无需重复点击。	Checking the device and modes. Please wait; no need to click again.
 设备身份尚未识别成功；请重新检测，不代表机型不支持。	Device identity could not be confirmed. Recheck; this does not mean the model is unsupported.

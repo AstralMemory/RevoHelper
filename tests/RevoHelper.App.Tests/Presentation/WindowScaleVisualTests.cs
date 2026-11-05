@@ -92,7 +92,7 @@ public sealed class WindowScaleVisualTests
 
                 var badge = Assert.IsType<Border>(window.FindName("ReleaseStatusBadge"));
                 var version = Assert.IsType<TextBlock>(window.FindName("ReleaseStatusText"));
-                Assert.Equal("V1.0.2", version.Text);
+                Assert.Equal("V1.0.3", version.Text);
                 Assert.Equal(UiFontExtension.Grow(10), version.FontSize);
                 Assert.Equal(Visibility.Collapsed, Assert.IsType<TextBlock>(window.FindName("HomeVersionFooter")).Visibility);
                 SaveOfflineImage(viewport, size, $"prerelease-fan-response-{percent}");
@@ -272,7 +272,7 @@ public sealed class WindowScaleVisualTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void ConfirmedModeCapabilitiesControlCardVisibilityWithoutChangingMode(bool twoModes)
+    public void PartialModeCapabilitiesKeepBaseCardsVisibleWithoutChangingMode(bool twoModes)
     {
         RunOnSta(() =>
         {
@@ -290,11 +290,11 @@ public sealed class WindowScaleVisualTests
                 var balanced = Assert.IsType<RadioButton>(window.FindName("BalancedProfileRadio"));
                 var turbo = Assert.IsType<RadioButton>(window.FindName("TurboProfileRadio"));
                 var custom = Assert.IsType<RadioButton>(window.FindName("CustomProfileRadio"));
-                Assert.Equal(twoModes ? "平衡模式" : "办公模式", office.Content);
-                Assert.Equal(twoModes ? "性能模式" : "平衡模式", balanced.Content);
-                Assert.Equal(twoModes ? Visibility.Collapsed : Visibility.Visible, ((Grid)turbo.Parent).Visibility);
-                Assert.Equal(twoModes ? Visibility.Collapsed : Visibility.Visible, ((Grid)custom.Parent).Visibility);
-                Assert.Equal(twoModes ? 2 : 1, Grid.GetRowSpan(office));
+                Assert.Equal("办公模式", office.Content);
+                Assert.Equal("平衡模式", balanced.Content);
+                Assert.Equal(Visibility.Visible, ((Grid)turbo.Parent).Visibility);
+                Assert.Equal(Visibility.Visible, ((Grid)custom.Parent).Visibility);
+                Assert.Equal(1, Grid.GetRowSpan(office));
                 Assert.Equal(office.ActualHeight, balanced.ActualHeight);
                 Assert.True(office.ActualWidth > 100);
                 Assert.Equal("balanced", vm.SelectedProfileId);
@@ -423,7 +423,7 @@ public sealed class WindowScaleVisualTests
                 Assert.Equal(Visibility.Visible, warning.Visibility);
                 Assert.True(warning.ActualHeight > 0, "OEM warning must have a laid-out visible slot.");
                 Assert.Equal(Color.FromRgb(0xD9, 0x36, 0x3E), Assert.IsType<SolidColorBrush>(warning.Foreground).Color);
-                Assert.Contains("V1.0.2", Assert.IsType<TextBlock>(window.FindName("SettingsVersionFooter")).Text);
+                Assert.Contains("V1.0.3", Assert.IsType<TextBlock>(window.FindName("SettingsVersionFooter")).Text);
                 var label = $"beta001-performance-{(custom ? "custom" : "balanced")}-{percent}";
                 SaveOfflineImage(viewport, size, label + "-top");
 

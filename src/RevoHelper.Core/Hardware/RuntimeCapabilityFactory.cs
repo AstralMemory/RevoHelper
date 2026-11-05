@@ -11,12 +11,12 @@ public static class RuntimeCapabilityFactory
         OemRuntimeEvidence evidence,
         IReadOnlyList<CpuBackendCapability> cpuBackends)
     {
-        var isMechrevo = identity.Manufacturer.Trim()
-            .Equals("MECHREVO", StringComparison.OrdinalIgnoreCase);
-        var oemBase = OemBaseAvailability(identity, isMechrevo, inventory);
+        // SMBIOS labels and component-file inventory describe discovery, not
+        // whether a live feature response is valid. Assess each feature from
+        // its own runtime evidence instead of imposing an installation gate.
         var features = Enum.GetValues<HardwareFeature>().ToDictionary(
             feature => feature,
-            feature => Capability(feature, oemBase, evidence, cpuBackends));
+            feature => Capability(feature, evidence, cpuBackends));
         var modes = features[HardwareFeature.OemPlatformModes].Availability == CapabilityAvailability.Available
             ? evidence.SupportedPlatformModes
             : new HashSet<PlatformMode>();
@@ -24,37 +24,8 @@ public static class RuntimeCapabilityFactory
         return new(identity, features, modes, cpuBackends);
     }
 
-    private static (CapabilityAvailability Availability, string Reason, CapabilityDiagnostic Diagnostic) OemBaseAvailability(
-        MachineIdentity identity,
-        bool isMechrevo,
-        OemControlInventory inventory)
-    {
-        if (string.IsNullOrWhiteSpace(identity.Manufacturer) ||
-            identity.Manufacturer.Equals("UNKNOWN", StringComparison.OrdinalIgnoreCase))
-        {
-            return (CapabilityAvailability.Unverified, "Machine manufacturer could not be identified.",
-                CapabilityDiagnostic.IdentityUnconfirmed);
-        }
-        if (!isMechrevo)
-        {
-            return (CapabilityAvailability.Unavailable,
-                "OEM writes are scoped to explicitly identified MECHREVO systems.", CapabilityDiagnostic.OtherManufacturer);
-        }
-
-        if (!inventory.HasCompletePlatformModeChain)
-        {
-            return (CapabilityAvailability.Unavailable,
-                "The required GCU/ACPI control chain is incomplete.", CapabilityDiagnostic.ControlChainIncomplete);
-        }
-
-        // Each feature needs its own evidence. An absent mode list must not
-        // discard a positive fan/status response from the same verified chain.
-        return (CapabilityAvailability.Available, "GCU control chain confirmed.", CapabilityDiagnostic.None);
-    }
-
     private static HardwareFeatureCapability Capability(
         HardwareFeature feature,
-        (CapabilityAvailability Availability, string Reason, CapabilityDiagnostic Diagnostic) oemBase,
         OemRuntimeEvidence evidence,
         IReadOnlyList<CpuBackendCapability> cpuBackends)
     {
@@ -70,11 +41,6 @@ public static class RuntimeCapabilityFactory
             return result is null
                 ? new(feature, CapabilityAvailability.Unavailable, "Backend does not apply to this CPU.")
                 : new(feature, result.Availability, result.Reason);
-        }
-
-        if (oemBase.Availability != CapabilityAvailability.Available)
-        {
-            return new(feature, oemBase.Availability, oemBase.Reason) { Diagnostic = oemBase.Diagnostic };
         }
 
         var confirmed = feature switch

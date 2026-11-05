@@ -161,16 +161,28 @@ public sealed class ExperimentalChargeViewModel : INotifyPropertyChanged, IDispo
         }, "恢复限充失败", cancellationToken);
     }
 
+    public async Task<bool> PrepareForManualControlAsync(CancellationToken cancellationToken = default)
+    {
+        // Only an explicit user operation reaches this path. Healthy active limiting
+        // remains untouched; a stale/recovery-pending session uses the existing
+        // ownership-aware recovery and must actually finish before a conflicting write.
+        if (disposed || IsBusy || cancellationToken.IsCancellationRequested) return false;
+        if (RecoveryPending) await RecoverAsync(cancellationToken).ConfigureAwait(false);
+        return !disposed && !IsBusy && !RecoveryPending && !cancellationToken.IsCancellationRequested;
+    }
+
     public void RequestStop(string reason)
     {
         desiredEnabled = false;
         Interlocked.Increment(ref stopGeneration);
         Interlocked.Increment(ref commandRevision);
         if (controller is null) return;
+        var recoveryWasPending = RecoveryPending;
+        var wasActive = controller.Status is { Enabled: true } or { Busy: true };
         try { controller.RequestStop(reason); }
         catch (Exception exception)
         {
-            recoveryFailed = true;
+            recoveryFailed = recoveryFailed || recoveryWasPending || wasActive || BackendNeedsRecovery();
             operationError = $"停止限充失败：{exception.Message}";
         }
         Notify();
@@ -178,14 +190,20 @@ public sealed class ExperimentalChargeViewModel : INotifyPropertyChanged, IDispo
 
     private async Task RunAsync(Func<Task<bool>> action, string failure, CancellationToken cancellationToken)
     {
+        var recoveryWasPending = RecoveryPending;
         Interlocked.Increment(ref operations);
         Notify();
         var entered = false;
+        var actionStarted = false;
         try
         {
             await operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             entered = true;
-            var completed = await Task.Run(action, cancellationToken).ConfigureAwait(false);
+            var completed = await Task.Run(async () =>
+            {
+                actionStarted = true;
+                return await action().ConfigureAwait(false);
+            }, cancellationToken).ConfigureAwait(false);
             if (completed)
             {
                 operationError = null;
@@ -194,10 +212,12 @@ public sealed class ExperimentalChargeViewModel : INotifyPropertyChanged, IDispo
         }
         catch (Exception exception)
         {
-            // A skipped/stale command cannot clear this latch. Only a successful
-            // confirmed stop/recovery can unlock native-care or enable controls.
+            // A no-write failure must not invent an unresolved hardware session.
+            // Conversely, cancellation or a failed recovery cannot erase previously
+            // pending evidence merely because the backend temporarily reports off.
             desiredEnabled = false;
-            recoveryFailed = true;
+            recoveryFailed = recoveryFailed || recoveryWasPending ||
+                controller?.Status.RecoveryPending == true || actionStarted && BackendNeedsRecovery();
             operationError = $"{failure}：{exception.Message}";
         }
         finally
@@ -207,6 +227,9 @@ public sealed class ExperimentalChargeViewModel : INotifyPropertyChanged, IDispo
             Notify();
         }
     }
+
+    private bool BackendNeedsRecovery() =>
+        controller?.Status is { RecoveryPending: true } or { Enabled: true } or { Busy: true };
 
     private void Controller_StatusChanged(object? sender, EventArgs e)
     {

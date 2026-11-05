@@ -8,6 +8,131 @@ public sealed class WindowsProcessorFrequencyLimitControllerTests
     private static readonly Guid ActiveScheme = Guid.Parse("381b4222-f694-41f0-9685-ff5bb260df2e");
 
     [Fact]
+    public async Task CorruptJournal_AutomaticApplyAndRecoveryDoNotDiscardOrWrite()
+    {
+        var api = new FakePowerProfileApi();
+        var store = new CorruptLeaseStore();
+        var controller = new WindowsProcessorFrequencyLimitController(api, store);
+        Assert.False((await controller.ApplyAsync(ProcessorFrequencyLimitPolicy.Uniform(0), CancellationToken.None)).Succeeded);
+        Assert.False((await controller.RecoverAsync(CancellationToken.None)).Succeeded);
+        Assert.Empty(api.AcWrites);
+        Assert.Empty(api.DcWrites);
+        Assert.False(store.Archived);
+    }
+
+    [Fact]
+    public async Task ExplicitDisable_CorruptJournal_ClearsAllFieldsAndNeverRestoresStaleCap()
+    {
+        var api = CappedApi();
+        var store = new CorruptLeaseStore();
+        IProcessorFrequencyLimitController controller = new WindowsProcessorFrequencyLimitController(api, store);
+        var result = await controller.PrepareForExplicitDisableAsync(CancellationToken.None);
+        Assert.True(result.Succeeded, result.Reason);
+        Assert.True(store.Archived);
+        Assert.Null(store.Lease);
+        Assert.Equal(ProcessorFrequencyLimitPolicy.Uniform(0), await controller.ReadAsync(CancellationToken.None));
+        Assert.True((await new WindowsProcessorFrequencyLimitController(api, store).RecoverAsync(CancellationToken.None)).Succeeded);
+        Assert.Equal(ProcessorFrequencyLimitPolicy.Uniform(0), await controller.ReadAsync(CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task ExplicitDisable_ArchiveOrJournalSaveFails_DoesNotWrite(bool archiveFails, bool saveFails)
+    {
+        var api = CappedApi();
+        var store = new CorruptLeaseStore { ArchiveFails = archiveFails, SaveFails = saveFails };
+        IProcessorFrequencyLimitController controller = new WindowsProcessorFrequencyLimitController(api, store);
+        Assert.False((await controller.PrepareForExplicitDisableAsync(CancellationToken.None)).Succeeded);
+        Assert.Empty(api.AcWrites);
+        Assert.Empty(api.DcWrites);
+    }
+
+    [Fact]
+    public async Task ExplicitDisable_PartialWriteFailure_KeepsResetIntentForRecovery()
+    {
+        var api = CappedApi();
+        api.FailedWriteNumbers.Add(3);
+        var store = new CorruptLeaseStore();
+        IProcessorFrequencyLimitController controller = new WindowsProcessorFrequencyLimitController(api, store);
+        Assert.False((await controller.PrepareForExplicitDisableAsync(CancellationToken.None)).Succeeded);
+        Assert.Equal(ProcessorFrequencyLimitPolicy.Uniform(0), store.Lease?.Original);
+        Assert.Equal(ProcessorFrequencyLimitPolicy.Uniform(3400), store.Lease?.Expected);
+        // An unrelated external value after failure must survive recovery.
+        api.Values[WindowsProcessorFrequencyLimitController.MaximumFrequencyClass2Setting] = (4200, 3400);
+        Assert.True((await new WindowsProcessorFrequencyLimitController(api, store).RecoverAsync(CancellationToken.None)).Succeeded);
+        Assert.Equal(new ProcessorFrequencyLimitPolicy(0, 0, 0, 0, 4200, 0), await controller.ReadAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ExplicitDisable_ReadbackMismatch_DoesNotReportSuccessOrClearJournal()
+    {
+        var api = new FakePowerProfileApi { IgnoreWrites = true };
+        SetCap(api);
+        var store = new CorruptLeaseStore();
+        IProcessorFrequencyLimitController controller = new WindowsProcessorFrequencyLimitController(api, store);
+        Assert.False((await controller.PrepareForExplicitDisableAsync(CancellationToken.None)).Succeeded);
+        Assert.NotNull(store.Lease);
+    }
+
+    [Fact]
+    public async Task ExplicitDisable_ValidJournal_PreservesOriginalRecoverySemantics()
+    {
+        var api = CappedApi();
+        var store = new FakeLeaseStore();
+        var controller = new WindowsProcessorFrequencyLimitController(api, store);
+        await controller.ApplyAsync(ProcessorFrequencyLimitPolicy.Uniform(4200), CancellationToken.None);
+        var previousLease = store.Lease;
+        Assert.True((await ((IProcessorFrequencyLimitController)controller).PrepareForExplicitDisableAsync(CancellationToken.None)).Succeeded);
+        Assert.Equal(previousLease, store.Lease);
+        Assert.Equal(ProcessorFrequencyLimitPolicy.Uniform(4200), await controller.ReadAsync(CancellationToken.None));
+    }
+
+    private static FakePowerProfileApi CappedApi()
+    {
+        var api = new FakePowerProfileApi();
+        SetCap(api);
+        return api;
+    }
+
+    private static void SetCap(FakePowerProfileApi api)
+    {
+        api.Values[WindowsProcessorFrequencyLimitController.MaximumFrequencySetting] = (3400, 3400);
+        api.Values[WindowsProcessorFrequencyLimitController.MaximumFrequencyClass1Setting] = (3400, 3400);
+        api.Values[WindowsProcessorFrequencyLimitController.MaximumFrequencyClass2Setting] = (3400, 3400);
+    }
+
+    private sealed class CorruptLeaseStore : IProcessorFrequencyLimitLeaseStore
+    {
+        private bool corrupt = true;
+        public bool Archived { get; private set; }
+        public bool ArchiveFails { get; init; }
+        public bool SaveFails { get; init; }
+        public ProcessorFrequencyLimitLease? Lease { get; private set; }
+        public ValueTask<ProcessorFrequencyLimitLease?> LoadAsync(CancellationToken token) =>
+            corrupt ? throw new InvalidDataException("处理器频率恢复记录已损坏。") : ValueTask.FromResult(Lease);
+        public ValueTask ArchiveCorruptAsync(CancellationToken token)
+        {
+            if (ArchiveFails) throw new IOException("archive failed");
+            Archived = true;
+            return ValueTask.CompletedTask;
+        }
+        public ValueTask SaveAsync(ProcessorFrequencyLimitLease lease, CancellationToken token)
+        {
+            Assert.True(Archived);
+            if (SaveFails) throw new IOException("save failed");
+            corrupt = false;
+            Lease = lease;
+            return ValueTask.CompletedTask;
+        }
+        public ValueTask ClearAsync(CancellationToken token)
+        {
+            Lease = null;
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    [Fact]
     public void MaximumFrequencySetting_UsesDocumentedWindowsGuid() =>
         Assert.Equal(
             Guid.Parse("75b0ae3f-bce0-45a7-8c89-c9611c25e100"),

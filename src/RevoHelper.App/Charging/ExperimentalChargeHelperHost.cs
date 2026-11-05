@@ -118,7 +118,7 @@ public static class ExperimentalChargeHelperHost
                     files.SaveStatus(new("Active", message, lease.LimitPercent, Enabled: true, Snapshot: snapshot));
                 }, recoveryWait: () => Thread.Sleep(1000)); // A signalled stop must not skip firmware cache settling.
             files.SaveStatus(new("WorkerFinished", "工作进程已尝试恢复，监护正在复核。", lease.LimitPercent,
-                RecoveryPending: !result.CriticalRestored || !result.CacheMatchesOriginal, Recovery: result));
+                RecoveryPending: !result.CriticalRestored, Recovery: result));
         }
         catch (Exception ex)
         {
@@ -167,14 +167,25 @@ public static class ExperimentalChargeHelperHost
                 files.Journal, () => Thread.Sleep(1000));
             if (pass < 2) Thread.Sleep(1000); // Bounded late-provider stability check.
         }
-        var restored = result is { CriticalRestored: true, CacheMatchesOriginal: true };
         if (intents.Error is not null)
             result = result! with { Errors = [.. result!.Errors, "恢复意图日志读取失败，已按已保存会话进行受限恢复：" + intents.Error] };
-        files.SaveStatus(new(restored ? "Restored" : "RecoveryPending",
-            restored ? "实验性限充已停止；平台、阈值和缓存观察已恢复，不能排除全部持久化副作用。"
+        var completion = CreateRecoveryStatus(result!, lease.LimitPercent);
+        files.SaveStatus(completion);
+        try { files.Journal(completion.RecoveryPending ? "GuardianRecoveryPending" : "GuardianRestored"); if (cause is not null) files.Journal("Cause:" + cause); } catch (Exception) { }
+    }
+
+    public static ChargeWireStatus CreateRecoveryStatus(ChargeRecoveryResult result, int limitPercent)
+    {
+        // A fresh C3/B9 verification releases temporary platform control. The
+        // read-only cache observation remains in Recovery, but must not lock
+        // unrelated performance commands after those live controls are restored.
+        var restored = result.CriticalRestored;
+        return new(restored ? "Restored" : "RecoveryPending",
+            restored ? result.CacheMatchesOriginal
+                ? "实验性限充已停止；平台、阈值和缓存观察已恢复，不能排除全部持久化副作用。"
+                : "平台与实时阈值已恢复；固件缓存尚未确认一致，未写入缓存。"
                 : "恢复尚未确认。请勿再次启用，保留诊断日志并使用恢复按钮。",
-            lease.LimitPercent, RecoveryPending: !restored, Recovery: result));
-        try { files.Journal(restored ? "GuardianRestored" : "GuardianRecoveryPending"); if (cause is not null) files.Journal("Cause:" + cause); } catch (Exception) { }
+            limitPercent, RecoveryPending: !restored, Recovery: result);
     }
 
     private static MutexLease Acquire(string name) => new(name);

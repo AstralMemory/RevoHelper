@@ -308,6 +308,15 @@ public sealed class ChargeSessionEngineTests
         Assert.True(result.CriticalRestored); Assert.False(result.CacheMatchesOriginal);
         Assert.Equal(80u, fixture.Registers[0x9164]);
         Assert.DoesNotContain(fixture.Writes, write => write.Address == 0x9164);
+        var completion = ExperimentalChargeHelperHost.CreateRecoveryStatus(result, 80);
+        Assert.Equal("Restored", completion.Phase);
+        Assert.False(completion.RecoveryPending);
+        Assert.Same(result, completion.Recovery);
+        // Releasing temporary control does not bypass the original-value guard
+        // when a later 60/80 session is explicitly requested.
+        var rejected = Assert.Throws<InvalidOperationException>(() => ChargeSessionEngine.ValidateInitial(fixture.Snapshot()));
+        Assert.Contains("0x9164", rejected.Message);
+        Assert.Equal(2, fixture.Writes.Count);
     }
 
     [Fact]

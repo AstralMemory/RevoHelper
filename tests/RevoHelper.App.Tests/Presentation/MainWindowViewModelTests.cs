@@ -1,4 +1,5 @@
 using RevoHelper.App.Presentation;
+using RevoHelper.App.Charging;
 using RevoHelper.App.Settings;
 using RevoHelper.App.Lifecycle;
 using RevoHelper.Core.Dashboard;
@@ -7,6 +8,7 @@ using RevoHelper.Core.Telemetry;
 using RevoHelper.Core.Fans;
 using RevoHelper.Core.Control;
 using RevoHelper.Core.Control.DynamicPower;
+using RevoHelper.Core.Control.ExperimentalCharge;
 using RevoHelper.Hardware.Windows.OemStatus;
 
 namespace RevoHelper.App.Tests.Presentation;
@@ -14,28 +16,122 @@ namespace RevoHelper.App.Tests.Presentation;
 public sealed class MainWindowViewModelTests
 {
     [Fact]
-    public void ConfirmedTwoPresetsUseOemLabelsAndSurviveTransientEmptyEvidence()
+    public void PartialModeEvidenceDoesNotHideOrRelabelManuallyAvailableBaseModes()
     {
-        var vm = new MainWindowViewModel(CreateDashboard());
+        var vm = CreateViewModel(platformModeController: new RecordingPlatformModeController(new(PlatformMode.Balanced)));
         Assert.True(vm.ShowTurboMode);
         Assert.True(vm.ShowCustomMode);
         var two = new RuntimeCapabilitySnapshot(CreateDashboard().Identity,
             new Dictionary<HardwareFeature, HardwareFeatureCapability>(),
             new HashSet<PlatformMode> { PlatformMode.Office, PlatformMode.Balanced }, []);
         vm.ApplyRuntimeCapabilities(two);
-        Assert.Equal("平衡模式", vm.OfficeModeTitle);
-        Assert.Equal("性能模式", vm.BalancedModeTitle);
-        Assert.Equal(2, vm.PresetRowSpan);
-        Assert.False(vm.ShowTurboMode);
-        Assert.False(vm.ShowCustomMode);
+        Assert.Equal("办公模式", vm.OfficeModeTitle);
+        Assert.Equal("平衡模式", vm.BalancedModeTitle);
+        Assert.Equal(1, vm.PresetRowSpan);
+        Assert.True(vm.ShowTurboMode);
+        Assert.True(vm.ShowCustomMode);
         vm.ApplyRuntimeCapabilities(two with { SupportedPlatformModes = new HashSet<PlatformMode>() });
-        Assert.True(vm.HasTwoPresetModes);
-        Assert.False(vm.CanUseOfficeMode);
+        Assert.False(vm.HasTwoPresetModes);
+        Assert.True(vm.CanUseOfficeMode);
         vm.ApplyRuntimeCapabilities(two with { SupportedPlatformModes = Enum.GetValues<PlatformMode>().ToHashSet() });
         Assert.True(vm.ShowTurboMode);
         Assert.True(vm.ShowCustomMode);
         Assert.False(vm.HasTwoPresetModes);
         Assert.Equal("办公模式", vm.OfficeModeTitle);
+    }
+
+    [Theory]
+    [InlineData("office", PlatformMode.Office)]
+    [InlineData("balanced", PlatformMode.Balanced)]
+    [InlineData("turbo", PlatformMode.TurboQuiet)]
+    [InlineData("custom", PlatformMode.Custom)]
+    public async Task MissingModeEvidenceDoesNotBlockExplicitTypedModeRequest(string profile, PlatformMode expected)
+    {
+        var platform = new RecordingPlatformModeController(new(PlatformMode.Balanced));
+        var vm = CreateViewModel(platformModeController: platform);
+        vm.ApplyRuntimeCapabilities(new(vm.Dashboard.Identity,
+            new Dictionary<HardwareFeature, HardwareFeatureCapability>(), new HashSet<PlatformMode>(), []));
+
+        Assert.Null(platform.LastApplied);
+        Assert.True(vm.CanUseOfficeMode);
+        Assert.True(vm.CanUseBalancedMode);
+        Assert.True(vm.CanUseTurboQuietMode);
+        Assert.True(vm.CanUseCustomMode);
+        Assert.False(vm.CanUseTurboHighMode);
+        Assert.True(await vm.ApplyPlatformProfileAsync(profile, default));
+        Assert.Equal(expected, platform.LastApplied?.Mode);
+        Assert.Equal(expected, vm.ConfirmedPlatformSelection?.Mode);
+    }
+
+    [Fact]
+    public async Task MissingEvidenceAndReadOnlyInitializationNeverSelectModesAutomatically()
+    {
+        var platform = new RecordingPlatformModeController(new(PlatformMode.Office));
+        var vm = CreateViewModel(platformModeController: platform);
+        vm.ApplyRuntimeCapabilities(new(vm.Dashboard.Identity,
+            new Dictionary<HardwareFeature, HardwareFeatureCapability>(), new HashSet<PlatformMode>(), []));
+        Assert.True(await vm.InitializePlatformModeAsync(default));
+        await vm.SynchronizeControlSessionAsync(default);
+        Assert.Null(platform.LastApplied);
+        Assert.Equal(PlatformMode.Office, vm.ConfirmedPlatformSelection?.Mode);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UnknownBaselineWithCompleteScheduleStillAllowsExplicitModeOnlySwitch(bool targetObserved)
+    {
+        var platform = new RecordingPlatformModeController(null);
+        var cpu = new RecordingCpuPolicyController(new(45, 65, null));
+        var boost = new RecordingBoostController(new(ProcessorBoostMode.Aggressive, ProcessorBoostMode.Aggressive));
+        var frequency = new RecordingFrequencyLimitController(ProcessorFrequencyLimitPolicy.Uniform(3600));
+        var vm = CreateViewModel(cpuPolicyController: cpu, boostController: boost,
+            platformModeController: platform, frequencyLimitController: frequency);
+        vm.ApplyRuntimeCapabilities(new(vm.Dashboard.Identity,
+            new Dictionary<HardwareFeature, HardwareFeatureCapability>(),
+            targetObserved ? new HashSet<PlatformMode> { PlatformMode.Office } : new HashSet<PlatformMode>(), []));
+
+        Assert.True(await vm.ApplyPlatformProfileAsync("office", default));
+        Assert.Equal(PlatformMode.Office, platform.LastApplied?.Mode);
+        Assert.Equal(PlatformMode.Office, vm.ConfirmedPlatformSelection?.Mode);
+        Assert.Null(cpu.LastApplied);
+        Assert.Empty(boost.AppliedPolicies);
+        Assert.Null(frequency.LastApplied);
+        await vm.ObservePlatformModeAsync(new(PlatformMode.Office), default);
+        await vm.SynchronizeControlSessionAsync(default);
+        Assert.Empty(frequency.AppliedPolicies);
+    }
+
+    [Fact]
+    public async Task MissingTargetEvidenceDoesNotMakeModeSwitchDependOnUnrelatedWindowsPolicyReads()
+    {
+        var platform = new RecordingPlatformModeController(new(PlatformMode.Balanced));
+        var boost = new RecordingBoostController(new(ProcessorBoostMode.Aggressive, ProcessorBoostMode.Aggressive))
+        { ThrowOnRead = true };
+        var vm = CreateViewModel(platformModeController: platform,
+            cpuPolicyController: new RecordingCpuPolicyController(new(45, 65, null)), boostController: boost);
+        vm.ApplyRuntimeCapabilities(new(vm.Dashboard.Identity,
+            new Dictionary<HardwareFeature, HardwareFeatureCapability>(),
+            new HashSet<PlatformMode> { PlatformMode.Balanced }, []));
+
+        Assert.True(await vm.ApplyPlatformProfileAsync("office", default));
+        Assert.Equal(PlatformMode.Office, platform.LastApplied?.Mode);
+        Assert.Equal(PlatformMode.Office, vm.ConfirmedPlatformSelection?.Mode);
+        Assert.Empty(boost.AppliedPolicies);
+    }
+
+    [Fact]
+    public async Task MissingEvidenceDoesNotTurnRejectedManualSwitchIntoConfirmedSuccess()
+    {
+        var platform = new RecordingPlatformModeController(new(PlatformMode.Balanced)) { RejectApply = true };
+        var vm = CreateViewModel(platformModeController: platform);
+        vm.ApplyRuntimeCapabilities(new(vm.Dashboard.Identity,
+            new Dictionary<HardwareFeature, HardwareFeatureCapability>(), new HashSet<PlatformMode>(), []));
+        Assert.False(await vm.ApplyPlatformProfileAsync("office", default));
+        Assert.Equal(PlatformMode.Office, platform.LastApplied?.Mode);
+        Assert.NotEqual(PlatformMode.Office, vm.ConfirmedPlatformSelection?.Mode);
+        Assert.Equal("balanced", vm.SelectedProfileId);
+        Assert.Contains("simulated mode failure", vm.StatusMessage);
     }
 
     [Fact]
@@ -49,7 +145,8 @@ public sealed class MainWindowViewModelTests
         var second = vm.ApplyPlatformProfileAsync("turbo", default);
         try
         {
-            Assert.Equal("turbo", vm.SelectedProfileId);
+            Assert.Equal("balanced", vm.SelectedProfileId);
+            Assert.False(vm.IsPlatformSwitchPending);
             Assert.False(second.IsCompleted);
             Assert.Null(platform.LastApplied);
         }
@@ -58,6 +155,192 @@ public sealed class MainWindowViewModelTests
         Assert.True(await second);
         Assert.Equal(2, controller.Preparations);
         Assert.Equal(new PlatformModeSelection(PlatformMode.TurboQuiet), platform.LastApplied);
+    }
+
+    [Theory]
+    [InlineData("office", PlatformMode.Office)]
+    [InlineData("balanced", PlatformMode.Balanced)]
+    [InlineData("quiet", PlatformMode.TurboQuiet)]
+    public async Task Snapshot3_ManualModeRequestRecoversPendingSessionBeforeSendingMode(
+        string target, PlatformMode expected)
+    {
+        var charge = new Snapshot3ChargeController();
+        charge.Set(new(RecoveryPending: true, Message: "old session needs verification"));
+        using var experiments = new ExperimentalControlsViewModel(chargeController: charge);
+        var platform = new RecordingPlatformModeController(new(PlatformMode.TurboHigh));
+        var vm = CreateViewModel(platformModeController: platform, experiments: experiments);
+        await vm.InitializePlatformModeAsync(default);
+        Assert.Equal(0, charge.Recoveries); // Construction and observation must remain read-only.
+
+        var succeeded = target == "quiet"
+            ? await vm.ApplyTurboStrategyAsync(TurboStrategy.Quiet, default)
+            : await vm.ApplyPlatformProfileAsync(target, default);
+
+        Assert.True(succeeded, vm.StatusMessage);
+        Assert.Equal(1, charge.Recoveries);
+        Assert.Equal(0, charge.Enables);
+        Assert.Equal(expected, platform.LastApplied?.Mode);
+        Assert.Equal(expected, vm.ConfirmedPlatformSelection?.Mode);
+        Assert.False(experiments.Charge.RecoveryPending);
+        Assert.False(vm.IsPlatformSwitchPending);
+    }
+
+    [Theory]
+    [InlineData("office", PlatformMode.Office)]
+    [InlineData("balanced", PlatformMode.Balanced)]
+    [InlineData("quiet", PlatformMode.TurboQuiet)]
+    public async Task Snapshot3_CacheOnlyRecoveryMismatchAllowsManualModeAfterFreshLiveConfirmation(
+        string target, PlatformMode expected)
+    {
+        var outcome = new ChargeRecoveryResult(true, true, false, []);
+        var charge = new Snapshot3ChargeController { RecoveryOutcome = outcome };
+        charge.Set(new(RecoveryPending: true));
+        using var experiments = new ExperimentalControlsViewModel(chargeController: charge);
+        var platform = new RecordingPlatformModeController(new(PlatformMode.TurboHigh));
+        var vm = CreateViewModel(platformModeController: platform, experiments: experiments);
+        await vm.InitializePlatformModeAsync(default);
+        // Old persisted success bits alone do not authorize a new command.
+        Assert.True(experiments.Charge.RecoveryPending);
+        Assert.Equal(0, charge.Recoveries);
+        Assert.Null(platform.LastApplied);
+
+        var succeeded = target == "quiet"
+            ? await vm.ApplyTurboStrategyAsync(TurboStrategy.Quiet, default)
+            : await vm.ApplyPlatformProfileAsync(target, default);
+
+        Assert.True(succeeded, vm.StatusMessage);
+        Assert.Equal(1, charge.Recoveries);
+        Assert.Equal(0, charge.Enables);
+        Assert.Equal(expected, platform.LastApplied?.Mode);
+        Assert.Equal(expected, vm.ConfirmedPlatformSelection?.Mode);
+        Assert.False(experiments.Charge.RecoveryPending);
+        Assert.Contains("缓存尚未确认一致", charge.Status.Message);
+        Assert.Same(outcome, charge.RecoveryWire?.Recovery);
+        Assert.False(charge.RecoveryWire!.Recovery!.CacheMatchesOriginal);
+    }
+
+    [Fact]
+    public async Task Snapshot3_PendingRecoveryDoesNotDisplayAnUnsentModeAsSelected()
+    {
+        var charge = new Snapshot3ChargeController
+        {
+            RecoveryHold = new(TaskCreationOptions.RunContinuationsAsynchronously)
+        };
+        charge.Set(new(RecoveryPending: true));
+        using var experiments = new ExperimentalControlsViewModel(chargeController: charge);
+        var platform = new RecordingPlatformModeController(new(PlatformMode.TurboHigh));
+        var vm = CreateViewModel(platformModeController: platform, experiments: experiments);
+        await vm.InitializePlatformModeAsync(default);
+        var switching = vm.ApplyPlatformProfileAsync("balanced", default);
+        try
+        {
+            await charge.RecoveryEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            Assert.Equal("turbo", vm.SelectedProfileId);
+            Assert.Equal(PlatformMode.TurboHigh, vm.ConfirmedPlatformSelection?.Mode);
+            Assert.False(vm.IsPlatformSwitchPending);
+            Assert.Null(platform.LastApplied);
+        }
+        finally { charge.RecoveryHold.TrySetResult(); await switching; }
+        Assert.True(await switching, vm.StatusMessage);
+        Assert.Equal("balanced", vm.SelectedProfileId);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Snapshot3_UnconfirmedRecoveryDoesNotSendOrConfirmMode(bool throws)
+    {
+        var charge = new Snapshot3ChargeController
+        {
+            RecoveryError = throws ? new InvalidOperationException("simulated recovery fault") : null,
+            RecoveryStillPending = !throws
+        };
+        charge.Set(new(RecoveryPending: true));
+        using var experiments = new ExperimentalControlsViewModel(chargeController: charge);
+        var platform = new RecordingPlatformModeController(new(PlatformMode.TurboQuiet));
+        var vm = CreateViewModel(platformModeController: platform, experiments: experiments);
+        await vm.InitializePlatformModeAsync(default);
+
+        Assert.False(await vm.ApplyPlatformProfileAsync("balanced", default));
+
+        Assert.Equal(1, charge.Recoveries);
+        Assert.Null(platform.LastApplied);
+        Assert.Equal("turbo", vm.SelectedProfileId);
+        Assert.Equal(PlatformMode.TurboQuiet, vm.ConfirmedPlatformSelection?.Mode);
+        Assert.True(experiments.Charge.RecoveryPending);
+        Assert.False(vm.IsPlatformSwitchPending);
+        Assert.Contains(throws ? "simulated recovery fault" : "原值仍未确认", vm.StatusMessage);
+    }
+
+    [Fact]
+    public async Task Snapshot3_NormalActiveChargeIsNotStoppedByManualModeRequest()
+    {
+        var charge = new Snapshot3ChargeController();
+        charge.Set(new(Enabled: true, LimitPercent: 80));
+        using var experiments = new ExperimentalControlsViewModel(chargeController: charge);
+        var platform = new RecordingPlatformModeController(new(PlatformMode.TurboQuiet));
+        var vm = CreateViewModel(platformModeController: platform, experiments: experiments);
+
+        Assert.True(await vm.ApplyPlatformProfileAsync("balanced", default));
+
+        Assert.Equal(0, charge.Recoveries);
+        Assert.Equal(0, charge.Stops);
+        Assert.Equal(0, charge.StopRequests);
+        Assert.True(charge.Status.Enabled);
+    }
+
+    [Fact]
+    public async Task Snapshot3_LatestModeClickWaitsForSingleRecoveryAndSkipsOldTarget()
+    {
+        var charge = new Snapshot3ChargeController
+        {
+            RecoveryHold = new(TaskCreationOptions.RunContinuationsAsynchronously)
+        };
+        charge.Set(new(RecoveryPending: true));
+        using var experiments = new ExperimentalControlsViewModel(chargeController: charge);
+        var platform = new RecordingPlatformModeController(new(PlatformMode.TurboQuiet));
+        var vm = CreateViewModel(platformModeController: platform, experiments: experiments);
+        await vm.InitializePlatformModeAsync(default);
+        var first = vm.ApplyPlatformProfileAsync("office", default);
+        await charge.RecoveryEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var latest = vm.ApplyPlatformProfileAsync("balanced", default);
+        try
+        {
+            Assert.Equal("turbo", vm.SelectedProfileId);
+            Assert.Null(platform.LastApplied);
+            Assert.False(vm.IsPlatformSwitchPending);
+        }
+        finally { charge.RecoveryHold.TrySetResult(); await Task.WhenAll(first, latest); }
+
+        Assert.False(await first);
+        Assert.True(await latest, vm.StatusMessage);
+        Assert.Equal(1, charge.Recoveries);
+        Assert.Equal(1, platform.ApplyCalls);
+        Assert.Equal(PlatformMode.Balanced, platform.LastApplied?.Mode);
+    }
+
+    [Fact]
+    public async Task Snapshot3_CancellationDuringRecoveryDoesNotSendModeOrErasePendingEvidence()
+    {
+        var charge = new Snapshot3ChargeController
+        {
+            RecoveryHold = new(TaskCreationOptions.RunContinuationsAsynchronously)
+        };
+        charge.Set(new(RecoveryPending: true));
+        using var experiments = new ExperimentalControlsViewModel(chargeController: charge);
+        var platform = new RecordingPlatformModeController(new(PlatformMode.TurboQuiet));
+        var vm = CreateViewModel(platformModeController: platform, experiments: experiments);
+        await vm.InitializePlatformModeAsync(default);
+        using var cancellation = new CancellationTokenSource();
+        var switching = vm.ApplyPlatformProfileAsync("balanced", cancellation.Token);
+        await charge.RecoveryEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => switching);
+
+        Assert.Null(platform.LastApplied);
+        Assert.Equal("turbo", vm.SelectedProfileId);
+        Assert.True(experiments.Charge.RecoveryPending);
+        Assert.False(vm.IsPlatformSwitchPending);
     }
 
     [Fact]
@@ -284,7 +567,8 @@ public sealed class MainWindowViewModelTests
     {
         var manager = new RecordingConflictServiceManager
         {
-            OperationException = new InvalidOperationException("access denied")
+            OperationException = new InvalidOperationException("access denied"),
+            DetectionResult = [new("XtuService", "Intel XTU Service", true, true, "正在运行")]
         };
         var viewModel = CreateViewModel(conflictServiceManager: manager);
         viewModel.UpdateConflictServices(
@@ -300,9 +584,115 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public async Task Snapshot4_ServiceCommandSuccessWithoutTargetStateDoesNotClaimStopped()
+    {
+        var manager = new RecordingConflictServiceManager
+        {
+            DetectionResult = [new("XtuService", "Intel XTU Service", true, true, "正在运行")]
+        };
+        var vm = CreateViewModel(conflictServiceManager: manager);
+        vm.UpdateConflictServices(manager.DetectionResult);
+        vm.ConflictServices[0].IsSelected = true;
+
+        await vm.StopSelectedConflictServicesAsync(default);
+
+        Assert.True(vm.ConflictServices[0].IsRunning);
+        Assert.DoesNotContain("所选服务已停止", vm.ConflictServiceOperationStatusText);
+        Assert.Contains("XtuService", vm.ConflictServiceOperationStatusText);
+    }
+
+    [Fact]
+    public async Task Snapshot4_ServiceDetectionFailureIsNotOverwrittenBySuccess()
+    {
+        var manager = new RecordingConflictServiceManager
+        {
+            DetectionException = new InvalidOperationException("simulated snapshot failure")
+        };
+        var vm = CreateViewModel(conflictServiceManager: manager);
+        vm.UpdateConflictServices([new("XtuService", "Intel XTU Service", true, true, "正在运行")]);
+        vm.ConflictServices[0].IsSelected = true;
+
+        await vm.StopSelectedConflictServicesAsync(default);
+
+        Assert.DoesNotContain("所选服务已停止", vm.ConflictServiceOperationStatusText);
+        Assert.Contains("simulated snapshot failure", vm.ConflictServiceOperationStatusText);
+    }
+
+    [Fact]
+    public async Task Snapshot4_PartialServiceFailureRefreshesActualStatesAndPreservesError()
+    {
+        var manager = new RecordingConflictServiceManager
+        {
+            OperationException = new InvalidOperationException("ipfsvc access denied"),
+            DetectionResult = [
+                new("XtuService", "Intel XTU Service", false, true, "已停止"),
+                new("ipfsvc", "Intel Innovation Platform Framework", true, true, "正在运行")]
+        };
+        var vm = CreateViewModel(conflictServiceManager: manager);
+        vm.UpdateConflictServices([
+            new("XtuService", "Intel XTU Service", true, true, "正在运行"),
+            new("ipfsvc", "Intel Innovation Platform Framework", true, true, "正在运行")]);
+        foreach (var service in vm.ConflictServices) service.IsSelected = true;
+
+        await vm.StopSelectedConflictServicesAsync(default);
+
+        Assert.False(vm.ConflictServices[0].IsRunning);
+        Assert.True(vm.ConflictServices[1].IsRunning);
+        Assert.All(vm.ConflictServices, service => Assert.True(service.IsSelected));
+        Assert.Contains("ipfsvc access denied", vm.ConflictServiceOperationStatusText);
+    }
+
+    [Fact]
+    public async Task Snapshot4_ModeDiagnosticsIdentifyDirectFailureAndActualPresentation()
+    {
+        var logs = new List<string>();
+        var platform = new RecordingPlatformModeController(new(PlatformMode.TurboHigh)) { RejectApply = true };
+        var vm = CreateViewModel(platformModeController: platform,
+            diagnostic: (area, message) => logs.Add($"{area}: {message}"));
+        await vm.InitializePlatformModeAsync(default);
+
+        Assert.False(await vm.ApplyPlatformProfileAsync("balanced", default));
+
+        Assert.Contains(logs, line => line.Contains("request=1") && line.Contains("target=Balanced"));
+        Assert.Contains(logs, line => line.Contains("route=mode-only"));
+        Assert.Contains(logs, line => line.Contains("simulated mode failure"));
+        Assert.Contains(logs, line => line.Contains("confirmed=TurboHigh"));
+    }
+
+    [Fact]
+    public async Task Snapshot4_ModeDiagnosticsRecordPreparationBlockWithoutModeWrite()
+    {
+        var logs = new List<string>();
+        var charge = new Snapshot3ChargeController { RecoveryStillPending = true };
+        charge.Set(new(RecoveryPending: true));
+        using var experiments = new ExperimentalControlsViewModel(chargeController: charge);
+        var platform = new RecordingPlatformModeController(new(PlatformMode.TurboHigh));
+        var vm = CreateViewModel(platformModeController: platform, experiments: experiments,
+            diagnostic: (area, message) => logs.Add($"{area}: {message}"));
+
+        Assert.False(await vm.ApplyPlatformProfileAsync("balanced", default));
+
+        Assert.Null(platform.LastApplied);
+        Assert.Contains(logs, line => line.Contains("prepare-blocked") && line.Contains("限充恢复未完成"));
+        Assert.DoesNotContain(logs, line => line.Contains("route="));
+    }
+
+    [Fact]
+    public async Task Snapshot4_ThrowingDiagnosticsCannotPreventModeChange()
+    {
+        var platform = new RecordingPlatformModeController(new(PlatformMode.TurboHigh));
+        var vm = CreateViewModel(platformModeController: platform,
+            diagnostic: (_, _) => throw new IOException("simulated diagnostics failure"));
+
+        Assert.True(await vm.ApplyPlatformProfileAsync("balanced", default));
+
+        Assert.Equal(PlatformMode.Balanced, vm.ConfirmedPlatformSelection?.Mode);
+    }
+
+    [Fact]
     public void ApplyRuntimeCapabilities_ExposesOnlyConfirmedHardwareFeatures()
     {
-        var viewModel = new MainWindowViewModel(CreateDashboard());
+        var viewModel = CreateViewModel(platformModeController: new RecordingPlatformModeController(new(PlatformMode.Balanced)));
         var identity = CreateDashboard().Identity;
         var features = Enum.GetValues<HardwareFeature>().ToDictionary(
             feature => feature,
@@ -323,7 +713,7 @@ public sealed class MainWindowViewModelTests
         viewModel.ApplyRuntimeCapabilities(snapshot);
 
         Assert.True(viewModel.CanUseOfficeMode);
-        Assert.False(viewModel.CanUseBalancedMode);
+        Assert.True(viewModel.CanUseBalancedMode);
         Assert.True(viewModel.CanUseCustomMode);
         Assert.True(viewModel.CanOpenFanAdjustment);
         Assert.True(viewModel.CanOpenPerformanceAdjustment);
@@ -373,13 +763,13 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public void AppVersionText_UsesUndatedSnapshot1Identity()
+    public void AppVersionText_UsesUndatedBetaSnapshot4Identity()
     {
         var viewModel = new MainWindowViewModel(CreateDashboard());
 
-        Assert.Equal("V1.0.2", viewModel.ReleaseVersionText);
-        Assert.Equal("V1.0.2", viewModel.ReleaseBadgeText);
-        Assert.Equal("RevoHelper V1.0.2 · 免费使用", viewModel.AppVersionText);
+        Assert.Equal("V1.0.3", viewModel.ReleaseVersionText);
+        Assert.Equal("V1.0.3", viewModel.ReleaseBadgeText);
+        Assert.Equal("RevoHelper V1.0.3 · 免费使用", viewModel.AppVersionText);
     }
 
     [Fact]
@@ -396,7 +786,7 @@ public sealed class MainWindowViewModelTests
         Assert.Equal("en-US", store.LastSaved?.UiLanguageCode);
         Assert.Equal("Laptop performance profiles", viewModel.UiCopy.HomeTitle);
         Assert.Equal("Performance", viewModel.DrawerTitle);
-        Assert.Equal("RevoHelper V1.0.2 · Free to use", viewModel.AppVersionText);
+        Assert.Equal("RevoHelper V1.0.3 · Free to use", viewModel.AppVersionText);
     }
 
     [Fact]
@@ -837,6 +1227,9 @@ public sealed class MainWindowViewModelTests
         string expectedLabel)
     {
         var viewModel = new MainWindowViewModel(CreateDashboard());
+        viewModel.ApplyRuntimeCapabilities(new(viewModel.Dashboard.Identity,
+            new Dictionary<HardwareFeature, HardwareFeatureCapability>(),
+            new HashSet<PlatformMode> { PlatformMode.TurboQuiet, PlatformMode.TurboHigh }, []));
 
         viewModel.SelectTurboStrategy(strategy);
 
@@ -1170,6 +1563,9 @@ public sealed class MainWindowViewModelTests
     {
         var controller = new RecordingPlatformModeController(new(PlatformMode.Office));
         var viewModel = CreateViewModel(platformModeController: controller);
+        viewModel.ApplyRuntimeCapabilities(new(viewModel.Dashboard.Identity,
+            new Dictionary<HardwareFeature, HardwareFeatureCapability>(),
+            new HashSet<PlatformMode> { PlatformMode.TurboQuiet, PlatformMode.TurboHigh }, []));
 
         var succeeded = await viewModel.ApplyTurboStrategyAsync(strategy, CancellationToken.None);
 
@@ -1718,7 +2114,7 @@ public sealed class MainWindowViewModelTests
 
         Assert.False(viewModel.StartWithWindows);
         Assert.Equal([true, false], startup.SetRequests);
-        Assert.Contains("未修改", viewModel.StatusMessage, StringComparison.Ordinal);
+        Assert.Contains("已恢复", viewModel.StatusMessage, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1732,7 +2128,7 @@ public sealed class MainWindowViewModelTests
 
         Assert.False(viewModel.StartWithWindows);
         Assert.Null(store.LastSaved);
-        Assert.Equal([true], startup.SetRequests);
+        Assert.Equal([true, false], startup.SetRequests);
         Assert.Contains("未确认", viewModel.StatusMessage, StringComparison.Ordinal);
     }
 
@@ -2880,6 +3276,46 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public async Task LiquidCooling_UnknownPermissionAllowsOnlyManualConnectionAndDisconnection()
+    {
+        var controls = new RecordingQuickControlsController { LiquidConnected = false, LiquidCanControl = null };
+        var vm = CreateViewModel(quickControlsController: controls, verificationDelay: (_, _) => Task.CompletedTask);
+        await vm.OpenLiquidCoolingAsync(CancellationToken.None);
+
+        Assert.True(vm.CanConnectLiquidCooling);
+        Assert.False(vm.CanPrimeLiquidCooling);
+        Assert.False(vm.CanResetLiquidCooling);
+        Assert.False((await vm.TryAutoConnectLiquidCoolingAsync(CancellationToken.None)).Succeeded);
+        Assert.Equal(0, controls.LiquidConnectCalls);
+
+        await vm.ConnectLiquidCoolingAsync(CancellationToken.None);
+
+        Assert.Equal(1, controls.LiquidConnectCalls);
+        Assert.True(vm.IsLiquidCoolingConnected);
+        Assert.True(vm.CanDisconnectLiquidCooling);
+        Assert.False(vm.CanPrimeLiquidCooling);
+        Assert.False(vm.CanResetLiquidCooling);
+    }
+
+    [Fact]
+    public async Task LiquidCooling_ExplicitDenialOrPrimingKeepsConnectionActionsUnavailable()
+    {
+        var controls = new RecordingQuickControlsController { LiquidConnected = false, LiquidCanControl = false };
+        var vm = CreateViewModel(quickControlsController: controls);
+        await vm.OpenLiquidCoolingAsync(CancellationToken.None);
+        Assert.False(vm.CanConnectLiquidCooling);
+        controls.LiquidConnected = true;
+        await vm.RefreshLiquidCoolingStatusAsync(CancellationToken.None);
+        Assert.False(vm.CanDisconnectLiquidCooling);
+
+        controls.LiquidCanControl = null;
+        controls.LiquidPriming = true;
+        await vm.RefreshLiquidCoolingStatusAsync(CancellationToken.None);
+        Assert.False(vm.CanConnectLiquidCooling);
+        Assert.False(vm.CanDisconnectLiquidCooling);
+    }
+
+    [Fact]
     public async Task LiquidCooling_FirstUseScansSelectsAndConnectsGcuDiscoveredDevice()
     {
         var controls = new RecordingQuickControlsController { LiquidConnected = false };
@@ -3346,7 +3782,8 @@ public sealed class MainWindowViewModelTests
         IOemFanController? fanController = null,
         Func<DateTimeOffset>? utcNow = null,
         ApplicationSettings? settings = null,
-        ExperimentalControlsViewModel? experiments = null) =>
+        ExperimentalControlsViewModel? experiments = null,
+        Action<string, string>? diagnostic = null) =>
         new(
             CreateDashboard(),
             settings ?? new ApplicationSettings(),
@@ -3366,7 +3803,8 @@ public sealed class MainWindowViewModelTests
             lightingProfileStore: lightingProfileStore,
             fanController: fanController,
             utcNow: utcNow,
-            experiments: experiments);
+            experiments: experiments,
+            diagnostic: diagnostic);
 
     private static HomeDashboard CreateDashboard() =>
         HomeDashboardFactory.Create(
@@ -3448,11 +3886,15 @@ public sealed class MainWindowViewModelTests
     {
         public IReadOnlyList<ConflictServiceStatus> DetectionResult { get; init; } = [];
         public Exception? OperationException { get; init; }
+        public Exception? DetectionException { get; init; }
         public List<string> StoppedServices { get; } = [];
         public List<string> RestoredServices { get; } = [];
 
-        public Task<IReadOnlyList<ConflictServiceStatus>> DetectAsync(CancellationToken cancellationToken) =>
-            Task.FromResult(DetectionResult);
+        public Task<IReadOnlyList<ConflictServiceStatus>> DetectAsync(CancellationToken cancellationToken)
+        {
+            if (DetectionException is not null) throw DetectionException;
+            return Task.FromResult(DetectionResult);
+        }
 
         public Task StopAsync(IReadOnlyList<string> serviceNames, CancellationToken cancellationToken)
         {
@@ -3506,9 +3948,13 @@ public sealed class MainWindowViewModelTests
     {
         private ProcessorBoostPolicy current = current;
         public List<ProcessorBoostPolicy> AppliedPolicies { get; } = [];
+        public bool ThrowOnRead { get; init; }
 
-        public ValueTask<ProcessorBoostPolicy> ReadAsync(CancellationToken cancellationToken) =>
-            ValueTask.FromResult(current);
+        public ValueTask<ProcessorBoostPolicy> ReadAsync(CancellationToken cancellationToken)
+        {
+            if (ThrowOnRead) throw new InvalidOperationException("Windows policy unavailable");
+            return ValueTask.FromResult(current);
+        }
 
         public ValueTask<ControlResult> ApplyAsync(ProcessorBoostPolicy policy, CancellationToken cancellationToken)
         {
@@ -3516,6 +3962,51 @@ public sealed class MainWindowViewModelTests
             current = policy;
             return ValueTask.FromResult(new ControlResult(true, "ok"));
         }
+    }
+
+    [Fact]
+    public async Task ExplicitFrequencyDisable_PreparesResetOnlyForDirectOffAction()
+    {
+        var frequency = new RecordingFrequencyLimitController(ProcessorFrequencyLimitPolicy.Uniform(3400));
+        var cpu = new RecordingCpuPolicyController(new CpuPolicy(75, 85, null));
+        var boost = new RecordingBoostController(new(ProcessorBoostMode.EfficientEnabled, ProcessorBoostMode.EfficientEnabled));
+        var platform = new RecordingPlatformModeController(new(PlatformMode.Balanced));
+        var vm = CreateViewModel(cpuPolicyController: cpu, boostController: boost,
+            platformModeController: platform, frequencyLimitController: frequency,
+            verificationDelay: (_, _) => Task.CompletedTask);
+        await vm.InitializePlatformModeAsync(CancellationToken.None);
+        vm.IsProcessorFrequencyLimitEnabled = false;
+        await vm.ApplyPerformancePolicyAsync(CancellationToken.None);
+        Assert.Equal(0, frequency.ExplicitDisablePreparations);
+        await vm.ApplyPerformancePolicyAsync(CancellationToken.None, userRequestedFrequencyDisable: true);
+        Assert.Equal(1, frequency.ExplicitDisablePreparations);
+        Assert.Equal(ProcessorFrequencyLimitPolicy.Uniform(0), frequency.LastApplied);
+        vm.IsProcessorFrequencyLimitEnabled = true;
+        await vm.ApplyPerformancePolicyAsync(CancellationToken.None, userRequestedFrequencyDisable: true);
+        Assert.Equal(1, frequency.ExplicitDisablePreparations);
+    }
+
+    [Fact]
+    public async Task ExplicitFrequencyDisable_PreparationFailure_DoesNotChangeOtherControls()
+    {
+        var frequency = new RecordingFrequencyLimitController(ProcessorFrequencyLimitPolicy.Uniform(3400))
+        {
+            ExplicitDisableResult = ControlResult.Rejected("保存损坏记录副本失败")
+        };
+        var cpu = new RecordingCpuPolicyController(new CpuPolicy(75, 85, null));
+        var boost = new RecordingBoostController(new(ProcessorBoostMode.EfficientEnabled, ProcessorBoostMode.EfficientEnabled));
+        var platform = new RecordingPlatformModeController(new(PlatformMode.Balanced));
+        var vm = CreateViewModel(cpuPolicyController: cpu, boostController: boost,
+            platformModeController: platform, frequencyLimitController: frequency,
+            verificationDelay: (_, _) => Task.CompletedTask);
+        await vm.InitializePlatformModeAsync(CancellationToken.None);
+        vm.IsProcessorFrequencyLimitEnabled = false;
+        await vm.ApplyPerformancePolicyAsync(CancellationToken.None, userRequestedFrequencyDisable: true);
+        Assert.Equal(1, frequency.ExplicitDisablePreparations);
+        Assert.Null(frequency.LastApplied);
+        Assert.Null(cpu.LastApplied);
+        Assert.Empty(boost.AppliedPolicies);
+        Assert.Contains("保存损坏记录副本失败", vm.StatusMessage);
     }
 
     private sealed class RecordingFrequencyLimitController(ProcessorFrequencyLimitPolicy current)
@@ -3528,6 +4019,14 @@ public sealed class MainWindowViewModelTests
         public List<ProcessorFrequencyLimitPolicy> AppliedPolicies { get; } = [];
         public Func<ProcessorFrequencyLimitPolicy, Task>? BeforeApply { get; init; }
         public ProcessorFrequencyLimitPolicy? OverrideOnSecondReadAfterApply { get; init; }
+        public int ExplicitDisablePreparations { get; private set; }
+        public ControlResult ExplicitDisableResult { get; init; } = new(true, "ok");
+
+        public ValueTask<ControlResult> PrepareForExplicitDisableAsync(CancellationToken cancellationToken)
+        {
+            ExplicitDisablePreparations++;
+            return ValueTask.FromResult(ExplicitDisableResult);
+        }
 
         public ValueTask<ProcessorFrequencyLimitPolicy> ReadAsync(CancellationToken cancellationToken)
         {
@@ -3553,10 +4052,47 @@ public sealed class MainWindowViewModelTests
         }
     }
 
-    private sealed class RecordingPlatformModeController(PlatformModeSelection current) : IPlatformModeController
+    private sealed class Snapshot3ChargeController : IExperimentalChargeController
     {
-        private PlatformModeSelection current = current;
+        public ExperimentalChargeStatus Status { get; private set; } = new();
+        public event EventHandler? StatusChanged;
+        public int Enables;
+        public int Recoveries;
+        public int Stops;
+        public int StopRequests;
+        public bool RecoveryStillPending;
+        public ChargeRecoveryResult? RecoveryOutcome;
+        public ChargeWireStatus? RecoveryWire;
+        public Exception? RecoveryError;
+        public TaskCompletionSource? RecoveryHold;
+        public TaskCompletionSource RecoveryEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public void Set(ExperimentalChargeStatus value) { Status = value; StatusChanged?.Invoke(this, EventArgs.Empty); }
+        public Task EnableAsync(int limitPercent, CancellationToken cancellationToken = default)
+        { Enables++; Set(new(Enabled: true, LimitPercent: limitPercent)); return Task.CompletedTask; }
+        public Task StopAsync(string reason, CancellationToken cancellationToken = default)
+        { Stops++; Set(new()); return Task.CompletedTask; }
+        public void RequestStop(string reason) => StopRequests++;
+        public async Task RecoverAsync(CancellationToken cancellationToken = default)
+        {
+            Recoveries++;
+            RecoveryEntered.TrySetResult();
+            if (RecoveryHold is not null) await RecoveryHold.Task.WaitAsync(cancellationToken);
+            if (RecoveryError is not null) throw RecoveryError;
+            if (RecoveryOutcome is not null)
+            {
+                RecoveryWire = ExperimentalChargeHelperHost.CreateRecoveryStatus(RecoveryOutcome, 80);
+                Set(new(Enabled: RecoveryWire.Enabled, RecoveryPending: RecoveryWire.RecoveryPending,
+                    LimitPercent: RecoveryWire.LimitPercent, Message: RecoveryWire.Message));
+            }
+            else Set(new(RecoveryPending: RecoveryStillPending));
+        }
+    }
+
+    private sealed class RecordingPlatformModeController(PlatformModeSelection? current) : IPlatformModeController
+    {
+        private PlatformModeSelection? current = current;
         public PlatformModeSelection? LastApplied { get; private set; }
+        public int ApplyCalls { get; private set; }
         public bool RejectApply { get; init; }
         public bool ThrowOnRead { get; init; }
 
@@ -3572,6 +4108,7 @@ public sealed class MainWindowViewModelTests
             PlatformModeSelection selection,
             CancellationToken cancellationToken)
         {
+            ApplyCalls++;
             LastApplied = selection;
             if (RejectApply) return ValueTask.FromResult(ControlResult.Rejected("simulated mode failure"));
             current = selection;
@@ -3617,6 +4154,7 @@ public sealed class MainWindowViewModelTests
         public bool KeepStaleSystemReadbackAfterWrite { get; init; }
         public int? LastBatteryChargeLimitPercent { get; private set; }
         public bool LiquidConnected { get; set; } = true;
+        public bool? LiquidCanControl { get; set; } = true;
         public bool EmptyLiquidDiscovery { get; init; }
         public int LiquidFanDuty { get; set; } = 60;
         public LiquidCoolingFanMode LiquidFanMode { get; private set; } = LiquidCoolingFanMode.Balanced;
@@ -3666,7 +4204,7 @@ public sealed class MainWindowViewModelTests
             ValueTask.FromResult<LiquidCoolingState?>(new(LiquidConnected, LiquidConnected ? "Connected" : "Disconnected",
                 LiquidFanMode, LiquidCoolingPumpMode.Maximum, LiquidConnected ? LiquidFanDuty : 0,
                 LiquidConnected ? 90 : 0, EmptyLiquidDiscovery ? [] : LiquidDevices, SelectedLiquidDeviceId,
-                "CoolingSystem LCT22002 v2.0.0.4", true, LiquidPriming, true));
+                "CoolingSystem LCT22002 v2.0.0.4", LiquidCanControl, LiquidPriming, true));
 
         public ValueTask<LiquidCoolingState?> ScanLiquidCoolingDevicesAsync(CancellationToken cancellationToken)
         {

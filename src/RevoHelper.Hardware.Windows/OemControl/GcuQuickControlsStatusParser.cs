@@ -288,7 +288,7 @@ public static class GcuQuickControlsStatusParser
             devices,
             selectedDevice,
             firmwareVersion,
-            canControl ?? false,
+            canControl,
             isPriming ?? false,
             meterNormal);
     }

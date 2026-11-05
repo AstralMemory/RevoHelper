@@ -9,4 +9,7 @@ public sealed record PerformanceSchedule(
 public sealed record PerformanceScheduleResult(
     bool Succeeded,
     string Reason,
-    PerformanceSchedule? Readback = null);
+    PerformanceSchedule? Readback = null)
+{
+    public PlatformModeSelection? ConfirmedPlatform { get; init; }
+}

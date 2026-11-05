@@ -740,6 +740,66 @@ public sealed class GcuQuickControlsControllerTests
         Assert.Equal("{\"Action\":\"Connect\"}", channel.LastLiquidCommand);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task LiquidCoolingConnection_MissingActionPermissionAllowsManualAttemptAndReadback(bool connect)
+    {
+        var channel = new FakeChannel
+        {
+            LiquidStatus = $"{{\"connected\":{connect.ToString().ToLowerInvariant()},\"DevMACString\":\"remembered-cooler\"}}"
+        };
+        channel.LiquidStatuses.Enqueue($"{{\"connected\":{(!connect).ToString().ToLowerInvariant()},\"DevMACString\":\"remembered-cooler\"}}");
+        var controller = new GcuQuickControlsController(channel, (_, _) => Task.CompletedTask);
+
+        var result = connect
+            ? await controller.ConnectLiquidCoolingAsync(CancellationToken.None)
+            : await controller.DisconnectLiquidCoolingAsync(CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(connect ? "{\"Action\":\"Connect\"}" : "{\"Action\":\"Disconnect\"}", channel.LastLiquidCommand);
+    }
+
+    [Theory]
+    [InlineData("{\"connected\":false,\"LC_action\":false,\"DevMACString\":\"remembered-cooler\"}")]
+    [InlineData("{\"connected\":false,\"LC_InputWater\":true,\"DevMACString\":\"remembered-cooler\"}")]
+    [InlineData("{\"connected\":false,\"DeviceMacList\":[\"discovered-cooler\"]}")]
+    [InlineData("{}")]
+    public async Task ConnectLiquidCooling_ExplicitDenialPrimingMissingSelectionOrUnavailableStateNeverWrites(string status)
+    {
+        var channel = new FakeChannel { LiquidStatus = status };
+        var controller = new GcuQuickControlsController(channel, (_, _) => Task.CompletedTask);
+
+        var result = await controller.ConnectLiquidCoolingAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Null(channel.LastLiquidCommand);
+    }
+
+    [Fact]
+    public async Task ConnectLiquidCooling_DifferentConnectedDeviceDoesNotConfirmRequestedDevice()
+    {
+        var channel = new FakeChannel { LiquidStatus = "{\"connected\":true,\"DevMACString\":\"different-cooler\"}" };
+        channel.LiquidStatuses.Enqueue("{\"connected\":false,\"DevMACString\":\"remembered-cooler\"}");
+        var controller = new GcuQuickControlsController(channel, (_, _) => Task.CompletedTask);
+
+        var result = await controller.ConnectLiquidCoolingAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("{\"Action\":\"Connect\"}", channel.LastLiquidCommand);
+    }
+
+    [Fact]
+    public async Task LiquidCooling_MissingActionPermissionDoesNotAuthorizePrimingOrReset()
+    {
+        var channel = new FakeChannel { LiquidStatus = "{\"connected\":true,\"DevMACString\":\"remembered-cooler\"}" };
+        var controller = new GcuQuickControlsController(channel, (_, _) => Task.CompletedTask);
+
+        Assert.False((await controller.StartLiquidCoolingPrimingAsync(CancellationToken.None)).Succeeded);
+        Assert.False((await controller.ResetLiquidCoolingDeviceAsync(CancellationToken.None)).Succeeded);
+        Assert.Null(channel.LastLiquidCommand);
+    }
+
     [Fact]
     public async Task Priming_WhenConnectedAndIdle_SendsOfficialCommand()
     {

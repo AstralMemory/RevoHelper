@@ -52,7 +52,7 @@ public sealed record LiquidCoolingState(
     IReadOnlyList<LiquidCoolingDevice> Devices,
     string? SelectedDeviceId,
     string? FirmwareVersion,
-    bool CanControl,
+    bool? CanControl,
     bool IsPriming,
     bool? MeterNormal);
 

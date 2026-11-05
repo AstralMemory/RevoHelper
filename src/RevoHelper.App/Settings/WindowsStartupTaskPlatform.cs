@@ -97,6 +97,39 @@ public sealed class WindowsStartupTaskPlatform : IStartupTaskPlatform
         }
     }
 
+    public LegacyStartupState CaptureLegacyState() => new(
+        ReadValue(RunKeyPath), ReadValue(StartupApprovedKeyPaths[0]), ReadValue(StartupApprovedKeyPaths[1]));
+
+    public void RestoreLegacyState(LegacyStartupState state)
+    {
+        if (!state.CanRestoreFrom(CaptureLegacyState()))
+            throw new InvalidOperationException("旧启动项已被其他操作修改，未覆盖。");
+        WriteValue(RunKeyPath, state.Run);
+        WriteValue(StartupApprovedKeyPaths[0], state.ApprovalRun);
+        WriteValue(StartupApprovedKeyPaths[1], state.ApprovalRun32);
+        if (!state.Matches(CaptureLegacyState()))
+            throw new InvalidOperationException("旧启动项恢复后回读不一致。");
+    }
+
+    private static StartupRegistryValue? ReadValue(string path)
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(path, writable: false);
+        var value = key?.GetValue(ValueName, null, RegistryValueOptions.DoNotExpandEnvironmentNames);
+        return value is null ? null : new(key!.GetValueKind(ValueName), value);
+    }
+
+    private static void WriteValue(string path, StartupRegistryValue? value)
+    {
+        if (value is null)
+        {
+            using var existing = Registry.CurrentUser.OpenSubKey(path, writable: true);
+            existing?.DeleteValue(ValueName, throwOnMissingValue: false);
+            return;
+        }
+        using var key = Registry.CurrentUser.CreateSubKey(path, writable: true);
+        key.SetValue(ValueName, value.Value, value.Kind);
+    }
+
     private static void RequireAdministrator()
     {
         using var identity = WindowsIdentity.GetCurrent();

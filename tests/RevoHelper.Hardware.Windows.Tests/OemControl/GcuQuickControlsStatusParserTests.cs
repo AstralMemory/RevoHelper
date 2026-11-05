@@ -332,6 +332,18 @@ public sealed class GcuQuickControlsStatusParserTests
     }
 
     [Theory]
+    [InlineData("{\"connected\":false,\"DevMACString\":\"remembered-cooler\"}", null)]
+    [InlineData("{\"connected\":false,\"LC_action\":false}", false)]
+    [InlineData("{\"connected\":false,\"LC_action\":true}", true)]
+    public void ParseLiquidCooling_PreservesUnknownVersusExplicitControlPermission(string payload, bool? expected)
+    {
+        var state = GcuQuickControlsStatusParser.ParseLiquidCooling(payload);
+
+        Assert.NotNull(state);
+        Assert.Equal(expected, state.CanControl);
+    }
+
+    [Theory]
     [InlineData("{\"ColorCalibrationStatus\":\"COLOR_CALIBRATION_ON_P3\",\"LocalDimming\":\"LOCALDIMMING_ON\"}", true, DisplayColorMode.P3, true)]
     [InlineData("{\"ColorCalibrationStatus\":\"COLOR_CALIBRATION_OFF\",\"LocalDimmingStatus\":0}", false, null, false)]
     public void ParseDisplayFeatures_ToleratesOfficialStatusVariants(

@@ -1,4 +1,4 @@
-using RevoHelper.Hardware.Windows.Discovery;
+using System.Management;
 
 namespace RevoHelper.App.Lifecycle;
 
@@ -9,7 +9,16 @@ public sealed record ConflictServiceStatus(
     string DisplayName,
     bool IsRunning,
     bool IsInstalled,
-    string StatusText);
+    string StatusText)
+{
+    // Preserve the old constructor for in-memory controllers and callers. Real
+    // observations always supply the native state, including pending/unknown.
+    public string NativeState { get; init; } = IsInstalled
+        ? IsRunning ? "Running" : "Stopped"
+        : "Missing";
+
+    public bool IsTransitioning => NativeState.EndsWith(" Pending", StringComparison.OrdinalIgnoreCase);
+}
 
 public sealed class ConflictServiceStatusDetector
 {
@@ -49,7 +58,7 @@ public sealed class ConflictServiceStatusDetector
                     service.DisplayName,
                     false,
                     false,
-                    "状态不可用"))
+                    "状态不可用") { NativeState = "Unknown" })
                 .ToArray();
         }
 
@@ -58,33 +67,51 @@ public sealed class ConflictServiceStatusDetector
                 ? new ConflictServiceStatus(
                     service.ServiceName,
                     service.DisplayName,
-                    string.Equals(identity.State, "Running", StringComparison.OrdinalIgnoreCase),
+                    string.Equals(identity.State.Trim(), "Running", StringComparison.OrdinalIgnoreCase),
                     true,
-                    string.Equals(identity.State, "Running", StringComparison.OrdinalIgnoreCase)
-                        ? "正在运行"
-                        : "已停止")
+                    StateText(identity.State))
+                {
+                    NativeState = string.IsNullOrWhiteSpace(identity.State) ? "Unknown" : identity.State.Trim()
+                }
                 : new ConflictServiceStatus(
                     service.ServiceName,
                     service.DisplayName,
                     false,
                     false,
-                    "未安装"))
+                    "未安装") { NativeState = "Missing" })
             .ToArray();
     }
 
+    private static string StateText(string state) => state.Trim().ToUpperInvariant() switch
+    {
+        "RUNNING" => "正在运行",
+        "STOPPED" => "已停止",
+        "START PENDING" => "正在启动",
+        "STOP PENDING" => "正在停止",
+        "CONTINUE PENDING" => "正在继续",
+        "PAUSE PENDING" => "正在暂停",
+        "PAUSED" => "已暂停",
+        _ => "状态不可用"
+    };
+
     private static IReadOnlyList<WindowsServiceIdentity> SnapshotServices()
     {
-        var query = new SystemManagementWmiQuery();
-        return query.ReadAll("Win32_Service")
-            .Where(row => row.TryGetValue("Name", out var name) &&
-                          KnownServices.Any(service => string.Equals(
-                              service.ServiceName,
-                              name,
-                              StringComparison.OrdinalIgnoreCase)))
-            .Select(row => new WindowsServiceIdentity(
-                row.GetValueOrDefault("Name", string.Empty),
-                row.GetValueOrDefault("State", string.Empty),
-                row.GetValueOrDefault("StartMode", string.Empty)))
-            .ToArray();
+        // Only manual operations poll this snapshot. Limit the query and its
+        // wait instead of repeatedly enumerating every Windows service.
+        using var searcher = new ManagementObjectSearcher(
+            "SELECT Name, State, StartMode FROM Win32_Service WHERE " +
+            "Name='XtuService' OR Name='dptftcs' OR Name='ipfsvc'");
+        searcher.Options.Timeout = TimeSpan.FromSeconds(2);
+        using var results = searcher.Get();
+        var snapshot = new List<WindowsServiceIdentity>();
+        foreach (ManagementObject service in results)
+        {
+            using (service)
+                snapshot.Add(new(
+                    service["Name"]?.ToString()?.Trim() ?? string.Empty,
+                    service["State"]?.ToString()?.Trim() ?? string.Empty,
+                    service["StartMode"]?.ToString()?.Trim() ?? string.Empty));
+        }
+        return snapshot;
     }
 }

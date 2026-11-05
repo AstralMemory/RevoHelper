@@ -42,12 +42,37 @@ public sealed class ConflictServiceStatusDetectorTests
             Assert.False(status.IsInstalled);
             Assert.False(status.IsRunning);
             Assert.Equal("未安装", status.StatusText);
+            Assert.Equal("Missing", status.NativeState);
         });
         Assert.All(unavailable, status =>
         {
             Assert.False(status.IsInstalled);
             Assert.False(status.IsRunning);
             Assert.Equal("状态不可用", status.StatusText);
+            Assert.Equal("Unknown", status.NativeState);
         });
+    }
+
+    [Theory]
+    [InlineData("Start Pending", "正在启动")]
+    [InlineData("Stop Pending", "正在停止")]
+    [InlineData("Continue Pending", "正在继续")]
+    [InlineData("Pause Pending", "正在暂停")]
+    [InlineData("Paused", "已暂停")]
+    [InlineData("Unknown", "状态不可用")]
+    [InlineData("", "状态不可用")]
+    public void Detect_DoesNotCallEveryNonRunningServiceStopped(string nativeState, string expectedText)
+    {
+        var detector = new ConflictServiceStatusDetector(() =>
+            [new("XtuService", nativeState, "Auto")]);
+
+        var status = detector.Detect().Single(item => item.ServiceName == "XtuService");
+
+        Assert.True(status.IsInstalled);
+        Assert.False(status.IsRunning);
+        Assert.Equal(expectedText, status.StatusText);
+        Assert.NotEqual("已停止", status.StatusText);
+        Assert.Equal(string.IsNullOrEmpty(nativeState) ? "Unknown" : nativeState, status.NativeState);
+        Assert.Equal(nativeState.EndsWith(" Pending", StringComparison.OrdinalIgnoreCase), status.IsTransitioning);
     }
 }

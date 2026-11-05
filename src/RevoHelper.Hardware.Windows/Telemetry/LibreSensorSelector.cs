@@ -12,8 +12,9 @@ public static class LibreSensorSelector
         var hasHybridClockLabels = performanceClock is not null || efficiencyClock is not null;
         return new(
             FindExact(all, SensorValueKind.Load, "CPU Total"),
-            FindFirstExact(all, SensorValueKind.Temperature, "CPU Package", "Core Average"),
-            Positive(FindExact(all, SensorValueKind.Power, "CPU Package")),
+            FindFirstExact(all, SensorValueKind.Temperature,
+                "CPU Package", "Core Average", "Core (Tctl/Tdie)", "Core (Tdie)", "Core (Tctl)"),
+            Positive(FindFirstExact(all, SensorValueKind.Power, "CPU Package", "Package")),
             hasHybridClockLabels ? null : MaximumCoreClock(all),
             performanceClock,
             efficiencyClock,
@@ -85,9 +86,18 @@ public static class LibreSensorSelector
     }
 
     private static double? MaximumCoreClock(IReadOnlyList<SensorDescriptor> sensors) =>
-        Maximum(sensors, SensorValueKind.Clock, name =>
-            name.StartsWith("CPU Core #", StringComparison.OrdinalIgnoreCase) &&
-            name.Length > 10 && name.AsSpan(10).IndexOfAnyExceptInRange('0', '9') < 0);
+        Maximum(sensors, SensorValueKind.Clock, IsNumberedCoreClock);
+
+    private static bool IsNumberedCoreClock(string name)
+    {
+        // Intel uses "CPU Core #n"; AMD uses "Core #n". Keep effective clocks
+        // and aggregate/uncore clocks separate from the existing operating-clock display.
+        var prefixLength = name.StartsWith("CPU Core #", StringComparison.OrdinalIgnoreCase) ? 10
+            : name.StartsWith("Core #", StringComparison.OrdinalIgnoreCase) ? 6
+            : 0;
+        return prefixLength != 0 && name.Length > prefixLength &&
+               name.AsSpan(prefixLength).IndexOfAnyExceptInRange('0', '9') < 0;
+    }
 
     private static double? Positive(double? value) => value > 0 ? value : null;
 

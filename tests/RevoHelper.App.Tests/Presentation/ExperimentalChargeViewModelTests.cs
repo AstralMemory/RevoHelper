@@ -116,9 +116,9 @@ public sealed class ExperimentalChargeViewModelTests
         Assert.Equal(!fail, backend.Status.Enabled);
         if (fail)
         {
-            Assert.True(vm.RecoveryPending);
+            Assert.False(vm.RecoveryPending);
             Assert.Contains("apply failed", vm.StatusText);
-            Assert.False(vm.CanToggle);
+            Assert.True(vm.CanToggle);
         }
     }
 
@@ -135,18 +135,27 @@ public sealed class ExperimentalChargeViewModelTests
     }
 
     [Fact]
-    public async Task BackendFailureIsShownAndRequiresExplicitRecovery()
+    public async Task BackendFailureBeforeAnyWriteDoesNotInventPendingRecovery()
     {
         var backend = new FakeController { EnableError = new InvalidOperationException("模拟异常") };
         using var vm = new ExperimentalChargeViewModel(backend);
         await vm.EnableAsync();
         Assert.Contains("模拟异常", vm.StatusText);
-        Assert.True(vm.RecoveryPending);
-        Assert.False(vm.CanEnable);
-        Assert.False(vm.CanUseNativeCareModes);
-        Assert.True(vm.CanRecover);
-        await vm.RecoverAsync();
-        Assert.Equal(1, backend.Recoveries);
+        Assert.False(vm.RecoveryPending);
+        Assert.True(vm.CanEnable);
+        Assert.True(vm.CanUseNativeCareModes);
+        Assert.False(vm.CanRecover);
+        Assert.Equal(0, backend.Recoveries);
+    }
+
+    [Fact]
+    public async Task CancellationBeforeStartingEnableDoesNotInventPendingRecovery()
+    {
+        var backend = new FakeController();
+        using var vm = new ExperimentalChargeViewModel(backend);
+        await vm.EnableAsync(new CancellationToken(canceled: true));
+
+        Assert.Equal(0, backend.Enables);
         Assert.False(vm.RecoveryPending);
         Assert.True(vm.CanEnable);
     }
@@ -345,29 +354,93 @@ public sealed class ExperimentalChargeViewModelTests
         Assert.True(await vm.PauseForManualControlAsync());
         Assert.Equal(0, backend.Stops);
         Assert.Equal(0, backend.StopRequests);
+        Assert.Equal(0, backend.Recoveries);
         Assert.True(vm.Charge.IsEnabled);
         Assert.Equal(limitPercent, backend.Status.LimitPercent);
     }
 
     [Theory]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    public async Task ManualPerformanceChangeIsBlockedWhileChargeIsBusyOrRecoveryPendingWithoutStopping(
-        bool busy, bool recoveryPending)
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ManualPerformanceChangeDoesNotRaceAnAlreadyBusyChargeOperation(bool recoveryPending)
     {
         var backend = new FakeController();
         var dynamic = new ShutdownDynamicController();
         using var vm = new ExperimentalControlsViewModel(dynamic, chargeController: backend);
-        backend.Set(new(Enabled: true, Busy: busy, RecoveryPending: recoveryPending));
+        backend.Set(new(Enabled: true, Busy: true, RecoveryPending: recoveryPending));
 
         Assert.False(await vm.PauseForManualControlAsync());
 
         Assert.Equal(0, backend.Stops);
         Assert.Equal(0, backend.StopRequests);
+        Assert.Equal(0, backend.Recoveries);
         Assert.Equal(0, dynamic.Preparations);
         Assert.Equal(!recoveryPending, vm.Charge.IsEnabled);
         Assert.True(backend.Status.Enabled);
         Assert.Equal(recoveryPending, vm.Charge.RecoveryPending);
+    }
+
+    [Fact]
+    public async Task ManualPerformanceChangeRecoversPendingSessionThenContinuesWithoutEnablingCharge()
+    {
+        var backend = new FakeController();
+        var dynamic = new ShutdownDynamicController();
+        using var vm = new ExperimentalControlsViewModel(dynamic, chargeController: backend);
+        backend.Set(new(RecoveryPending: true, Message: "旧会话尚未确认恢复"));
+
+        Assert.True(await vm.PauseForManualControlAsync());
+
+        Assert.Equal(1, backend.Recoveries);
+        Assert.Equal(1, dynamic.Preparations);
+        Assert.False(vm.Charge.RecoveryPending);
+        Assert.False(vm.Charge.IsEnabled);
+        Assert.Equal(0, backend.Enables);
+        Assert.Equal(0, backend.Stops);
+    }
+
+    [Theory]
+    [InlineData("throw")]
+    [InlineData("pending")]
+    [InlineData("enabled")]
+    [InlineData("busy")]
+    [InlineData("clear-then-throw")]
+    public async Task ManualPerformanceChangeDoesNotProceedWithoutConfirmedRecovery(string failure)
+    {
+        var backend = new FakeController
+        {
+            RecoveryError = failure is "throw" or "clear-then-throw" ? new InvalidOperationException("恢复失败") : null,
+            RecoveryErrorClearsStatus = failure == "clear-then-throw",
+            RecoveryResult = new(Enabled: failure == "enabled", Busy: failure == "busy",
+                RecoveryPending: failure == "pending", Message: "恢复尚未确认")
+        };
+        var dynamic = new ShutdownDynamicController();
+        using var vm = new ExperimentalControlsViewModel(dynamic, chargeController: backend);
+        backend.Set(new(RecoveryPending: true));
+
+        Assert.False(await vm.PauseForManualControlAsync());
+
+        Assert.Equal(1, backend.Recoveries);
+        Assert.True(vm.Charge.RecoveryPending);
+        Assert.Equal(0, dynamic.Preparations);
+        Assert.Equal(0, backend.Enables);
+    }
+
+    [Fact]
+    public async Task ManualPerformanceRecoveryIsSingleFlightAndConstructionDoesNotRecover()
+    {
+        var backend = new FakeController { RecoveryHold = new(TaskCreationOptions.RunContinuationsAsynchronously) };
+        backend.Set(new(RecoveryPending: true));
+        using var vm = new ExperimentalControlsViewModel(chargeController: backend);
+        Assert.Equal(0, backend.Recoveries);
+        var first = vm.PauseForManualControlAsync();
+        try
+        {
+            await backend.RecoveryEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            Assert.False(await vm.PauseForManualControlAsync());
+            Assert.Equal(1, backend.Recoveries);
+        }
+        finally { backend.RecoveryHold.TrySetResult(); }
+        Assert.True(await first);
     }
 
     [Fact]
@@ -393,7 +466,7 @@ public sealed class ExperimentalChargeViewModelTests
     public async Task BlockedManualControlReportsChargeStateInsteadOfDynamicFrequency(
         bool busy, bool recoveryPending, string expected)
     {
-        var backend = new FakeController();
+        var backend = new FakeController { RecoveryError = recoveryPending ? new InvalidOperationException("恢复仍失败") : null };
         using var experiments = new ExperimentalControlsViewModel(chargeController: backend);
         backend.Set(new(Enabled: true, Busy: busy, RecoveryPending: recoveryPending));
         var vm = new MainWindowViewModel(
@@ -473,14 +546,19 @@ public sealed class ExperimentalChargeViewModelTests
         public int StopRequests;
         public bool StopTokenWasCancelled;
         public bool StopLeavesRecoveryPending;
+        public ExperimentalChargeStatus RecoveryResult = new(Message: "已恢复");
+        public bool RecoveryErrorClearsStatus;
         public readonly List<string> Calls = [];
         public Exception? EnableError;
         public bool EnableErrorLeavesEnabled;
         public Exception? StopError;
+        public Exception? RecoveryError;
         public TaskCompletionSource? EnableHold;
         public TaskCompletionSource? StopHold;
+        public TaskCompletionSource? RecoveryHold;
         public TaskCompletionSource EnableEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource StopEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource RecoveryEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public void Set(ExperimentalChargeStatus status) { Status = status; StatusChanged?.Invoke(this, EventArgs.Empty); }
         public async Task EnableAsync(int limitPercent, CancellationToken token = default)
         {
@@ -505,8 +583,18 @@ public sealed class ExperimentalChargeViewModelTests
             if (StopError is not null) throw StopError;
             Set(new(RecoveryPending: StopLeavesRecoveryPending, Message: StopLeavesRecoveryPending ? "待恢复" : "已恢复"));
         }
-        public Task RecoverAsync(CancellationToken token = default)
-        { Recoveries++; Set(new(Message: "已恢复")); return Task.CompletedTask; }
+        public async Task RecoverAsync(CancellationToken token = default)
+        {
+            Recoveries++;
+            RecoveryEntered.TrySetResult();
+            if (RecoveryHold is not null) await RecoveryHold.Task;
+            if (RecoveryError is not null)
+            {
+                if (RecoveryErrorClearsStatus) Set(new());
+                throw RecoveryError;
+            }
+            Set(RecoveryResult);
+        }
         public void RequestStop(string reason) => StopRequests++;
     }
 }

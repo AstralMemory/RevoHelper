@@ -184,6 +184,104 @@ public sealed class LibreSensorSelectorTests
     }
 
     [Fact]
+    public void SelectCpu_AmdRyzenLabels_PreserveAvailableTemperaturePowerAndCoreClock()
+    {
+        // Names used by LibreHardwareMonitor 0.9.6 Amd17Cpu (including Zen 5).
+        var reading = LibreSensorSelector.SelectCpu([
+            new("CPU Total", SensorValueKind.Load, 6),
+            new("Core (Tctl/Tdie)", SensorValueKind.Temperature, 72.5),
+            new("Package", SensorValueKind.Power, 32.5),
+            new("Core #1", SensorValueKind.Clock, 4350),
+            new("Core #2", SensorValueKind.Clock, 4900),
+            new("Core #3", SensorValueKind.Clock, null),
+            new("Cores (Average)", SensorValueKind.Clock, 4625),
+            new("Core #2 (Effective)", SensorValueKind.Clock, 9000),
+            new("Bus Speed", SensorValueKind.Clock, 100)]);
+
+        Assert.Equal(6, reading.UsagePercent);
+        Assert.Equal(72.5, reading.TemperatureC);
+        Assert.Equal(32.5, reading.PowerWatts);
+        Assert.Equal(4900, reading.FrequencyMhz);
+        Assert.Null(reading.PerformanceCoreFrequencyMhz);
+        Assert.Null(reading.EfficiencyCoreFrequencyMhz);
+    }
+
+    [Theory]
+    [InlineData("Core (Tctl/Tdie)")]
+    [InlineData("Core (Tdie)")]
+    [InlineData("Core (Tctl)")]
+    public void SelectCpu_AmdTemperatureAliases_AreRecognized(string sensorName)
+    {
+        var reading = LibreSensorSelector.SelectCpu([
+            new(sensorName, SensorValueKind.Temperature, 64.5)]);
+
+        Assert.Equal(64.5, reading.TemperatureC);
+    }
+
+    [Fact]
+    public void SelectCpu_AmdTemperature_PrefersDieOverOffsetControlReading()
+    {
+        var reading = LibreSensorSelector.SelectCpu([
+            new("Core (Tctl)", SensorValueKind.Temperature, 82),
+            new("Core (Tdie)", SensorValueKind.Temperature, 62),
+            new("CCD1 (Tdie)", SensorValueKind.Temperature, 90)]);
+
+        Assert.Equal(62, reading.TemperatureC);
+    }
+
+    [Fact]
+    public void SelectCpu_AmdCoreNames_OnlyUseValidNumberedOperatingClocks()
+    {
+        var reading = LibreSensorSelector.SelectCpu([
+            new("core #11", SensorValueKind.Clock, 5100),
+            new("Core #1", SensorValueKind.Clock, 4300),
+            new("Core #3", SensorValueKind.Clock, double.NaN),
+            new("Core #4", SensorValueKind.Clock, double.PositiveInfinity),
+            new("Core #5", SensorValueKind.Clock, -1),
+            new("Core #", SensorValueKind.Clock, 9000),
+            new("Core #6 (Effective)", SensorValueKind.Clock, 9000),
+            new("Core #7", SensorValueKind.Temperature, 9000)]);
+
+        Assert.Equal(5100, reading.FrequencyMhz);
+    }
+
+    [Fact]
+    public void SelectCpu_AmdInvalidReadings_RemainUnavailable()
+    {
+        var reading = LibreSensorSelector.SelectCpu([
+            new("Core (Tctl/Tdie)", SensorValueKind.Temperature, double.NaN),
+            new("Core (Tdie)", SensorValueKind.Temperature, -1),
+            new("Core (Tctl)", SensorValueKind.Temperature, null),
+            new("Package", SensorValueKind.Power, 0),
+            new("Core #1", SensorValueKind.Clock, double.PositiveInfinity),
+            new("Cores (Average)", SensorValueKind.Clock, 5000),
+            new("Core #1 (Effective)", SensorValueKind.Clock, 4000)]);
+
+        Assert.Null(reading.TemperatureC);
+        Assert.Null(reading.PowerWatts);
+        Assert.Null(reading.FrequencyMhz);
+    }
+
+    [Fact]
+    public void SelectCpu_AmdAliases_DoNotOverrideExistingPackageAndHybridPriority()
+    {
+        var reading = LibreSensorSelector.SelectCpu([
+            new("CPU Package", SensorValueKind.Temperature, 60),
+            new("Core (Tctl/Tdie)", SensorValueKind.Temperature, 80),
+            new("CPU Package", SensorValueKind.Power, 25),
+            new("Package", SensorValueKind.Power, 45),
+            new("P-Core #1", SensorValueKind.Clock, 5000),
+            new("E-Core #1", SensorValueKind.Clock, 2000),
+            new("Core #1", SensorValueKind.Clock, 6000)]);
+
+        Assert.Equal(60, reading.TemperatureC);
+        Assert.Equal(25, reading.PowerWatts);
+        Assert.Null(reading.FrequencyMhz);
+        Assert.Equal(5000, reading.PerformanceCoreFrequencyMhz);
+        Assert.Equal(2000, reading.EfficiencyCoreFrequencyMhz);
+    }
+
+    [Fact]
     public void SelectGpu_UsesCoreMetricsAndReturnsNullForUnavailablePower()
     {
         SensorDescriptor[] sensors =

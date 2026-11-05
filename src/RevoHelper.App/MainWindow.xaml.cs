@@ -100,7 +100,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void Profile_Checked(object sender, RoutedEventArgs e)
+    private async void Profile_Click(object sender, RoutedEventArgs e)
     {
         if (!IsLoaded || synchronizingProfileButtons ||
             DataContext is not MainWindowViewModel viewModel ||
@@ -110,11 +110,15 @@ public partial class MainWindow : Window
         }
 
         var refreshVersion = Interlocked.Increment(ref profileDrawerRefreshVersion);
-        await viewModel.ApplyPlatformProfileAsync(profileId, CancellationToken.None);
+        var applying = viewModel.ApplyPlatformProfileAsync(profileId, CancellationToken.None);
+        // RadioButton toggles before Click. Reconcile immediately with the VM so
+        // pending preparation does not present a target that has not been sent.
+        SynchronizeProfileButtons();
+        await applying;
         await RefreshLatestProfileDrawerAsync(refreshVersion);
     }
 
-    private async void TurboStrategy_Checked(object sender, RoutedEventArgs e)
+    private async void TurboStrategy_Click(object sender, RoutedEventArgs e)
     {
         if (!IsLoaded || synchronizingProfileButtons ||
             DataContext is not MainWindowViewModel viewModel ||
@@ -128,11 +132,13 @@ public partial class MainWindow : Window
             : TurboStrategy.Quiet;
 
         var refreshVersion = Interlocked.Increment(ref profileDrawerRefreshVersion);
-        await viewModel.ApplyTurboStrategyAsync(strategy, CancellationToken.None);
+        var applying = viewModel.ApplyTurboStrategyAsync(strategy, CancellationToken.None);
+        SynchronizeProfileButtons();
+        await applying;
         await RefreshLatestProfileDrawerAsync(refreshVersion);
     }
 
-    private async void CustomProfile_Checked(object sender, RoutedEventArgs e)
+    private async void CustomProfile_Click(object sender, RoutedEventArgs e)
     {
         if (!IsLoaded || synchronizingProfileButtons ||
             sender is not FrameworkElement { Tag: string profileText } ||
@@ -142,7 +148,9 @@ public partial class MainWindow : Window
         }
 
         var refreshVersion = Interlocked.Increment(ref profileDrawerRefreshVersion);
-        await ViewModel.ApplyCustomProfileAsync(profileIndex, CancellationToken.None);
+        var applying = ViewModel.ApplyCustomProfileAsync(profileIndex, CancellationToken.None);
+        SynchronizeProfileButtons();
+        await applying;
         await RefreshLatestProfileDrawerAsync(refreshVersion);
     }
 
@@ -684,7 +692,8 @@ public partial class MainWindow : Window
         if (IsUserComboBoxSelection(sender)) QueuePerformanceAutoApply();
     }
 
-    private void PerformanceToggle_Click(object sender, RoutedEventArgs e) => QueuePerformanceAutoApply();
+    private void PerformanceToggle_Click(object sender, RoutedEventArgs e) =>
+        QueuePerformanceAutoApply(userRequestedFrequencyDisable: sender is CheckBox { IsChecked: false });
 
     private void PerformanceSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
@@ -703,7 +712,7 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private void QueuePerformanceAutoApply(TimeSpan? delay = null)
+    private void QueuePerformanceAutoApply(TimeSpan? delay = null, bool userRequestedFrequencyDisable = false)
     {
         if (!IsLoaded) return;
         var version = Interlocked.Increment(ref performanceAutoApplyVersion);
@@ -711,7 +720,8 @@ public partial class MainWindow : Window
         var turboStrategy = ViewModel.SelectedTurboStrategy;
         var customProfileIndex = ViewModel.SelectedCustomProfileIndex;
         _ = ApplyLatestPerformancePolicyAsync(
-            version, profileId, turboStrategy, customProfileIndex, delay ?? TimeSpan.Zero);
+            version, profileId, turboStrategy, customProfileIndex, delay ?? TimeSpan.Zero,
+            userRequestedFrequencyDisable);
     }
 
     private async Task ApplyLatestPerformancePolicyAsync(
@@ -719,7 +729,8 @@ public partial class MainWindow : Window
         string profileId,
         TurboStrategy turboStrategy,
         int customProfileIndex,
-        TimeSpan delay)
+        TimeSpan delay,
+        bool userRequestedFrequencyDisable)
     {
         if (delay > TimeSpan.Zero) await Task.Delay(delay);
         if (version != Volatile.Read(ref performanceAutoApplyVersion)) return;
@@ -731,7 +742,7 @@ public partial class MainWindow : Window
                 turboStrategy == ViewModel.SelectedTurboStrategy &&
                 customProfileIndex == ViewModel.SelectedCustomProfileIndex &&
                 ViewModel.IsPerformanceApplyEnabled)
-                await ViewModel.ApplyPerformancePolicyAsync(CancellationToken.None);
+                await ViewModel.ApplyPerformancePolicyAsync(CancellationToken.None, userRequestedFrequencyDisable);
         }
         finally
         {

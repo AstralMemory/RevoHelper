@@ -63,12 +63,15 @@ public sealed class GcuGpuOutputModeController(
         throw new InvalidOperationException("GCU 回读未收敛到目标模式");
     }
 
+    // The live GCU answer decides. A registry value only speaks when GCU is silent,
+    // and when neither says anything the user may still try; readback confirms the result.
     private static GpuOutputModeCapabilities Combine(
         GcuGpuOutputModeStatus live,
-        GpuOutputModeCapabilities machine) => new(
-            machine.SupportsHybrid && live.SupportsDirectSwitch is not false,
-            machine.SupportsDiscrete && live.SupportsDirectSwitch is not false,
-            machine.SupportsIntegrated && live.SupportsIntegrated is not false);
+        GpuOutputMachineSupport machine)
+    {
+        var direct = live.SupportsDirectSwitch ?? machine.DirectSwitch ?? true;
+        return new(direct, direct, live.SupportsIntegrated ?? machine.Integrated ?? true);
+    }
 
     private static string Label(GpuOutputMode mode) => mode switch
     {

@@ -1,4 +1,5 @@
 using System.IO;
+using System.Reflection;
 using System.Windows;
 using RevoHelper.App.Presentation;
 using RevoHelper.App.Settings;
@@ -137,12 +138,13 @@ public partial class App : Application
             RuntimeDiagnosticLog.Write("startup-registration", $"{exception.GetType().Name}: {exception.Message}");
         }
 
+        RuntimeDiagnosticLog.Write("startup", $"version={typeof(App).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion}");
         var gcuStatusSource = new GcuMqttStatusSource();
         oemStatusSource = gcuStatusSource;
         var gpuOutputController = new GcuGpuOutputModeController(
             gcuStatusSource,
             new WindowsGpuOutputModeCapabilitySource());
-        var platformModeController = new GcuPlatformModeController(gcuStatusSource);
+        var platformModeController = new GcuPlatformModeController(gcuStatusSource, RuntimeDiagnosticLog.Write);
         directCpuPolicyController = new SwitchableCpuPolicyController();
         platformAwareCpuPolicyController = new PlatformAwareCpuPolicyController(
             platformModeController,
@@ -232,7 +234,8 @@ public partial class App : Application
             fanController: new GcuFanController(gcuStatusSource, readMode: platformModeController.ReadPlatformModeAsync),
             experiments: experiments,
             fanBoostController: new GcuFanBoostController(gcuStatusSource),
-            shutdownScheduler: new WindowsShutdownScheduler());
+            shutdownScheduler: new WindowsShutdownScheduler(),
+            diagnostic: RuntimeDiagnosticLog.Write);
         var window = new MainWindow(viewModel);
         mainViewModel = viewModel;
 

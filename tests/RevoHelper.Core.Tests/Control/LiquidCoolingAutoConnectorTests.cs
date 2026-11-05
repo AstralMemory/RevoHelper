@@ -153,6 +153,23 @@ public sealed class LiquidCoolingAutoConnectorTests
         Assert.Equal(0, connectCalls);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData(false)]
+    public async Task TryConnect_UnknownOrDeniedPermissionNeverAutomaticallyAttempts(bool? permission)
+    {
+        var connectCalls = 0;
+        var connector = new LiquidCoolingAutoConnector(
+            _ => ValueTask.FromResult<LiquidCoolingState?>(State(false, "remembered-cooler") with { CanControl = permission }),
+            _ => { connectCalls++; return ValueTask.FromResult(new ControlResult(true, "unexpected")); },
+            (_, _) => Task.CompletedTask, maxReadAttempts: 2);
+
+        var result = await connector.TryConnectAsync(CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(0, connectCalls);
+    }
+
     [Fact]
     public async Task TryConnect_ConnectCommandThrows_ReturnsTruthfulFailure()
     {

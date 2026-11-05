@@ -681,32 +681,32 @@
                                          Grid.RowSpan="{Binding PresetRowSpan}" Visibility="{Binding ShowOfficeMode, Converter={StaticResource ModeVisibilityConverter}}"
                                          IsEnabled="{Binding CanUseOfficeMode}"
                                          Background="#DDF8E8" Style="{StaticResource ProfileRadioStyle}"
-                                         Checked="Profile_Checked" />
+                                         Click="Profile_Click" />
                             <RadioButton presentation:ThemeScope.AccentSurface="True" x:Name="BalancedProfileRadio" Grid.Row="0" Grid.Column="1" GroupName="PerformanceProfile"
                                          Content="{presentation:UiText Value={Binding BalancedModeTitle}}" Tag="balanced" ToolTip="{presentation:UiText Value={Binding BalancedModeTooltip}}"
                                          AutomationProperties.HelpText="{presentation:UiText Value={Binding BalancedModeDescription}}"
                                          Grid.RowSpan="{Binding PresetRowSpan}" Visibility="{Binding ShowBalancedMode, Converter={StaticResource ModeVisibilityConverter}}"
                                          IsEnabled="{Binding CanUseBalancedMode}"
                                          Background="#DCEEFF" Style="{StaticResource ProfileRadioStyle}"
-                                         Checked="Profile_Checked" />
+                                         Click="Profile_Click" />
                             <Grid Grid.Row="1" Grid.Column="0" Visibility="{Binding ShowTurboMode, Converter={StaticResource ModeVisibilityConverter}}">
                                 <RadioButton presentation:ThemeScope.AccentSurface="True" x:Name="TurboProfileRadio" GroupName="PerformanceProfile"
                                              Content="{Binding UiCopy.TurboTitle}" Tag="turbo" ToolTip="{presentation:UiText Value={Binding TurboModeTooltip}}"
                                              AutomationProperties.HelpText="{Binding TurboModeDescription}"
                                              IsEnabled="{Binding CanUseTurboQuietMode}"
                                              Background="#EEDCFF" Style="{StaticResource ProfileRadioStyle}"
-                                             Checked="Profile_Checked" />
+                                             Click="Profile_Click" />
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
                                             VerticalAlignment="Bottom" Margin="0,0,9,8"
                                             Visibility="{Binding ShowTurboStrategies, Converter={StaticResource ModeVisibilityConverter}}">
                                     <RadioButton x:Name="TurboQuietRadio" GroupName="TurboStrategy" Content="{Binding UiCopy.QuietTitle}" Tag="quiet"
                                                  IsChecked="True" Style="{StaticResource StrategyRadioStyle}"
                                                  IsEnabled="{Binding CanUseTurboQuietMode}"
-                                                 Checked="TurboStrategy_Checked" />
+                                                 Click="TurboStrategy_Click" />
                                     <RadioButton x:Name="TurboHighRadio" GroupName="TurboStrategy" Content="{Binding UiCopy.HighPerformanceTitle}" Tag="high"
                                                  IsEnabled="{Binding CanUseTurboHighMode}"
                                                  Style="{StaticResource StrategyRadioStyle}"
-                                                 Checked="TurboStrategy_Checked" />
+                                                 Click="TurboStrategy_Click" />
                                 </StackPanel>
                             </Grid>
                             <Grid Grid.Row="1" Grid.Column="1" Visibility="{Binding ShowCustomMode, Converter={StaticResource ModeVisibilityConverter}}">
@@ -715,17 +715,17 @@
                                              AutomationProperties.HelpText="{Binding UiCopy.CustomDescription}"
                                              IsEnabled="{Binding CanUseCustomMode}"
                                              Background="#FFF0D8" Style="{StaticResource ProfileRadioStyle}"
-                                             Checked="Profile_Checked" />
+                                             Click="Profile_Click" />
                                 <StackPanel x:Name="CustomProfileSelector" Orientation="Horizontal"
                                             HorizontalAlignment="Right" VerticalAlignment="Bottom"
                                             IsEnabled="{Binding CanUseCustomMode}" ToolTipService.ShowOnDisabled="True"
                                             Margin="0,0,5,8" ToolTip="{Binding UiCopy.CustomPlanHint}">
                                     <RadioButton x:Name="CustomProfileOneRadio" GroupName="CustomProfile" Content="1" Tag="1" IsChecked="True"
-                                                 Style="{StaticResource CustomPlanRadioStyle}" Checked="CustomProfile_Checked" />
+                                                 Style="{StaticResource CustomPlanRadioStyle}" Click="CustomProfile_Click" />
                                     <RadioButton x:Name="CustomProfileTwoRadio" GroupName="CustomProfile" Content="2" Tag="2"
-                                                 Style="{StaticResource CustomPlanRadioStyle}" Checked="CustomProfile_Checked" />
+                                                 Style="{StaticResource CustomPlanRadioStyle}" Click="CustomProfile_Click" />
                                     <RadioButton x:Name="CustomProfileThreeRadio" GroupName="CustomProfile" Content="3" Tag="3"
-                                                 Style="{StaticResource CustomPlanRadioStyle}" Checked="CustomProfile_Checked" />
+                                                 Style="{StaticResource CustomPlanRadioStyle}" Click="CustomProfile_Click" />
                                 </StackPanel>
                             </Grid>
                         </Grid>

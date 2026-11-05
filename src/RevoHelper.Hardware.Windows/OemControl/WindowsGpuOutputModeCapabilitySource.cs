@@ -7,19 +7,20 @@ public sealed class WindowsGpuOutputModeCapabilitySource : IGpuOutputModeCapabil
 {
     private const string ItemSupportPath = @"SOFTWARE\OEM\GamingCenter2\ItemSupport";
 
-    public GpuOutputModeCapabilities Read()
+    public GpuOutputMachineSupport Read()
     {
         using var key = Registry.LocalMachine.OpenSubKey(ItemSupportPath, writable: false);
-        var direct = ReadFlag(key, "DGpuDirectConnectionSupport");
-        var integrated = ReadFlag(key, "iGPUModeOnlySupport");
-        return new(direct, direct, integrated);
+        return new(
+            ParseFlag(key?.GetValue("DGpuDirectConnectionSupport")),
+            ParseFlag(key?.GetValue("iGPUModeOnlySupport")));
     }
 
-    private static bool ReadFlag(RegistryKey? key, string name) => key?.GetValue(name) switch
+    public static bool? ParseFlag(object? value) => value switch
     {
-        int value => value == 1,
-        long value => value == 1,
-        string value => value is "1" or "true" or "True",
-        _ => false
+        int number => number == 1,
+        long number => number == 1,
+        string text when text is "1" or "true" or "True" => true,
+        string text when text is "0" or "false" or "False" => false,
+        _ => null
     };
 }

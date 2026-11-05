@@ -1,4 +1,5 @@
 using RevoHelper.App.Lifecycle;
+using RevoHelper.App.Settings;
 using RevoHelper.Core.Control;
 using RevoHelper.Core.Control.DynamicPower;
 using RevoHelper.Hardware.Windows.PowerPolicy;
@@ -7,6 +8,35 @@ namespace RevoHelper.App.Tests.Lifecycle;
 
 public sealed class LayeredFrequencyRecoveryIntegrationTests
 {
+    [Fact]
+    public async Task DamagedManualJournal_ExplicitDisableSurvivesNewControllerAndExitWithoutRelocking()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "RevoHelper.Tests.FrequencyReset." + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "manual-frequency-lease.json");
+            var api = new MemoryPowerApi();
+            var controller = new WindowsProcessorFrequencyLimitController(api, new JsonProcessorFrequencyLimitLeaseStore(path));
+            Assert.True((await controller.ApplyAsync(ProcessorFrequencyLimitPolicy.Uniform(3400), default)).Succeeded);
+            // Reproduce the observed on-disk all-NUL record, independent of its unknown cause.
+            var damaged = new byte[459];
+            await File.WriteAllBytesAsync(path, damaged);
+            var next = new WindowsProcessorFrequencyLimitController(api, new JsonProcessorFrequencyLimitLeaseStore(path));
+            Assert.False((await next.RecoverAsync(default)).Succeeded);
+            Assert.False((await next.ApplyAsync(ProcessorFrequencyLimitPolicy.Uniform(0), default)).Succeeded);
+            Assert.Equal(ProcessorFrequencyLimitPolicy.Uniform(3400), await next.ReadAsync(default));
+            Assert.True((await next.PrepareForExplicitDisableAsync(default)).Succeeded);
+            Assert.Equal(damaged, await File.ReadAllBytesAsync(Assert.Single(Directory.GetFiles(directory, "*.corrupt-*"))));
+            Assert.False(File.Exists(path));
+            Assert.True((await next.ApplyAsync(ProcessorFrequencyLimitPolicy.Uniform(0), default)).Succeeded);
+            Assert.True((await new WindowsProcessorFrequencyLimitController(api, new JsonProcessorFrequencyLimitLeaseStore(path))
+                .RecoverAsync(default)).Succeeded);
+            Assert.Equal(ProcessorFrequencyLimitPolicy.Uniform(0), await next.ReadAsync(default));
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
     [Fact]
     public async Task FailedDynamicRestore_PreservesManualJournalUntilNextLaunchRestoresOriginalFrequency()
     {

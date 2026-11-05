@@ -15,6 +15,7 @@ public sealed class ConflictServiceItemViewModel : INotifyPropertyChanged
         IsRunning = status.IsRunning;
         IsInstalled = status.IsInstalled;
         StatusText = status.StatusText;
+        NativeState = status.NativeState;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -24,6 +25,7 @@ public sealed class ConflictServiceItemViewModel : INotifyPropertyChanged
     public bool IsRunning { get; }
     public bool IsInstalled { get; }
     public string StatusText { get; }
+    public string NativeState { get; }
 
     public bool IsSelected
     {

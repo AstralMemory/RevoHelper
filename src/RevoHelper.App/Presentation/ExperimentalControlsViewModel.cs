@@ -73,17 +73,18 @@ public sealed class ExperimentalControlsViewModel : INotifyPropertyChanged, IDis
         finally { dynamicBusy = false; Notify(); }
     }
 
-    public async Task<bool> PauseForManualControlAsync()
+    public async Task<bool> PauseForManualControlAsync(CancellationToken cancellationToken = default)
     {
         // An active charge session is independent of ordinary performance edits. Its guardian
-        // owns hardware-conflict detection; only an in-flight transition or pending recovery blocks edits.
-        if (Charge.IsBusy || Charge.RecoveryPending) return false;
+        // owns hardware-conflict detection. Only an explicit performance request can
+        // reconcile a pending old session; construction/startup never does so.
+        if (!await Charge.PrepareForManualControlAsync(cancellationToken).ConfigureAwait(false)) return false;
         if (dynamicPower is null) return true;
         Interlocked.Increment(ref pausing); operationError = null; Notify();
         try
         {
             await Task.Run(() => dynamicPower.PrepareForExternalChangeAsync(
-                "性能设置已改变，动态节能保持开启并重新观察。", CancellationToken.None)).ConfigureAwait(false);
+                "性能设置已改变，动态节能保持开启并重新观察。", cancellationToken), cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) { operationError = $"频率恢复未完成：{ex.Message}"; }
         finally { Interlocked.Decrement(ref pausing); Notify(); }

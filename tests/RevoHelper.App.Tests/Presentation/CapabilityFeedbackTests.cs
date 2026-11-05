@@ -1,4 +1,5 @@
 using RevoHelper.App.Presentation;
+using RevoHelper.App.Settings;
 using RevoHelper.Core.Dashboard;
 using RevoHelper.Core.Discovery;
 using RevoHelper.Core.Hardware;
@@ -42,19 +43,20 @@ public sealed class CapabilityFeedbackTests
     }
 
     [Fact]
-    public void MissingTargetModeHasSpecificReasonAndDetectionDoesNotRemoveConfirmedControls()
+    public void MissingTargetModeAndRediscoveryDoNotDisableManualBaseCommands()
     {
         var identity = new MachineIdentity("MECHREVO", "Test", "", "CPU", "");
-        var vm = new MainWindowViewModel(HomeDashboardFactory.Create(identity, []));
+        var vm = new MainWindowViewModel(HomeDashboardFactory.Create(identity, []), new(),
+            new MemorySettings(), new NoStartup(), platformModeController: new AvailablePlatform());
         vm.ApplyRuntimeCapabilities(RuntimeCapabilityFactory.Create(identity,
             new OemControlInventory([], true, "test"),
             OemRuntimeEvidence.None with { SupportedPlatformModes = new HashSet<PlatformMode> { PlatformMode.Office } }, []));
         Assert.True(vm.CanUseOfficeMode);
-        Assert.False(vm.CanUseBalancedMode);
-        Assert.Contains("此档位", vm.BalancedModeTooltip);
+        Assert.True(vm.CanUseBalancedMode);
+        Assert.Equal(vm.BalancedModeDescription, vm.BalancedModeTooltip);
         vm.SetCapabilityDetectionBusy(true);
         Assert.True(vm.CanUseOfficeMode);
-        Assert.Contains("正在检测", vm.BalancedModeTooltip);
+        Assert.True(vm.CanUseBalancedMode);
     }
 
     [Fact]
@@ -80,16 +82,16 @@ public sealed class CapabilityFeedbackTests
     }
 
     [Theory]
-    [InlineData("UNKNOWN", true, "身份")]
-    [InlineData("MECHREVO", false, "控制组件")]
-    public void DisabledReasonDistinguishesIdentityFromMissingControlChain(string manufacturer, bool chain, string reason)
+    [InlineData("UNKNOWN", true)]
+    [InlineData("MECHREVO", false)]
+    public void MissingFanReadbackIsNotMisreportedAsAnIdentityOrInstallationFailure(string manufacturer, bool chain)
     {
         var identity = new MachineIdentity(manufacturer, "Test", "", "CPU", "");
         var vm = new MainWindowViewModel(HomeDashboardFactory.Create(identity, []));
         vm.ApplyRuntimeCapabilities(RuntimeCapabilityFactory.Create(identity,
             new OemControlInventory([], chain, "test"), OemRuntimeEvidence.None, []));
 
-        Assert.Contains(reason, vm.FanAvailabilityReason);
+        Assert.Contains("运行时证据", vm.FanAvailabilityReason);
     }
 
     [Fact]
@@ -114,5 +116,25 @@ public sealed class CapabilityFeedbackTests
             if (File.Exists(candidate)) return candidate;
         }
         throw new FileNotFoundException(Path.Combine(path));
+    }
+
+    private sealed class AvailablePlatform : IPlatformModeController
+    {
+        public ValueTask<PlatformModeSelection?> ReadPlatformModeAsync(CancellationToken token) =>
+            ValueTask.FromResult<PlatformModeSelection?>(new(PlatformMode.Balanced));
+        public ValueTask<ControlResult> SetPlatformModeAsync(PlatformModeSelection selection, CancellationToken token) =>
+            ValueTask.FromResult(new ControlResult(true, "ok"));
+    }
+
+    private sealed class MemorySettings : IApplicationSettingsStore
+    {
+        public ApplicationSettings Load() => new();
+        public void Save(ApplicationSettings settings) { }
+    }
+
+    private sealed class NoStartup : IStartupRegistration
+    {
+        public bool IsEnabled() => false;
+        public void SetEnabled(bool enabled) { }
     }
 }
