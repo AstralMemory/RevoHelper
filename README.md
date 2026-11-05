@@ -123,7 +123,7 @@ The package includes `先阅读我-README.txt` for usage instructions and `Third
 
 Developed and maintained by [Astral Memory](https://github.com/AstralMemory).
 
-The project uses a **Vibe Coding** development workflow: code is primarily written with assistance from an agent (ChatGPT), while the developer takes full responsibility for product logic, proposals and change approval, UI design, hands-on testing and ongoing maintenance.
+The project uses a **Vibe Coding** development workflow: code is primarily written with assistance from agents (ChatGPT/Claude), while the developer takes full responsibility for product logic, proposals and change approval, UI design, hands-on testing and ongoing maintenance.
 
 The program is committed to remaining free permanently. The V1.0.3 application source code is available in this repository. The project's own code uses the [MIT License](./LICENSE); third-party components retain their respective licenses. See the [third-party notices](./THIRD_PARTY_NOTICES.md).
 
