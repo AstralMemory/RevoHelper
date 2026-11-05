@@ -55,18 +55,7 @@ public sealed class Snapshot4AnnouncementTests
         Assert.Equal("2026-11-05", copy.UpdatedDate);
         Assert.Contains("MIT", copy.Release);
         Assert.Contains("GitHub Releases", copy.Release);
-        Assert.Contains("V1.0.2", copy.Notice);
         Assert.DoesNotContain(language == "en-US" ? "has been publicly released" : "已正式发布", copy.Release);
-        Assert.Contains("60% / 80% / 100%", copy.Notice);
-        Assert.Contains(language == "en-US" ? "MECHREVO YAOSHI in tests" : "机械革命耀世实测", copy.Notice);
-        Assert.Contains(language == "en-US" ? "not model" : "不按品牌或型号限制", copy.Notice);
-        Assert.Contains(language == "en-US" ? "original values" : "原值检查", copy.Notice);
-        Assert.DoesNotContain("MRO24", copy.Notice);
-        Assert.DoesNotContain("1.25", copy.Notice);
-        Assert.Contains(language == "en-US" ? "off by default" : "默认关闭", copy.Notice);
-        Assert.Contains(language == "en-US" ? "remain unverified" : "尚待验证", copy.Notice);
-        foreach (var risk in language == "en-US" ? new[] { "platform state", "fans", "power", "keys" } : new[] { "平台状态", "风扇", "功耗", "按键" })
-            Assert.Contains(risk, copy.Notice);
         Assert.Contains(language == "en-US" ? "does not unlock GPU" : "没有 GPU 功耗解锁", copy.Release);
         Assert.Contains(language == "en-US" ? "third-party" : "第三方", copy.Release);
         Assert.Contains(language == "en-US" ? "Some models" : "部分机型", copy.Compatibility);
@@ -89,21 +78,22 @@ public sealed class Snapshot4AnnouncementTests
     }
 
     [Theory]
-    [InlineData("zh-CN")]
-    [InlineData("en-US")]
-    public void Release103CopyDescribesTurboAndStartupFixesWithoutClaimingAllSwitchingFaultsFixed(string language)
+    [InlineData("zh-CN", "V1.0.2")]
+    [InlineData("zh-CN", "V1.0.3")]
+    [InlineData("zh-CN", "Beta V1.0.4 Snapshot 1")]
+    [InlineData("zh-CN", "V9.9.9")]
+    [InlineData("en-US", "V1.0.2")]
+    [InlineData("en-US", "V1.0.3")]
+    [InlineData("en-US", "Beta V1.0.4 Snapshot 1")]
+    [InlineData("en-US", "V9.9.9")]
+    public void DeveloperNotice_StaysFixedForEveryVersion(string language, string version)
     {
-        var copy = AnnouncementCopy.For(language, "V1.0.3");
-        Assert.Equal("V1.0.3", copy.Version);
-        Assert.Contains("V1.0.3", copy.Notice);
-        Assert.Contains(language == "en-US" ? "basic Turbo mode" : "基础狂暴档位", copy.Notice);
-        Assert.Contains(language == "en-US" ? "startup configuration" : "完整配置", copy.Notice);
-        Assert.Contains("AMD CPU", copy.Notice);
-        Assert.Contains(language == "en-US" ? "still need AMD hardware testing" : "仍待 AMD 实机验证", copy.Notice);
-        Assert.Contains(language == "en-US" ? "service state verification" : "终态确认", copy.Notice);
-        Assert.Contains(language == "en-US" ? "still need diagnosis" : "仍待定位", copy.Notice);
-        Assert.Contains(language == "en-US" ? "manually turn off the frequency limit" : "手动关闭频率限制", copy.Notice);
-        Assert.DoesNotContain(language == "en-US" ? "has not been published" : "尚未发布", copy.Notice);
+        var copy = AnnouncementCopy.For(language, version);
+        Assert.Equal(version, copy.Version);
+        Assert.Equal(language == "en-US"
+            ? "RevoHelper is a lightweight, free third-party control center for MECHREVO laptops. V1.0.0 adds an external performance monitor, dark mode and interface improvements. Check GitHub Releases for publicly available downloads."
+            : "RevoHelper 是轻量、免费的机械革命第三方控制台。V1.0.0 新增外置性能监控、深色模式并完善界面体验；公开下载请以 GitHub Releases 为准。",
+            copy.Notice);
     }
 
     [Theory]

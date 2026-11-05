@@ -18,6 +18,10 @@ public sealed record AnnouncementCopy(
     public const string DownloadsUrl = ProjectUrl + "/releases";
     public const string FeedbackUrl = ProjectUrl + "/issues";
 
+    // The developer's own wording, fixed for every release. Release notes belong on GitHub.
+    public const string DeveloperNoticeChinese = "RevoHelper 是轻量、免费的机械革命第三方控制台。V1.0.0 新增外置性能监控、深色模式并完善界面体验；公开下载请以 GitHub Releases 为准。";
+    public const string DeveloperNoticeEnglish = "RevoHelper is a lightweight, free third-party control center for MECHREVO laptops. V1.0.0 adds an external performance monitor, dark mode and interface improvements. Check GitHub Releases for publicly available downloads.";
+
     // Only these developer-controlled destinations can be opened by page buttons.
     public static string? LinkFor(string? action) => action switch
     {
@@ -31,9 +35,7 @@ public sealed record AnnouncementCopy(
         LocalizedUiCopy.NormalizeLanguageCode(language) == "en-US"
             ? new("About & announcements", "Version & notes", "Version", version,
                 "Updated", UpdateDate, "Developer announcement",
-                version.Contains("1.0.3", StringComparison.Ordinal)
-                    ? "V1.0.3: basic Turbo mode no longer keeps an Office frequency cap when later policies fail, and rollbacks no longer turn on the quiet strategy. Retains startup configuration recovery, journal recovery when you manually turn off the frequency limit, and service state verification. Other startup switching faults still need diagnosis. AMD CPU sensor mappings still need AMD hardware testing."
-                    : "V1.0.2 adds 60% / 80% / 100% charge control, off by default. 60% / 80% stopped charging on MECHREVO YAOSHI in tests; checks use interface and original values, not model. Shared platform state may affect fans, power and keys. 100% uses native charging. Water cooling retries the same device every 3s for 10 minutes. Long-term use and charging to cutoff remain unverified.",
+                DeveloperNoticeEnglish,
                 "Project", "Downloads", "Feedback", "Back to settings",
                 "Release & source code",
                 "RevoHelper's own code uses MIT; third-party components retain their own licenses. See GitHub Releases for publicly available versions. This build does not unlock GPU power limits or certify hardware compatibility.",
@@ -48,9 +50,7 @@ public sealed record AnnouncementCopy(
                 "This page is bundled with the app and never fetches announcements in the background. Instructions and third-party licenses are included in the release package.")
             : new("关于与公告", "版本、更新和使用提醒", "当前版本", version,
                 "更新日期", UpdateDate, "开发者公告",
-                version.Contains("1.0.3", StringComparison.Ordinal)
-                    ? "V1.0.3 修正基础狂暴档位确认后策略失败时残留办公频率上限的问题，回滚不再擅自开启静音策略；切档较慢时多等几秒再判定失败，显卡输出支持信息缺失时允许手动尝试。保留启动项失败时恢复原完整配置、手动关闭频率限制时对损坏恢复记录的处理，以及手动 Intel 服务终态确认。其它开机切档故障仍待定位；AMD CPU 遥测映射仍待 AMD 实机验证。"
-                    : "V1.0.2 新增充电上限开关及 60% / 80% / 100% 三档，默认关闭。100% 恢复原生充电，不持续覆盖平台状态。60% 和 80% 已在机械革命耀世实测停充；限充使用共享平台状态，可能影响风扇、功耗和按键。不按品牌或型号限制，仍需通过接口和原值检查。水冷意外断开后，可在10分钟内每3秒尝试重连同一设备。长期行为及完整从低电量充至上限后停充的过程仍尚待验证。",
+                DeveloperNoticeChinese,
                 "GitHub 项目", "下载与更新", "问题反馈", "返回设置",
                 "发布与开源",
                 "自有代码采用 MIT 协议，第三方组件保留各自许可。公开版本以 GitHub Releases 为准。本版没有 GPU 功耗解锁，也不代表机型硬件兼容性认证。",
