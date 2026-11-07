@@ -82,8 +82,11 @@ public static class HomeDashboardFactory
             return DeviceKind.DiscreteGpu;
         }
 
+        // AMD names its integrated GPUs "Radeon Graphics" as well as "Radeon 610M" or
+        // "Radeon 780M Graphics". Treat any non-RX Radeon as integrated, the same rule the
+        // telemetry side uses, or the two sides never match and the row stays N/A.
         if (name.Contains("Intel", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("Radeon Graphics", StringComparison.OrdinalIgnoreCase))
+            name.Contains("Radeon", StringComparison.OrdinalIgnoreCase))
         {
             return DeviceKind.IntegratedGpu;
         }
@@ -106,6 +109,9 @@ public static class HomeDashboardFactory
             ? model["Intel ".Length..]
             : model;
     }
+
+    /// <summary>The name a GPU row shows; telemetry names go through the same cleanup before matching.</summary>
+    public static string NormalizeAdapterName(string value) => CleanModelName(value);
 
     private static string CleanModelName(string value)
     {

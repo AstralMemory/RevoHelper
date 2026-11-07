@@ -87,6 +87,29 @@ public sealed class HomeDashboardFactoryTests
         Assert.Equal("GPU", gpu.Label);
     }
 
+    [Theory]
+    [InlineData("AMD Radeon(TM) 610M", "AMD Radeon 610M")]
+    [InlineData("AMD Radeon 780M Graphics", "AMD Radeon 780M Graphics")]
+    [InlineData("AMD Radeon(TM) 890M", "AMD Radeon 890M")]
+    [InlineData("AMD Radeon(TM) Graphics", "AMD Radeon Graphics")]
+    public void Create_LabelsEveryAmdIntegratedRadeonAsIntegrated(string windowsName, string shown)
+    {
+        var dashboard = HomeDashboardFactory.Create(Identity, [windowsName]);
+
+        var gpu = dashboard.Devices[1];
+        Assert.Equal(DeviceKind.IntegratedGpu, gpu.Kind);
+        Assert.Equal("核显", gpu.Label);
+        Assert.Equal(shown, gpu.Model);
+    }
+
+    [Fact]
+    public void Create_KeepsRadeonRxDiscrete()
+    {
+        var dashboard = HomeDashboardFactory.Create(Identity, ["AMD Radeon(TM) RX 7600M XT"]);
+
+        Assert.Equal(DeviceKind.DiscreteGpu, dashboard.Devices[1].Kind);
+    }
+
     [Fact]
     public void Create_LabelsIntelArcAsDiscreteInsteadOfMatchingTheIntelIntegratedRule()
     {

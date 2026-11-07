@@ -2227,6 +2227,21 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
 
     private int FindTelemetryDeviceIndex(DeviceTelemetry telemetry)
     {
+        // Windows and LibreHardwareMonitor spell GPU names differently ("Radeon(TM) 610M"),
+        // and an unrecognised name leaves the row as UnknownGpu. The same cleaned name is
+        // stronger evidence than the guessed kind, so it wins first.
+        if (telemetry.Kind is not DeviceKind.Cpu)
+        {
+            var telemetryName = HomeDashboardFactory.NormalizeAdapterName(telemetry.Model);
+            for (var index = 0; index < Devices.Count; index++)
+            {
+                var device = Devices[index];
+                if (device.Kind is not DeviceKind.Cpu &&
+                    string.Equals(device.Model, telemetryName, StringComparison.OrdinalIgnoreCase))
+                    return index;
+            }
+        }
+
         var candidateIndex = -1;
         var candidateCount = 0;
         for (var index = 0; index < Devices.Count; index++)

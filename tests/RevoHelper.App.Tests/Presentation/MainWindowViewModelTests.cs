@@ -854,6 +854,45 @@ public sealed class MainWindowViewModelTests
         Assert.Equal(cpu.Model, viewModel.Devices.Single(device => device.Kind is DeviceKind.Cpu).Model);
     }
 
+    [Theory]
+    [InlineData("AMD Radeon(TM) 610M")]
+    [InlineData("AMD Radeon 780M Graphics")]
+    public void ApplyTelemetry_AmdIntegratedRadeonReceivesItsReadings(string windowsName)
+    {
+        // A user's Radeon 610M row stayed N/A: Windows' name made it UnknownGpu while
+        // LibreHardwareMonitor reported it as integrated, so the readings never matched.
+        var viewModel = new MainWindowViewModel(HomeDashboardFactory.Create(
+            new MachineIdentity("MECHREVO", "Test", "Test", "AMD Ryzen 9 9955HX 16-Core Processor", "test", 16, 32),
+            [windowsName, "NVIDIA GeForce RTX 5070 Ti Laptop GPU"]));
+
+        viewModel.ApplyTelemetry(new HardwareTelemetrySnapshot(DateTimeOffset.Now,
+        [
+            new DeviceTelemetry(DeviceKind.Cpu, "AMD Ryzen 9 9955HX 16-Core Processor", 18, 63, 40, 4200),
+            new DeviceTelemetry(DeviceKind.IntegratedGpu, windowsName, 12, null, null, null),
+            new DeviceTelemetry(DeviceKind.DiscreteGpu, "NVIDIA GeForce RTX 5070 Ti Laptop GPU", 30, 50, 60, 1500)
+        ]));
+
+        var integrated = viewModel.Devices.Single(device => device.Model.Contains("Radeon", StringComparison.Ordinal));
+        Assert.Equal(DeviceKind.IntegratedGpu, integrated.Kind);
+        Assert.Equal("12%", integrated.Usage);
+        Assert.Equal("63°C", integrated.Temperature); // Shares the CPU package temperature, as Intel iGPUs do.
+        Assert.Equal("30%", viewModel.Devices.Single(device => device.Kind is DeviceKind.DiscreteGpu).Usage);
+    }
+
+    [Fact]
+    public void ApplyTelemetry_SameAdapterNameWinsWhenTheKindsWereGuessedDifferently()
+    {
+        var viewModel = new MainWindowViewModel(HomeDashboardFactory.Create(
+            new MachineIdentity("MECHREVO", "Test", "Test", "Intel(R) Core(TM) Ultra 9 275HX", "test", 24, 24),
+            ["Example Graphics 9000"]));
+        Assert.Equal(DeviceKind.UnknownGpu, viewModel.Devices[1].Kind);
+
+        viewModel.ApplyTelemetry(new HardwareTelemetrySnapshot(DateTimeOffset.Now,
+            [new DeviceTelemetry(DeviceKind.IntegratedGpu, "Example(TM) Graphics 9000", 7, null, null, null)]));
+
+        Assert.Equal("7%", viewModel.Devices[1].Usage);
+    }
+
     [Fact]
     public void ReportTelemetryUnavailable_PreservesLastGoodReadings()
     {
