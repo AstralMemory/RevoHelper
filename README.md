@@ -10,8 +10,8 @@
 
 <table>
   <tr>
-    <td align="center"><a href="./docs/images/preview-snapshot4-about.png"><img src="./docs/images/preview-snapshot4-about.png" width="410" alt="RevoHelper Snapshot 4 主界面"></a><br>主界面</td>
-    <td align="center"><a href="./docs/images/preview-snapshot4-controls.png"><img src="./docs/images/preview-snapshot4-controls.png" width="410" alt="RevoHelper Snapshot 4 性能参数控制界面"></a><br>性能参数控制界面</td>
+    <td align="center"><a href="./docs/images/preview-v104-about.png"><img src="./docs/images/preview-v104-about.png" width="410" alt="RevoHelper 浅色界面"></a></td>
+    <td align="center"><a href="./docs/images/preview-v104-dark.png"><img src="./docs/images/preview-v104-dark.png" width="410" alt="RevoHelper 深色界面"></a></td>
   </tr>
 </table>
 
@@ -89,8 +89,8 @@ The following images preview the application interface (The UI text in the image
 
 <table>
   <tr>
-    <td align="center"><a href="./docs/images/preview-snapshot4-about.png"><img src="./docs/images/preview-snapshot4-about.png" width="410" alt="RevoHelper Snapshot 4 main interface"></a><br>Main interface</td>
-    <td align="center"><a href="./docs/images/preview-snapshot4-controls.png"><img src="./docs/images/preview-snapshot4-controls.png" width="410" alt="RevoHelper Snapshot 4 performance controls"></a><br>Performance controls</td>
+    <td align="center"><a href="./docs/images/preview-v104-about.png"><img src="./docs/images/preview-v104-about.png" width="410" alt="RevoHelper light theme"></a></td>
+    <td align="center"><a href="./docs/images/preview-v104-dark.png"><img src="./docs/images/preview-v104-dark.png" width="410" alt="RevoHelper dark theme"></a></td>
   </tr>
 </table>
 
