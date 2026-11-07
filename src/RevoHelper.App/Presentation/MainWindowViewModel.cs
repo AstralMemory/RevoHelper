@@ -1694,11 +1694,16 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
 
     public bool IsTradeoffVisible => SelectedProfileId != "custom";
 
+    private bool isBasicTurboActive;
+
+    /// <summary>The hardware reports Turbo with neither strategy on; show neither as selected.</summary>
+    public bool IsBasicTurboActive => isBasicTurboActive;
+
     public string CurrentFanProfileLabel => SelectedProfileId switch
     {
         "office" => $"当前：{OfficeModeTitle}",
         "balanced" => $"当前：{BalancedModeTitle}",
-        "turbo" when !ShowTurboStrategies => "当前：狂暴模式",
+        "turbo" when !ShowTurboStrategies || IsBasicTurboActive => "当前：狂暴模式",
         "turbo" => SelectedTurboStrategy is TurboStrategy.HighEfficiency
             ? "当前：狂暴模式 · 高能"
             : "当前：狂暴模式 · 静音",

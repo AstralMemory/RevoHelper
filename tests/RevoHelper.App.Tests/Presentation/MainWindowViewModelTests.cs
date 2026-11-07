@@ -880,6 +880,29 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public async Task ObservePlatformMode_BasicTurboShowsNeitherStrategyUntilOneIsOn()
+    {
+        var viewModel = new MainWindowViewModel(CreateDashboard());
+
+        await viewModel.ObservePlatformModeAsync(new PlatformModeSelection(PlatformMode.TurboQuiet) { IsBasicTurbo = true }, default);
+
+        Assert.Equal("turbo", viewModel.SelectedProfileId);
+        Assert.True(viewModel.IsBasicTurboActive);
+        Assert.Equal("当前：狂暴模式", viewModel.CurrentFanProfileLabel);
+        // Switching still treats basic Turbo as quiet, exactly as before.
+        Assert.Equal(new PlatformModeSelection(PlatformMode.TurboQuiet), viewModel.ConfirmedPlatformSelection);
+        Assert.Equal(TurboStrategy.Quiet, viewModel.SelectedTurboStrategy);
+
+        await viewModel.ObservePlatformModeAsync(new PlatformModeSelection(PlatformMode.TurboQuiet), default);
+        Assert.False(viewModel.IsBasicTurboActive);
+
+        await viewModel.ObservePlatformModeAsync(new PlatformModeSelection(PlatformMode.TurboQuiet) { IsBasicTurbo = true }, default);
+        await viewModel.ObservePlatformModeAsync(new PlatformModeSelection(PlatformMode.TurboHigh), default);
+        Assert.False(viewModel.IsBasicTurboActive);
+        Assert.Equal(TurboStrategy.HighEfficiency, viewModel.SelectedTurboStrategy);
+    }
+
+    [Fact]
     public void ApplyTelemetry_SameAdapterNameWinsWhenTheKindsWereGuessedDifferently()
     {
         var viewModel = new MainWindowViewModel(HomeDashboardFactory.Create(

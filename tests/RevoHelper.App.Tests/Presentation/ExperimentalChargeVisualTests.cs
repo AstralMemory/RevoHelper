@@ -357,6 +357,37 @@ public sealed class ExperimentalChargeVisualTests
         });
     }
 
+    [Fact]
+    public void BasicTurbo_LightsNeitherStrategyButton()
+    {
+        RunOnSta(() =>
+        {
+            // Presentation only: the readback is injected, nothing is sent to hardware.
+            var vm = new MainWindowViewModel(HomeDashboardFactory.Create(
+                new MachineIdentity("MECHREVO", "YAOSHI Series", "Offline turbo", "Core Ultra 9 275HX", "preview", 24, 24),
+                ["Intel Graphics"]), new ApplicationSettings(), new MemorySettings(), new NoStartup());
+            var window = new MainWindow(vm) { AllowApplicationClose = true };
+            try
+            {
+                var quiet = Assert.IsType<RadioButton>(window.FindName("TurboQuietRadio"));
+                var high = Assert.IsType<RadioButton>(window.FindName("TurboHighRadio"));
+                var turbo = Assert.IsType<RadioButton>(window.FindName("TurboProfileRadio"));
+
+                vm.ObservePlatformModeAsync(new RevoHelper.Core.Control.PlatformModeSelection(
+                    RevoHelper.Core.Control.PlatformMode.TurboQuiet) { IsBasicTurbo = true }, default).GetAwaiter().GetResult();
+                Assert.True(turbo.IsChecked);
+                Assert.False(quiet.IsChecked);
+                Assert.False(high.IsChecked);
+
+                vm.ObservePlatformModeAsync(new RevoHelper.Core.Control.PlatformModeSelection(
+                    RevoHelper.Core.Control.PlatformMode.TurboQuiet), default).GetAwaiter().GetResult();
+                Assert.True(quiet.IsChecked);
+                Assert.False(high.IsChecked);
+            }
+            finally { window.Close(); vm.Experiments.Dispose(); }
+        });
+    }
+
     private static void SaveHomePreview(MainWindow window, FrameworkElement element, string file)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

@@ -59,6 +59,7 @@ public sealed class SystemTrayController : IDisposable
         if (e.PropertyName is nameof(MainWindowViewModel.SelectedProfileId) or
             nameof(MainWindowViewModel.SelectedTurboStrategy) or
             nameof(MainWindowViewModel.SelectedCustomProfileIndex) or
+            nameof(MainWindowViewModel.IsBasicTurboActive) or
             nameof(MainWindowViewModel.SelectedUiLanguageCode))
         {
             window.Dispatcher.BeginInvoke(RefreshProfileMarkers);
@@ -81,7 +82,9 @@ public sealed class SystemTrayController : IDisposable
                 RevoHelper.Core.Control.PlatformMode.TurboHigh => "Turbo · High",
                 _ => $"Custom {action.Selection.ProfileIndex}"
             };
-            var active = action.IsCurrent(current);
+            // Basic Turbo matches the quiet entry for switching, but quiet is not actually on.
+            var active = action.IsCurrent(current) &&
+                         !(viewModel.IsBasicTurboActive && action.Selection.Mode is RevoHelper.Core.Control.PlatformMode.TurboQuiet);
             item.Checked = active;
             item.Font = active ? boldMenuFont : menu.Font;
         }

@@ -65,6 +65,33 @@ public sealed class GcuPlatformModeCommandTests
         Assert.Equal(new PlatformModeSelection(PlatformMode.TurboQuiet), GcuPlatformModeStatusMapper.Map(status));
     }
 
+    [Theory]
+    [InlineData(0, 0, PlatformMode.TurboQuiet, true)]
+    [InlineData(1, 0, PlatformMode.TurboQuiet, false)]
+    [InlineData(0, 1, PlatformMode.TurboHigh, false)]
+    public void MapStatus_TurboWithNeitherStrategyIsMarkedBasic(int silent, int extreme, PlatformMode mode, bool basic)
+    {
+        var status = new GcuCpuPolicyStatus(0, 0, 0, 0, 0, 0,
+            OperatingMode: 2, TurboProfileIndex: 0, Extreme: extreme, Silent: silent);
+
+        var selection = GcuPlatformModeStatusMapper.Map(status)!;
+
+        Assert.Equal(mode, selection.Mode);
+        Assert.Equal(basic, selection.IsBasicTurbo);
+    }
+
+    [Fact]
+    public void BasicTurboMark_DoesNotChangeHowSwitchingComparesSelections()
+    {
+        var basic = new PlatformModeSelection(PlatformMode.TurboQuiet) { IsBasicTurbo = true };
+        var quiet = new PlatformModeSelection(PlatformMode.TurboQuiet);
+
+        Assert.Equal(quiet, basic);
+        Assert.True(quiet == basic);
+        Assert.Equal(quiet.GetHashCode(), basic.GetHashCode());
+        Assert.NotEqual(new PlatformModeSelection(PlatformMode.TurboHigh), basic);
+    }
+
     [Fact]
     public void MapStatus_ConvertsFirmwareCustomIndexToUserFacingProfileNumber()
     {

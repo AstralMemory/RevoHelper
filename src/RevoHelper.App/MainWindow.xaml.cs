@@ -1133,6 +1133,10 @@ public partial class MainWindow : Window
         {
             ApplyWindowGeometry();
         }
+        else if (e.PropertyName == nameof(MainWindowViewModel.IsBasicTurboActive))
+        {
+            SynchronizeProfileButtons();
+        }
         else if (e.PropertyName is nameof(MainWindowViewModel.SelectedProfileId) or
                  nameof(MainWindowViewModel.SelectedTurboStrategy) or
                  nameof(MainWindowViewModel.SelectedCustomProfileIndex))
@@ -1160,8 +1164,9 @@ public partial class MainWindow : Window
             CustomProfileOneRadio.IsChecked = ViewModel.SelectedCustomProfileIndex == 1;
             CustomProfileTwoRadio.IsChecked = ViewModel.SelectedCustomProfileIndex == 2;
             CustomProfileThreeRadio.IsChecked = ViewModel.SelectedCustomProfileIndex == 3;
-            TurboQuietRadio.IsChecked = ViewModel.SelectedTurboStrategy is TurboStrategy.Quiet;
-            TurboHighRadio.IsChecked = ViewModel.SelectedTurboStrategy is TurboStrategy.HighEfficiency;
+            // Basic Turbo has neither strategy on, so neither button is shown as selected.
+            TurboQuietRadio.IsChecked = !ViewModel.IsBasicTurboActive && ViewModel.SelectedTurboStrategy is TurboStrategy.Quiet;
+            TurboHighRadio.IsChecked = !ViewModel.IsBasicTurboActive && ViewModel.SelectedTurboStrategy is TurboStrategy.HighEfficiency;
         }
         finally
         {

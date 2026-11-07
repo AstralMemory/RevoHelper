@@ -473,6 +473,14 @@ public sealed partial class MainWindowViewModel
                 : TurboStrategy.Quiet;
         }
 
+        var basicTurbo = selection.IsBasicTurbo && selection.Mode is PlatformMode.TurboQuiet;
+        if (isBasicTurboActive != basicTurbo)
+        {
+            isBasicTurboActive = basicTurbo;
+            OnPropertyChanged(nameof(IsBasicTurboActive));
+            OnPropertyChanged(nameof(CurrentFanProfileLabel));
+        }
+
         ShowProfile(selection.Mode switch
         {
             PlatformMode.Office => "office",
