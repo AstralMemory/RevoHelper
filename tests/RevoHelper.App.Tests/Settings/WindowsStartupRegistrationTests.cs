@@ -157,6 +157,37 @@ public sealed class WindowsStartupRegistrationTests
         Assert.True(StartupTaskDefinition.IsEnabledFor(platform.TaskXml!, Executable, Sid));
     }
 
+    [Theory]
+    [InlineData("1.0.3.9", "1.0.4.5", true)]
+    [InlineData("1.0.4.5", "1.0.4.5", true)]
+    [InlineData(null, "1.0.4.5", true)]
+    [InlineData("1.0.4.6", "1.0.4.5", false)]
+    public void Synchronize_MovesAnEnabledTaskUnlessItPointsAtANewerVersion(string? registered, string current, bool moved)
+    {
+        const string oldPath = @"C:\Old\RevoHelper.exe";
+        var original = StartupTaskDefinition.Create(oldPath, Sid);
+        var platform = new FakeStartupTaskPlatform { CurrentUserSid = Sid, TaskXml = original };
+        var registration = new WindowsStartupRegistration(Executable, platform,
+            path => string.Equals(path, oldPath, StringComparison.OrdinalIgnoreCase)
+                ? registered is null ? null : Version.Parse(registered)
+                : Version.Parse(current));
+
+        Assert.Equal(moved, StartupRegistrationSynchronizer.Synchronize(registration));
+
+        if (moved) Assert.True(StartupTaskDefinition.IsEnabledFor(platform.TaskXml!, Executable, Sid));
+        else Assert.Equal(original, platform.TaskXml);
+    }
+
+    [Fact]
+    public void Synchronize_DoesNotCreateATaskWhenStartupIsOff()
+    {
+        var platform = new FakeStartupTaskPlatform { CurrentUserSid = Sid };
+        var registration = new WindowsStartupRegistration(Executable, platform, _ => new Version(1, 0, 4, 5));
+
+        Assert.False(StartupRegistrationSynchronizer.Synchronize(registration));
+        Assert.Null(platform.TaskXml);
+    }
+
     [Fact]
     public void Definition_CreatesElevatedCurrentUserLogonTask()
     {

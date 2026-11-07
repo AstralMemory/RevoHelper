@@ -52,7 +52,7 @@ public sealed class Snapshot4AnnouncementTests
     {
         var copy = AnnouncementCopy.For(language, "V1.0.2");
         Assert.Equal("V1.0.2", copy.Version);
-        Assert.Equal("2026-11-05", copy.UpdatedDate);
+        Assert.Equal("2026-11-07", copy.UpdatedDate);
         Assert.Contains("MIT", copy.Release);
         Assert.Contains("GitHub Releases", copy.Release);
         Assert.DoesNotContain(language == "en-US" ? "has been publicly released" : "已正式发布", copy.Release);
@@ -64,7 +64,8 @@ public sealed class Snapshot4AnnouncementTests
         Assert.Contains("AI", copy.Development);
         Assert.Contains("UI", copy.Development);
         Assert.Contains(language == "en-US" ? "testing" : "测试", copy.Development);
-        Assert.Contains(language == "en-US" ? "never fetches" : "不会后台联网", copy.OfflineNote);
+        Assert.Contains(language == "en-US" ? "never fetches" : "不会联网获取公告", copy.OfflineNote);
+        Assert.Contains(language == "en-US" ? "only read the latest version number from GitHub" : "只读取 GitHub 上的最新版本号", copy.OfflineNote);
     }
 
     [Fact]

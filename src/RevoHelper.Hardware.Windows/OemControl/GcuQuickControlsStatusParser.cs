@@ -356,6 +356,7 @@ public static class GcuQuickControlsStatusParser
         "2" => LightingDirection.Right,
         "3" => LightingDirection.Up,
         "4" => LightingDirection.Down,
+        "LEFT" or "LEFTRIGHT" => LightingDirection.Left,
         "RIGHT" or "RIGHTLEFT" => LightingDirection.Right,
         "UP" or "DOWNUP" => LightingDirection.Up,
         "DOWN" or "UPDOWN" => LightingDirection.Down,

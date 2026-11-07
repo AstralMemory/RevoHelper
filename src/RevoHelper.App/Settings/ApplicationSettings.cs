@@ -22,4 +22,11 @@ public sealed record ApplicationSettings(
     int WindowScalePercent = 100,
     bool FrequencySafetyMigrationCompleted = false,
     string UiLanguageCode = "zh-CN",
-    string UiThemeCode = "light");
+    string UiThemeCode = "light",
+    bool CheckForUpdatesAutomatically = true,
+    DateTimeOffset? LastUpdateCheckUtc = null,
+    string? LatestReleaseTag = null,
+    DateTimeOffset? LastSuccessfulUpdateCheckUtc = null,
+    string? VersionFirstSeen = null,
+    DateTimeOffset? VersionFirstSeenUtc = null,
+    string? PossibleUpdateNoticeReadVersion = null);

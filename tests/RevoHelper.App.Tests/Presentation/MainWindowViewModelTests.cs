@@ -763,13 +763,13 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public void AppVersionText_UsesUndatedBetaSnapshot4Identity()
+    public void AppVersionText_UsesV104ReleaseIdentity()
     {
         var viewModel = new MainWindowViewModel(CreateDashboard());
 
-        Assert.Equal("V1.0.3", viewModel.ReleaseVersionText);
-        Assert.Equal("V1.0.3", viewModel.ReleaseBadgeText);
-        Assert.Equal("RevoHelper V1.0.3 · 免费使用", viewModel.AppVersionText);
+        Assert.Equal("V1.0.4", viewModel.ReleaseVersionText);
+        Assert.Equal("V1.0.4", viewModel.ReleaseBadgeText);
+        Assert.Equal("RevoHelper V1.0.4 · 免费使用", viewModel.AppVersionText);
     }
 
     [Fact]
@@ -786,7 +786,7 @@ public sealed class MainWindowViewModelTests
         Assert.Equal("en-US", store.LastSaved?.UiLanguageCode);
         Assert.Equal("Laptop performance profiles", viewModel.UiCopy.HomeTitle);
         Assert.Equal("Performance", viewModel.DrawerTitle);
-        Assert.Equal("RevoHelper V1.0.3 · Free to use", viewModel.AppVersionText);
+        Assert.Equal("RevoHelper V1.0.4 · Free to use", viewModel.AppVersionText);
     }
 
     [Fact]
@@ -1694,7 +1694,8 @@ public sealed class MainWindowViewModelTests
         var cpu = new RecordingCpuPolicyController(new CpuPolicy(35, 55, null));
         var boost = new RecordingBoostController(
             new ProcessorBoostPolicy(ProcessorBoostMode.Aggressive, ProcessorBoostMode.Aggressive));
-        var viewModel = CreateViewModel(cpuPolicyController: cpu, boostController: boost);
+        var viewModel = CreateViewModel(cpuPolicyController: cpu, boostController: boost,
+            platformModeController: new RecordingPlatformModeController(new(PlatformMode.Custom, 1)));
         viewModel.SelectCustomProfile(1);
         await viewModel.InitializePerformancePolicyAsync(CancellationToken.None);
         viewModel.SelectedPl1Watts = 45;
@@ -1707,7 +1708,7 @@ public sealed class MainWindowViewModelTests
         Assert.Equal(
             new ProcessorBoostPolicy(ProcessorBoostMode.Disabled, ProcessorBoostMode.Disabled),
             boost.AppliedPolicies.Single());
-        Assert.Contains("已应用并回读", viewModel.StatusMessage, StringComparison.Ordinal);
+        Assert.Contains("整套性能策略已应用", viewModel.StatusMessage, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1917,7 +1918,8 @@ public sealed class MainWindowViewModelTests
         var original = new ProcessorBoostPolicy(ProcessorBoostMode.Aggressive, ProcessorBoostMode.Aggressive);
         var cpu = new RecordingCpuPolicyController(new CpuPolicy(35, 55, null)) { RejectApply = true };
         var boost = new RecordingBoostController(original);
-        var viewModel = CreateViewModel(cpuPolicyController: cpu, boostController: boost);
+        var viewModel = CreateViewModel(cpuPolicyController: cpu, boostController: boost,
+            platformModeController: new RecordingPlatformModeController(new(PlatformMode.Custom, 1)));
         viewModel.SelectCustomProfile(1);
         await viewModel.InitializePerformancePolicyAsync(CancellationToken.None);
         viewModel.SelectedProcessorBoostMode = ProcessorBoostMode.Disabled;
@@ -1926,7 +1928,7 @@ public sealed class MainWindowViewModelTests
 
         Assert.Equal(2, boost.AppliedPolicies.Count);
         Assert.Equal(original, boost.AppliedPolicies[1]);
-        Assert.Contains("已恢复睿频策略", viewModel.StatusMessage, StringComparison.Ordinal);
+        Assert.Contains("调度失败", viewModel.StatusMessage, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -4132,6 +4134,184 @@ public sealed class MainWindowViewModelTests
         }
     }
 
+    private static LightingZoneConfiguration LightingEdit(LightingZone zone, string hex, bool enabled = true)
+    {
+        var color = Convert.ToUInt32(hex, 16);
+        return new(zone, enabled, LightingEffect.Static, new((byte)(color >> 16), (byte)(color >> 8), (byte)color),
+            3, 2, LightingDirection.None, 120);
+    }
+
+    [Fact]
+    public async Task LightingQueue_SlowZoneDoesNotHoldBackAnotherZone()
+    {
+        var logoRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var controls = new RecordingQuickControlsController
+        {
+            LightingApplyGate = target => target.Zone == LightingZone.Logo ? logoRelease.Task : Task.CompletedTask
+        };
+        controls.AvailableLightingZones.UnionWith([LightingZone.Keyboard, LightingZone.Logo]);
+        var vm = CreateViewModel(quickControlsController: controls);
+        await vm.OpenLightingAsync(CancellationToken.None);
+
+        vm.QueueLightingEdit(LightingEdit(LightingZone.Logo, "FF0000"));
+        vm.QueueLightingEdit(LightingEdit(LightingZone.Keyboard, "00FF00"));
+
+        Assert.Equal([LightingZone.Logo, LightingZone.Keyboard], controls.AppliedLightingZones);
+        logoRelease.SetResult();
+        await vm.WhenLightingWritesIdleAsync().WaitAsync(TimeSpan.FromSeconds(2));
+    }
+
+    [Fact]
+    public async Task LightingQueue_WaitingEditsInOneZoneKeepOnlyTheNewest()
+    {
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var controls = new RecordingQuickControlsController { LightingApplyGate = _ => release.Task };
+        controls.AvailableLightingZones.Add(LightingZone.Keyboard);
+        var vm = CreateViewModel(quickControlsController: controls);
+        await vm.OpenLightingAsync(CancellationToken.None);
+
+        vm.QueueLightingEdit(LightingEdit(LightingZone.Keyboard, "FF0000"));
+        vm.QueueLightingEdit(LightingEdit(LightingZone.Keyboard, "00FF00"));
+        vm.QueueLightingEdit(LightingEdit(LightingZone.Keyboard, "0000FF"));
+        release.SetResult();
+        await vm.WhenLightingWritesIdleAsync().WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Equal(["#FF0000", "#0000FF"], controls.AppliedLightingConfigurations.Select(target => target.Color.Hex));
+    }
+
+    [Fact]
+    public async Task LightingQueue_ReplacingEditKeepsAWaitingPowerRequest()
+    {
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var controls = new RecordingQuickControlsController { LightingApplyGate = _ => release.Task };
+        controls.AvailableLightingZones.Add(LightingZone.Keyboard);
+        var vm = CreateViewModel(quickControlsController: controls);
+        await vm.OpenLightingAsync(CancellationToken.None);
+
+        vm.QueueLightingEdit(LightingEdit(LightingZone.Keyboard, "FF0000"));
+        vm.QueueLightingEdit(LightingEdit(LightingZone.Keyboard, "FF0000", enabled: false), powerChange: true);
+        vm.QueueLightingEdit(LightingEdit(LightingZone.Keyboard, "00FF00", enabled: false));
+        release.SetResult();
+        await vm.WhenLightingWritesIdleAsync().WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Equal([(LightingZone.Keyboard, false)], controls.LightingPowerRequests);
+    }
+
+    [Fact]
+    public async Task LightingQueue_ControlsStayUsableDuringAWrite()
+    {
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var controls = new RecordingQuickControlsController { LightingApplyGate = _ => release.Task };
+        controls.AvailableLightingZones.Add(LightingZone.Keyboard);
+        var vm = CreateViewModel(quickControlsController: controls);
+        await vm.OpenLightingAsync(CancellationToken.None);
+
+        vm.QueueLightingEdit(LightingEdit(LightingZone.Keyboard, "FF0000"));
+
+        Assert.True(vm.CanToggleSelectedLightingZonePower);
+        Assert.True(vm.CanApplyLightingSleepTimer);
+        release.SetResult();
+        await vm.WhenLightingWritesIdleAsync().WaitAsync(TimeSpan.FromSeconds(2));
+    }
+
+    [Fact]
+    public async Task OpenLighting_ShowsEachZoneAsSoonAsItAnswers()
+    {
+        var logoRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var controls = new RecordingQuickControlsController
+        {
+            LightingReadGate = zone => zone == LightingZone.Logo ? logoRelease.Task : Task.CompletedTask
+        };
+        controls.AvailableLightingZones.UnionWith([LightingZone.Keyboard, LightingZone.Logo]);
+        var vm = CreateViewModel(quickControlsController: controls);
+
+        var opening = vm.OpenLightingAsync(CancellationToken.None);
+
+        Assert.False(opening.IsCompleted);
+        Assert.True(vm.IsKeyboardLightingZoneAvailable);
+        Assert.False(vm.IsLogoLightingZoneAvailable);
+        Assert.Equal(LightingZone.Keyboard, vm.SelectedLightingZone);
+        logoRelease.SetResult();
+        await opening.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.True(vm.IsLogoLightingZoneAvailable);
+    }
+
+    [Fact]
+    public async Task LightingEditor_ShowsOnlyParametersTheEffectUses()
+    {
+        var controls = new RecordingQuickControlsController();
+        controls.AvailableLightingZones.UnionWith([LightingZone.Keyboard, LightingZone.LiquidCooler]);
+        var vm = CreateViewModel(quickControlsController: controls);
+        await vm.OpenLightingAsync(CancellationToken.None);
+
+        vm.SelectedLightingEffect = LightingEffect.Static;
+        Assert.True(vm.ShowLightingBrightness);
+        Assert.False(vm.ShowLightingSpeed);
+        vm.SelectedLightingEffect = LightingEffect.Breathing;
+        Assert.True(vm.ShowLightingSpeed);
+
+        vm.SelectLightingZone(LightingZone.LiquidCooler);
+        Assert.False(vm.ShowLightingBrightness);
+        Assert.False(vm.ShowLightingSpeed);
+    }
+
+    [Fact]
+    public async Task LightingStatus_MarksAFailedWriteUntilTheNextOneSucceeds()
+    {
+        var controls = new RecordingQuickControlsController { LightingApplyResult = ControlResult.Rejected("回读未匹配") };
+        controls.AvailableLightingZones.Add(LightingZone.Keyboard);
+        var vm = CreateViewModel(quickControlsController: controls);
+        await vm.OpenLightingAsync(CancellationToken.None);
+        Assert.False(vm.IsLightingStatusProblem);
+
+        vm.QueueLightingEdit(LightingEdit(LightingZone.Keyboard, "FF0000"));
+        await vm.WhenLightingWritesIdleAsync().WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.True(vm.IsLightingStatusProblem);
+        Assert.Contains("回读未匹配", vm.LightingStatusText, StringComparison.Ordinal);
+
+        controls.LightingApplyResult = null;
+        vm.QueueLightingEdit(LightingEdit(LightingZone.Keyboard, "00FF00"));
+        await vm.WhenLightingWritesIdleAsync().WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.False(vm.IsLightingStatusProblem);
+    }
+
+    [Fact]
+    public async Task LightingStatus_UnconfirmedParameterIsNotAProblemAndKeepsTheChosenValue()
+    {
+        var controls = new RecordingQuickControlsController
+        {
+            LightingApplyResult = new(true, "键盘背光灯效已确认；颜色未回读确认，请以实际灯光为准。") { UnconfirmedDetail = "颜色 expected #FF0000 read #000000" }
+        };
+        controls.AvailableLightingZones.Add(LightingZone.Keyboard);
+        var vm = CreateViewModel(quickControlsController: controls);
+        await vm.OpenLightingAsync(CancellationToken.None);
+        vm.SetLightingColor("#FF0000");
+
+        vm.QueueSelectedLightingEdit();
+        await vm.WhenLightingWritesIdleAsync().WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.False(vm.IsLightingStatusProblem);
+
+        vm.ApplyLightingZoneState(LightingZone.Keyboard, new(true, "PerKey",
+            new(LightingZone.Keyboard, true, LightingEffect.Static, new(0, 0, 0), 3, 2, LightingDirection.None, 120),
+            [LightingEffect.Static]));
+        Assert.Equal("#FF0000", vm.LightingColorHex);
+        Assert.Equal("Keyboard backlight effect confirmed. color not confirmed by readback; check the actual light.",
+            UiTextCatalog.Translate(vm.LightingStatusText, "en-US"));
+    }
+
+    [Fact]
+    public void LightingDirectionOptions_AreLabelledAndTranslated()
+    {
+        var vm = CreateViewModel();
+
+        Assert.Equal(Enum.GetValues<LightingDirection>(), vm.LightingDirectionOptions.Select(option => option.Value));
+        foreach (var label in vm.LightingDirectionOptions.Select(option => option.Label).Append("默认背光"))
+        {
+            Assert.DoesNotContain(label, Enum.GetNames<LightingDirection>());
+            Assert.NotEqual(label, UiTextCatalog.Translate(label, "en-US"));
+        }
+    }
+
     private sealed class RecordingQuickControlsController : IQuickControlsController
     {
         public Exception? DisplayFeatureReadException { get; init; }
@@ -4184,7 +4364,17 @@ public sealed class MainWindowViewModelTests
         public ValueTask<KeyboardLightingState?> ReadKeyboardLightingAsync(CancellationToken cancellationToken) =>
             ValueTask.FromResult<KeyboardLightingState?>(new(KeyboardLightingEnabled, "SingleZone"));
 
-        public ValueTask<LightingZoneState?> ReadLightingZoneAsync(LightingZone zone, CancellationToken cancellationToken) =>
+        public async ValueTask<LightingZoneState?> ReadLightingZoneAsync(LightingZone zone, CancellationToken cancellationToken)
+        {
+            if (LightingReadGate is not null) await LightingReadGate(zone);
+            return await ReadLightingZoneNowAsync(zone);
+        }
+
+        public Func<LightingZone, Task>? LightingReadGate { get; init; }
+        public Func<LightingZoneConfiguration, Task>? LightingApplyGate { get; init; }
+        public ControlResult? LightingApplyResult { get; set; }
+
+        private ValueTask<LightingZoneState?> ReadLightingZoneNowAsync(LightingZone zone) =>
             ValueTask.FromResult<LightingZoneState?>(LightingReadOverride is not null ? LightingReadOverride(zone) : AvailableLightingZones.Contains(zone)
                 ? new(true, "PerKey", new(zone, true, LightingEffect.Static, new(0, 180, 255), 3, 2,
                     LightingDirection.Left, 2), zone == LightingZone.Logo
@@ -4250,15 +4440,16 @@ public sealed class MainWindowViewModelTests
             return ValueTask.FromResult(new ControlResult(true, "键盘背光已回读"));
         }
 
-        public ValueTask<ControlResult> ApplyLightingZoneAsync(
+        public async ValueTask<ControlResult> ApplyLightingZoneAsync(
             LightingZoneConfiguration configuration,
             CancellationToken cancellationToken)
         {
             AppliedLightingZones.Add(configuration.Zone);
             AppliedLightingConfigurations.Add(configuration);
+            if (LightingApplyGate is not null) await LightingApplyGate(configuration);
             if (LightingApplyException is not null) throw LightingApplyException;
             OnApplyLighting?.Invoke(configuration);
-            return ValueTask.FromResult(new ControlResult(true, "灯效已应用并回读"));
+            return LightingApplyResult ?? new ControlResult(true, "灯效已应用并回读");
         }
 
         public ValueTask<ControlResult> SetLightingZonePowerAsync(

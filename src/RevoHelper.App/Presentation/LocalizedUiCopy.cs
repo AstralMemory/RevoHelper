@@ -38,6 +38,21 @@ public sealed class LocalizedUiCopy
     public string DisplayTitle { get; init; } = "";
     public string DisplaySubtitle { get; init; } = "";
     public string OtherTitle { get; init; } = "";
+    public string OtherSubtitle { get; init; } = "";
+    public string UpdateSectionTitle { get; init; } = "";
+    public string AutomaticUpdateCheckTitle { get; init; } = "";
+    public string AutomaticUpdateCheckDescription { get; init; } = "";
+    public string CheckForUpdatesButton { get; init; } = "";
+    public string UpdateChecking { get; init; } = "";
+    public string UpdateUpToDate { get; init; } = "";
+    public string UpdateCheckFailed { get; init; } = "";
+    public string UpdateNotChecked { get; init; } = "";
+    public string UpdateAvailableFormat { get; init; } = "";
+    public string UpdateBadgeTooltip { get; init; } = "";
+    public string ManualUpdateCheckTooltip { get; init; } = "";
+    public string UpdateStatusMessageFormat { get; init; } = "";
+    public string PossibleUpdateBadge { get; init; } = "";
+    public string PossibleUpdateTooltip { get; init; } = "";
     public string MonitorTitle { get; init; } = "";
     public string MonitorEntryTitle { get; init; } = "";
     public string PerformanceAdjustmentTitle { get; init; } = "";
@@ -102,8 +117,15 @@ public sealed class LocalizedUiCopy
         LiquidCoolingTitle = "水冷", LiquidCoolingSubtitle = "连接与控制",
         KeyboardTitle = "按键开关", KeyboardSubtitle = "Win / Fn / OSD",
         BatteryTitle = "电源", BatterySubtitle = "功耗释放模式",
-        DisplayTitle = "显示", DisplaySubtitle = "色彩与屏幕功能", OtherTitle = "其它", MonitorTitle = "性能监控（外置监控小横条）", MonitorEntryTitle = "性能监控",
+        DisplayTitle = "显示", DisplaySubtitle = "色彩与屏幕功能", OtherTitle = "其它", OtherSubtitle = "强冷 / 定时关机", MonitorTitle = "性能监控（外置监控小横条）", MonitorEntryTitle = "性能监控",
         PerformanceAdjustmentTitle = "性能调整", FanAdjustmentTitle = "风扇调整", SettingsTitle = "设置",
+        UpdateSectionTitle = "更新", AutomaticUpdateCheckTitle = "自动检查更新",
+        AutomaticUpdateCheckDescription = "启动 2 分钟后检查，之后每天一次，失败时 3 小时后重试。只读取 GitHub 上的最新版本号，不发送设备信息。关闭后不再自动联网。",
+        CheckForUpdatesButton = "检查更新", UpdateChecking = "正在检查…", UpdateUpToDate = "已是最新版本",
+        UpdateCheckFailed = "检查失败，请稍后再试", UpdateNotChecked = "尚未检查",
+        UpdateAvailableFormat = "发现新版本 {0}", UpdateBadgeTooltip = "点击打开下载页面",
+        ManualUpdateCheckTooltip = "手动检查更新", UpdateStatusMessageFormat = "检查更新：{0}", PossibleUpdateBadge = "可能有新版本",
+        PossibleUpdateTooltip = "已有一段时间未能连接 GitHub，无法确认是否有新版本。点击打开下载页（部分网络可能无法访问），之后这个版本不再提示。",
         StartupSectionTitle = "启动", StartWithWindowsTitle = "随 Windows 启动", StartWithWindowsDescription = "登录后驻留系统托盘",
         WindowSectionTitle = "窗口", WindowScaleTitle = "窗口缩放", WindowScaleDescription = "选择后立即生效，默认 100%。",
         AlwaysOnTopTitle = "窗口始终置顶", AlwaysOnTopDescription = "让面板保持在其他窗口上方",
@@ -145,13 +167,20 @@ public sealed class LocalizedUiCopy
         ProfileTendencyTitle = "Profile guide", MoreProfilesTitle = "More", MoreProfilesHint = "Additional dynamic power strategies",
         NoiseLabel = "Noise", PerformanceLabel = "Perf.", TemperatureLabel = "Temp.",
         UsageLabel = "Usage", PowerUsageLabel = "Power", FrequencyLabel = "Clock",
-        GpuOutputTitle = "GPU mode", GpuOutputSubtitle = "Hybrid / discrete",
+        GpuOutputTitle = "GPU mode", GpuOutputSubtitle = "Hybrid / dGPU",
         LightingTitle = "Lighting", LightingSubtitle = "RGB / keyboard",
-        LiquidCoolingTitle = "Cooling", LiquidCoolingSubtitle = "Connect / control",
+        LiquidCoolingTitle = "Cooling", LiquidCoolingSubtitle = "Link / control",
         KeyboardTitle = "Keys", KeyboardSubtitle = "Win / Fn / OSD",
         BatteryTitle = "Power", BatterySubtitle = "Power profiles",
-        DisplayTitle = "Display", DisplaySubtitle = "Color and screen", OtherTitle = "Other", MonitorTitle = "Performance monitor (floating bar)", MonitorEntryTitle = "Monitor",
+        DisplayTitle = "Display", DisplaySubtitle = "Color / screen", OtherTitle = "Other", OtherSubtitle = "Fans / shutdown", MonitorTitle = "Performance monitor (floating bar)", MonitorEntryTitle = "Monitor",
         PerformanceAdjustmentTitle = "Performance", FanAdjustmentTitle = "Fan control", SettingsTitle = "Settings",
+        UpdateSectionTitle = "Updates", AutomaticUpdateCheckTitle = "Check for updates automatically",
+        AutomaticUpdateCheckDescription = "Checks 2 minutes after launch, then once a day, retrying after 3 hours if it fails. Only reads the latest version number from GitHub and sends no device information. When off, the app does not go online on its own.",
+        CheckForUpdatesButton = "Check now", UpdateChecking = "Checking…", UpdateUpToDate = "Up to date",
+        UpdateCheckFailed = "Check failed. Try later.", UpdateNotChecked = "Not checked yet",
+        UpdateAvailableFormat = "New version {0}", UpdateBadgeTooltip = "Open the downloads page",
+        ManualUpdateCheckTooltip = "Check for updates", UpdateStatusMessageFormat = "Update check: {0}", PossibleUpdateBadge = "Maybe a new version",
+        PossibleUpdateTooltip = "RevoHelper has not reached GitHub for a while, so it cannot tell whether a new version is out. Click to open the downloads page (some networks cannot reach it). It will not appear again for this version.",
         StartupSectionTitle = "Startup", StartWithWindowsTitle = "Start with Windows", StartWithWindowsDescription = "Stay available in the system tray after sign-in",
         WindowSectionTitle = "Window", WindowScaleTitle = "Window scale", WindowScaleDescription = "Applies immediately; default is 100%.",
         AlwaysOnTopTitle = "Always on top", AlwaysOnTopDescription = "Keep the panel above other windows",

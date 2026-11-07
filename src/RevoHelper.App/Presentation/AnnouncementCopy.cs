@@ -1,8 +1,8 @@
 namespace RevoHelper.App.Presentation;
 
 /// <summary>
-/// Developer-authored, bundled announcement. Edit this file for a release;
-/// opening the page never downloads content or checks for updates.
+/// Developer-authored, bundled announcement. Edit this file for a release.
+/// The page itself downloads nothing; the update check in Updates/ only reads a version number.
 /// Bundled copy; publication is managed separately on GitHub.
 /// </summary>
 public sealed record AnnouncementCopy(
@@ -13,7 +13,7 @@ public sealed record AnnouncementCopy(
     string UsageTitle, string Usage, string DevelopmentTitle, string Development,
     string FeedbackTitle, string Feedback, string OfflineNote)
 {
-    public const string UpdateDate = "2026-11-05";
+    public const string UpdateDate = "2026-11-07";
     public const string ProjectUrl = "https://github.com/AstralMemory/RevoHelper";
     public const string DownloadsUrl = ProjectUrl + "/releases";
     public const string FeedbackUrl = ProjectUrl + "/issues";
@@ -38,7 +38,7 @@ public sealed record AnnouncementCopy(
     public static AnnouncementCopy For(string? language, string version) =>
         LocalizedUiCopy.NormalizeLanguageCode(language) == "en-US"
             ? new("About & announcements", "Version & notes", "Version", version,
-                "Updated", UpdateDate, "Developer announcement",
+                "Updated", UpdateDate, "Product overview",
                 DeveloperNoticeEnglish,
                 "Project", "Downloads", "Feedback", "Back to settings",
                 "Release & source code",
@@ -51,9 +51,9 @@ public sealed record AnnouncementCopy(
                 "RevoHelper is a Vibe Coding project, with code mainly written with AI assistance. The developer is responsible for product logic, approving designs and changes, UI design, real-device testing and iteration.",
                 "Feedback",
                 "Please include your laptop model, CPU/GPU, Windows version, the affected feature, steps and screenshots. Confirmation that a feature works is useful too. Do not upload full system reports containing personal information.",
-                "This page is bundled with the app and never fetches announcements in the background. Instructions and third-party licenses are included in the release package.")
+                "This page is bundled with the app and never fetches announcements. Update checks only read the latest version number from GitHub and download nothing; automatic checks can be turned off in Settings. Instructions and third-party licenses are included in the release package.")
             : new("关于与公告", "版本、更新和使用提醒", "当前版本", version,
-                "更新日期", UpdateDate, "开发者公告",
+                "更新日期", UpdateDate, "产品介绍",
                 DeveloperNoticeChinese,
                 "GitHub 项目", "下载与更新", "问题反馈", "返回设置",
                 "发布与开源",
@@ -66,5 +66,5 @@ public sealed record AnnouncementCopy(
                 "本产品属于 Vibe Coding 产物，代码主要由 AI 辅助编写。开发者负责产品逻辑、方案与改动审批、UI 设计、真机测试和迭代改进等工作。",
                 "反馈说明",
                 "欢迎提供机型、CPU/GPU、Windows 版本、所用功能、复现步骤和截图；确认某项功能正常也很有帮助。请勿上传包含个人信息的完整系统报告。",
-                "本页随版本更新，不会后台联网获取公告。使用说明与第三方许可随发布包提供。");
+                "本页内容随版本提供，不会联网获取公告。检查更新只读取 GitHub 上的最新版本号，不下载任何内容，可在设置中关闭自动检查。使用说明与第三方许可随发布包提供。");
 }

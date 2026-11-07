@@ -97,6 +97,18 @@ public static class StartupTaskDefinition
         }
     }
 
+    public static string? ReadCommand(string xml)
+    {
+        try
+        {
+            return (string?)Parse(xml).Descendants(Ns + "Exec").SingleOrDefault()?.Element(Ns + "Command");
+        }
+        catch (Exception exception) when (exception is XmlException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
     public static bool IsEnabledFor(string xml, string executablePath, string userSid)
     {
         try

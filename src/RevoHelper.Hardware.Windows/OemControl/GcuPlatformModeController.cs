@@ -98,9 +98,14 @@ public sealed class GcuPlatformModeController(
                 Trace($"stage=rollback result=begin target={baseline.Mode}/{baseline.ProfileIndex}");
                 // Basic Turbo (no sub-strategy on) maps to TurboQuiet; rolling back to it
                 // must return to the mode without switching the quiet strategy on.
-                await ApplyAndVerifyAsync(baseline, restoreBaselineStrategy, cancellationToken).ConfigureAwait(false);
+                var restored = await ApplyAndVerifyAsync(baseline, restoreBaselineStrategy, cancellationToken).ConfigureAwait(false);
                 Trace($"stage=rollback result=success target={baseline.Mode}/{baseline.ProfileIndex}");
-                return ControlResult.Rejected($"整机档位切换失败，已恢复原档位：{exception.Message}");
+                return ControlResult.Rejected($"整机档位切换失败，已恢复原档位：{exception.Message}") with
+                {
+                    RestoredTo = GcuPlatformModeStatusMapper.Map(restored) is { } actual
+                        ? new(actual, HasActiveTurboStrategy(restored))
+                        : null
+                };
             }
             catch (Exception rollbackException) when (rollbackException is not OperationCanceledException)
             {

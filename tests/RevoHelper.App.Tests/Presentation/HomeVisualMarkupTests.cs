@@ -65,15 +65,12 @@ public sealed class HomeVisualMarkupTests
     }
 
     [Fact]
-    public void LightingCommands_AllUseZoneScopedVersionsAndCaptureZonePowerBeforeWaiting()
+    public void LightingCommands_GoThroughTheViewModelQueueInsteadOfTheWindow()
     {
         var source = File.ReadAllText(LocateRepositoryFile("src", "RevoHelper.App", "MainWindow.xaml.cs"));
-        Assert.DoesNotContain("Volatile.Read(ref lightingAutoApplyVersion)", source, StringComparison.Ordinal);
-        Assert.Contains("lightingMutationVersions.IsCurrent(zone, version)", source, StringComparison.Ordinal);
-        Assert.Contains("ViewModel.CaptureLightingEditor()", source, StringComparison.Ordinal);
-        Assert.Contains("QueueLightingAutoApply(powerChange: true)", source, StringComparison.Ordinal);
-        var marker = FindNamedElement(LoadMainWindowXaml(), "LightingBuildLabel");
-        Assert.Equal("分区即时编辑", (string?)marker.Attribute("Text"));
+        Assert.Contains("ViewModel.QueueSelectedLightingEdit(powerChange: true)", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("lightingAutoApplyLock", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("pendingLightingEdits", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -364,13 +361,16 @@ public sealed class HomeVisualMarkupTests
         Assert.Contains("{Binding UiCopy.OtherTitle}", labels);
         Assert.Equal("电源", (string?)FindNamedElement(panel, "BatteryHealthQuickEntry").Attribute("ToolTip"));
         Assert.All(
-            new[] { "GpuOutputQuickTitle", "LightingQuickTitle", "WaterCoolingQuickTitle", "KeyboardQuickTitle", "BatteryHealthQuickTitle", "DisplayColorQuickTitle" },
+            new[] { "GpuOutputQuickTitle", "LightingQuickTitle", "WaterCoolingQuickTitle", "KeyboardQuickTitle", "BatteryHealthQuickTitle", "DisplayColorQuickTitle", "OtherQuickTitle" },
             name =>
             {
                 var title = FindNamedElement(panel, name);
-                Assert.Equal("{DynamicResource TextBrush}", (string?)title.Attribute("Foreground"));
-                Assert.Equal("SemiBold", (string?)title.Attribute("FontWeight"));
+                Assert.Equal("{StaticResource QuickActionTitleStyle}", (string?)title.Attribute("Style"));
             });
+
+        // Microsoft YaHei has no semibold, so SemiBold would turn the small Chinese titles bold.
+        var titleStyle = document.Descendants().Single(element => (string?)element.Attribute(XamlNamespace + "Key") == "QuickActionTitleStyle");
+        Assert.Contains(titleStyle.Elements(), setter => (string?)setter.Attribute("Property") == "FontWeight" && (string?)setter.Attribute("Value") == "Medium");
 
         var row = panel.Descendants().First(element => element.Name.LocalName == "RowDefinition");
         Assert.True(double.Parse((string?)row.Attribute("Height") ?? "0") >= 64);
@@ -412,7 +412,7 @@ public sealed class HomeVisualMarkupTests
         foreach (var name in new[]
                  {
                      "LightingKeyboardTab", "LightingCoastTab", "LightingLogoTab", "LightingWaterTab",
-                     "LightingEffectCombo", "LightingColorHexBox", "LightingBrightnessSlider", "LightingSpeedSlider",
+                     "LightingEffectChips", "LightingStatusLine", "LightingColorHexBox", "LightingBrightnessSlider", "LightingSpeedSlider",
                      "LightingZonePowerToggle", "LightingSleepTimerSelector", "KeyboardLightingProfilesSection",
                      "KeyboardLightingProfileActionsSection", "SaveLightingProfileButton", "ImportLightingProfileButton",
                      "ExportLightingProfileButton"
@@ -421,7 +421,7 @@ public sealed class HomeVisualMarkupTests
         foreach (var label in new[]
                  {
                      "键盘灯光方案", "机器最初始默认背光", "耀世流光", "冰海呼吸", "静夜微光",
-                     "键盘与海岸灯带自动熄灯（秒级档位）",
+                     "键盘与灯带自动熄灯",
                      "保存为我的方案"
                  })
             Assert.Contains(label, text, StringComparison.Ordinal);
@@ -445,27 +445,27 @@ public sealed class HomeVisualMarkupTests
     }
 
     [Fact]
-    public void LightingDrawer_UserComboSelectionsCommitNewValueBeforeAutoApply()
+    public void LightingDrawer_UserSelectionsCommitNewValueBeforeAutoApply()
     {
         var codeBehind = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "RevoHelper.App", "MainWindow.xaml.cs"));
         var effectHandler = SliceMethod(codeBehind, "private void LightingEffect_SelectionChanged", "private void LightingDirection_SelectionChanged");
         var directionHandler = SliceMethod(codeBehind, "private void LightingDirection_SelectionChanged", "private void LightingSlider_ValueChanged");
-        var sleepHandler = SliceMethod(codeBehind, "private void LightingSleepTimer_SelectionChanged", "private async Task ApplyLatestLightingSleepTimerAsync");
+        var sleepHandler = SliceMethod(codeBehind, "private void LightingSleepTimer_SelectionChanged", "private bool IsUserComboBoxSelection");
 
-        AssertAssignmentPrecedesApply(effectHandler, "ViewModel.SelectedLightingEffect = effect;", "QueueLightingAutoApply();");
-        AssertAssignmentPrecedesApply(directionHandler, "ViewModel.SelectedLightingDirection = direction;", "QueueLightingAutoApply();");
-        AssertAssignmentPrecedesApply(sleepHandler, "ViewModel.LightingSleepSeconds = seconds;", "ApplyLatestLightingSleepTimerAsync");
+        AssertAssignmentPrecedesApply(effectHandler, "ViewModel.SelectedLightingEffect = effect;", "ViewModel.QueueSelectedLightingEdit();");
+        AssertAssignmentPrecedesApply(directionHandler, "ViewModel.SelectedLightingDirection = direction;", "ViewModel.QueueSelectedLightingEdit();");
+        AssertAssignmentPrecedesApply(sleepHandler, "ViewModel.LightingSleepSeconds = seconds;", "ViewModel.QueueLightingSleepTimer();");
     }
 
     [Fact]
-    public void LightingDrawer_FocusedComboSelectionStillCountsAfterPopupCloses()
+    public void LightingDrawer_SelectionsMadeByEditorSyncDoNotWrite()
     {
         var codeBehind = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "RevoHelper.App", "MainWindow.xaml.cs"));
         var effectHandler = SliceMethod(codeBehind, "private void LightingEffect_SelectionChanged", "private void LightingDirection_SelectionChanged");
         var directionHandler = SliceMethod(codeBehind, "private void LightingDirection_SelectionChanged", "private void LightingSlider_ValueChanged");
-        var sleepHandler = SliceMethod(codeBehind, "private void LightingSleepTimer_SelectionChanged", "private async Task ApplyLatestLightingSleepTimerAsync");
+        var sleepHandler = SliceMethod(codeBehind, "private void LightingSleepTimer_SelectionChanged", "private bool IsUserComboBoxSelection");
 
-        Assert.Contains("IsUserLightingComboBoxSelection(sender)", effectHandler, StringComparison.Ordinal);
+        Assert.Contains("ViewModel.IsSynchronizingLightingEditor", effectHandler, StringComparison.Ordinal);
         Assert.Contains("IsUserLightingComboBoxSelection(sender)", directionHandler, StringComparison.Ordinal);
         Assert.Contains("IsUserLightingComboBoxSelection(sender)", sleepHandler, StringComparison.Ordinal);
         Assert.Contains("comboBox.IsDropDownOpen || comboBox.IsKeyboardFocusWithin", codeBehind, StringComparison.Ordinal);
@@ -481,17 +481,15 @@ public sealed class HomeVisualMarkupTests
     }
 
     [Fact]
-    public void LightingDrawer_QueuesCapturedValuesPerZoneInsteadOfRereadingLiveEditor()
+    public void LightingDrawer_EffectsAreOneClickChipsWithoutInnerScrolling()
     {
-        var source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "RevoHelper.App", "MainWindow.xaml.cs"));
-        var queue = SliceMethod(source, "private void QueueLightingAutoApply", "private void LightingSleepTimer_SelectionChanged");
-        Assert.Contains("ViewModel.CaptureLightingEditor()", queue);
-        Assert.Contains("pendingLightingEdits", queue);
-        Assert.Contains("ViewModel.ApplyLightingConfigurationAsync(request.Configuration", queue);
-        Assert.DoesNotContain("ViewModel.ApplySelectedLightingZoneAsync", queue);
-        Assert.DoesNotContain("zone == ViewModel.SelectedLightingZone", queue);
-        var slider = SliceMethod(source, "private void LightingSlider_ValueChanged", "private void QueueLightingAutoApply");
-        Assert.Contains("!ViewModel.IsSynchronizingLightingEditor", slider);
+        var document = LoadMainWindowXaml();
+        var chips = FindNamedElement(document, "LightingEffectChips");
+        Assert.Equal("{StaticResource LightingEffectChipStyle}", (string?)chips.Attribute("ItemContainerStyle"));
+        Assert.Contains("ItemsPresenter", chips.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("ScrollViewer", chips.ToString(), StringComparison.Ordinal);
+        Assert.Contains("UniformGrid", chips.ToString(), StringComparison.Ordinal);
+        var source = File.ReadAllText(LocateRepositoryFile("src", "RevoHelper.App", "MainWindow.xaml.cs"));
         Assert.Contains("LightingColorHexBox.IsKeyboardFocusWithin", source);
     }
 
@@ -1344,7 +1342,7 @@ public sealed class HomeVisualMarkupTests
 
         foreach (var name in new[]
                  {
-                     "ProcessorBoostModeSelector", "LightingEffectCombo", "LightingDirectionCombo",
+                     "ProcessorBoostModeSelector", "LightingDirectionCombo",
                      "LightingSleepTimerSelector", "LiquidCoolingDeviceSelector", "DeepSleepMinuteSelector",
                      "DisplayRefreshRateSelector", "ShutdownMinuteSelector", "WindowScaleSelector"
                  })
@@ -1374,7 +1372,7 @@ public sealed class HomeVisualMarkupTests
 
         foreach (var name in new[]
                  {
-                     "ProcessorBoostModeSelector", "LightingEffectCombo", "LightingDirectionCombo",
+                     "ProcessorBoostModeSelector", "LightingDirectionCombo",
                      "LightingSleepTimerSelector", "LiquidCoolingDeviceSelector", "DeepSleepMinuteSelector",
                      "DisplayRefreshRateSelector", "ShutdownMinuteSelector", "WindowScaleSelector"
                  })

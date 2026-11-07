@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Xml.Linq;
 
@@ -7,14 +8,50 @@ public sealed class WindowsStartupRegistration : IStartupRegistration
 {
     private readonly string executablePath;
     private readonly IStartupTaskPlatform platform;
+    private readonly Func<string, Version?> readFileVersion;
     private readonly object gate = new();
     private readonly Guid ownerId = Guid.NewGuid();
     private Mutation? lastMutation;
 
-    public WindowsStartupRegistration(string executablePath, IStartupTaskPlatform? platform = null)
+    public WindowsStartupRegistration(
+        string executablePath,
+        IStartupTaskPlatform? platform = null,
+        Func<string, Version?>? readFileVersion = null)
     {
         this.executablePath = Path.GetFullPath(executablePath);
         this.platform = platform ?? new WindowsStartupTaskPlatform();
+        this.readFileVersion = readFileVersion ?? ReadFileVersion;
+    }
+
+    public bool RegisteredExecutableIsNewer()
+    {
+        var registered = RegisteredExecutablePath();
+        if (registered is null) return false;
+        var registeredVersion = readFileVersion(registered);
+        var currentVersion = readFileVersion(executablePath);
+        return registeredVersion is not null && currentVersion is not null && registeredVersion > currentVersion;
+    }
+
+    private string? RegisteredExecutablePath()
+    {
+        if (platform.ReadTaskXml() is { } xml) return StartupTaskDefinition.ReadCommand(xml);
+        return platform.ReadLegacyRunCommand() is { Length: > 0 } command
+            ? Environment.ExpandEnvironmentVariables(StartupCommand.ExtractExecutablePath(command))
+            : null;
+    }
+
+    private static Version? ReadFileVersion(string path)
+    {
+        try
+        {
+            return File.Exists(path) && Version.TryParse(FileVersionInfo.GetVersionInfo(path).FileVersion, out var version)
+                ? version
+                : null;
+        }
+        catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     public bool IsEnabled()

@@ -33,7 +33,7 @@ public static class StartupCommand
         }
     }
 
-    private static string ExtractExecutablePath(string command)
+    public static string ExtractExecutablePath(string command)
     {
         var trimmed = command.Trim();
         if (!trimmed.StartsWith('"'))

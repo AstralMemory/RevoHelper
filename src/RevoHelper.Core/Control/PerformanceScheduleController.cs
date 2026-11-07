@@ -53,6 +53,7 @@ public sealed class PerformanceScheduleController(
             }
 
             var cpuWriteAttempted = false;
+            var modeAlreadyRestored = false;
             CpuPolicyRestorePoint? targetCpuBaseline = null;
             var targetPlatformSelected = platformAlreadySelected && baselinePlatform == target.Platform;
             try
@@ -81,6 +82,12 @@ public sealed class PerformanceScheduleController(
                             Trace($"stage=platform-apply result=partial actual={Mode(confirmedPlatform)}");
                             return new(false, platformResult.Reason) { ConfirmedPlatform = confirmedPlatform };
                         }
+                        // The hardware layer may have restored the mode already. Only a match with
+                        // this baseline, sub-strategy state included, spares the repeated mode command.
+                        // Firmware can change Boost, power or frequency during the attempt, so those
+                        // are still restored below.
+                        modeAlreadyRestored = platformResult.RestoredTo == baselineRestorePoint;
+                        Trace($"stage=platform-apply result=rollback-needed restored={Mode(platformResult.RestoredTo?.Selection)} restoredStrategy={platformResult.RestoredTo?.RestoreStrategy} modeAlreadyRestored={modeAlreadyRestored}");
                         throw new TransitionException(platformResult.Reason);
                     }
                     targetPlatformSelected = true;
@@ -170,6 +177,7 @@ public sealed class PerformanceScheduleController(
                     target.Platform,
                     targetCpuBaseline,
                     targetPlatformSelected,
+                    modeAlreadyRestored,
                     cancellationToken).ConfigureAwait(false);
                 Trace($"stage={stage} result={(rollback.Succeeded ? "success" : "rejected")} reason={rollback.Reason}");
                 return rollback.Succeeded
@@ -237,6 +245,7 @@ public sealed class PerformanceScheduleController(
         PlatformModeSelection targetPlatform,
         CpuPolicyRestorePoint? targetCpuBaseline,
         bool targetPlatformSelected,
+        bool modeAlreadyRestored,
         CancellationToken cancellationToken)
     {
         var failures = new List<string>();
@@ -257,7 +266,7 @@ public sealed class PerformanceScheduleController(
         }
 
         ControlResult? platformRestore = null;
-        var originalPlatformRestored = await RestoreAsync(
+        var originalPlatformRestored = modeAlreadyRestored || await RestoreAsync(
             async () => platformRestore = await platformController
                 .RestorePlatformModeAsync(baselineRestorePoint, cancellationToken).ConfigureAwait(false),
             failures).ConfigureAwait(false);

@@ -136,12 +136,11 @@ public sealed class StartupOrderingTests
             AppContext.BaseDirectory, "..", "..", "..", "..", "..",
             "src", "RevoHelper.App", "App.xaml.cs"));
         var source = File.ReadAllText(sourcePath);
-        var readIndex = source.IndexOf("startupRegistration.IsEnabled()", StringComparison.Ordinal);
+        var syncIndex = source.IndexOf("StartupRegistrationSynchronizer.Synchronize(startupRegistration)", StringComparison.Ordinal);
         var viewModelIndex = source.IndexOf("var viewModel = new MainWindowViewModel", StringComparison.Ordinal);
 
-        Assert.DoesNotContain("StartupRegistrationSynchronizer.Synchronize(startupRegistration)", source, StringComparison.Ordinal);
-        Assert.True(readIndex >= 0 && readIndex < viewModelIndex,
-            "Experimental startup must only read registration and must not retarget the stable executable.");
+        Assert.True(syncIndex >= 0 && syncIndex < viewModelIndex,
+            "An updated version must take over an enabled startup entry before the settings page reads it.");
     }
 
     [Fact]

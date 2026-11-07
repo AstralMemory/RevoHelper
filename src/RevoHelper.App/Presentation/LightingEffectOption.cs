@@ -6,7 +6,7 @@ public sealed record LightingEffectOption(LightingEffect Value, string Label)
 {
     public static LightingEffectOption From(LightingEffect effect) => new(effect, effect switch
     {
-        LightingEffect.OemDefault => "机器最初始默认背光",
+        LightingEffect.OemDefault => "默认背光",
         LightingEffect.Static => "单色静态",
         LightingEffect.Breathing => "呼吸",
         LightingEffect.Wave => "波浪",
@@ -18,10 +18,22 @@ public sealed record LightingEffectOption(LightingEffect Value, string Label)
         LightingEffect.Fireworks => "烟火",
         LightingEffect.Aurora => "极光",
         LightingEffect.Game => "游戏",
-        LightingEffect.Impact => "冲突",
+        LightingEffect.Impact => "冲击",
         LightingEffect.Meteor => "流星",
         LightingEffect.Colorful => "多彩",
         LightingEffect.Rotate => "旋转",
         _ => effect.ToString()
     });
+}
+
+public sealed record LightingDirectionOption(LightingDirection Value, string Label)
+{
+    public static IReadOnlyList<LightingDirectionOption> All { get; } =
+    [
+        new(LightingDirection.None, "默认方向"),
+        new(LightingDirection.Left, "从左到右"),
+        new(LightingDirection.Right, "从右到左"),
+        new(LightingDirection.Up, "从下到上"),
+        new(LightingDirection.Down, "从上到下")
+    ];
 }

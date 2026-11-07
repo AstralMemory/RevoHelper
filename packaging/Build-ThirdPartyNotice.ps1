@@ -1,4 +1,4 @@
-param(
+﻿param(
     [Parameter(Mandatory = $true)][string]$OutputPath,
     [string]$ProductLabel = 'RevoHelper V1.0.0',
     [switch]$IncludePresentMon = $true

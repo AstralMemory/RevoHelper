@@ -5,6 +5,88 @@ namespace RevoHelper.Core.Tests.Control;
 public sealed class PerformanceScheduleControllerTests
 {
     [Fact]
+    public async Task ApplyAsync_ModeRestoredByHardwareLayer_SkipsOnlyTheRepeatedModeCommand()
+    {
+        var (calls, platform, boost, cpu, frequency, target) = FailedSwitchFixture(restoredTo: new(new(PlatformMode.Balanced), true));
+        var originalBoost = await boost.ReadAsync(CancellationToken.None);
+        // Firmware can change these on its own during the failed attempt.
+        platform.AfterSet = () =>
+        {
+            boost.SetOemCurrent(new(ProcessorBoostMode.Aggressive, ProcessorBoostMode.Aggressive));
+            cpu.SetOemCurrent(new(120, 150, null));
+            frequency.SetOemCurrent(ProcessorFrequencyLimitPolicy.Uniform(3400));
+        };
+
+        var result = await new PerformanceScheduleController(platform, cpu, boost, frequency)
+            .ApplyAsync(target, false, CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Contains("已恢复", result.Reason, StringComparison.Ordinal);
+        Assert.Equal(["set-platform", "set-cpu", "set-boost", "set-frequency"], calls.Where(call => call.StartsWith("set-", StringComparison.Ordinal)));
+        Assert.Equal(new PlatformModeSelection(PlatformMode.Balanced), platform.Current);
+        Assert.Equal(originalBoost, await boost.ReadAsync(CancellationToken.None));
+        Assert.Equal(new CpuPolicy(45, 65, null), await cpu.ReadCpuPolicyAsync(CancellationToken.None));
+        Assert.Equal(ProcessorFrequencyLimitPolicy.Uniform(0), await frequency.ReadAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ApplyAsync_HardwareLayerRestoredADifferentMode_RestoresTheScheduleBaseline()
+    {
+        // Fn key or the official console changed the mode between the two baseline reads.
+        var (calls, platform, boost, cpu, frequency, target) = FailedSwitchFixture(restoredTo: new(new(PlatformMode.Custom, 2), true));
+
+        var result = await new PerformanceScheduleController(platform, cpu, boost, frequency)
+            .ApplyAsync(target, false, CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(2, calls.Count(call => call == "set-platform"));
+        Assert.Equal(new PlatformModeSelection(PlatformMode.Balanced), platform.Current);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_SameModeButDifferentSubStrategy_RestoresTheScheduleBaseline()
+    {
+        // Quiet was on at the schedule's read and off at the hardware layer's read. Both map
+        // to TurboQuiet, so comparing the mode alone would report a restore that did not happen.
+        var (calls, platform, boost, cpu, frequency, target) = FailedSwitchFixture(
+            restoredTo: new(new(PlatformMode.TurboQuiet), false), original: new(PlatformMode.TurboQuiet));
+
+        var result = await new PerformanceScheduleController(platform, cpu, boost, frequency)
+            .ApplyAsync(target, false, CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(2, calls.Count(call => call == "set-platform"));
+        Assert.Equal(new PlatformModeSelection(PlatformMode.TurboQuiet), platform.Current);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_HardwareLayerCouldNotRestore_StillRollsTheModeBack()
+    {
+        var (calls, platform, boost, cpu, frequency, target) = FailedSwitchFixture(restoredTo: null);
+
+        var result = await new PerformanceScheduleController(platform, cpu, boost, frequency)
+            .ApplyAsync(target, false, CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(2, calls.Count(call => call == "set-platform"));
+        Assert.Equal(new PlatformModeSelection(PlatformMode.Balanced), platform.Current);
+    }
+
+    private static (List<string> Calls, FakePlatformController Platform, FakeBoostController Boost,
+        FakeCpuController Cpu, FakeFrequencyController Frequency, PerformanceSchedule Target)
+        FailedSwitchFixture(PlatformRestorePoint? restoredTo, PlatformModeSelection? original = null)
+    {
+        var calls = new List<string>();
+        return (calls,
+            new FakePlatformController(original ?? new(PlatformMode.Balanced), calls) { RejectFirstSet = true, RestoredAfterRejection = restoredTo },
+            new FakeBoostController(new(ProcessorBoostMode.EfficientEnabled, ProcessorBoostMode.EfficientEnabled), calls),
+            new FakeCpuController(new(45, 65, null), calls),
+            new FakeFrequencyController(ProcessorFrequencyLimitPolicy.Uniform(0), calls),
+            new PerformanceSchedule(new(PlatformMode.Office), new(60, 90, null),
+                new(ProcessorBoostMode.Aggressive, ProcessorBoostMode.Aggressive), ProcessorFrequencyLimitPolicy.Uniform(3400)));
+    }
+
+    [Fact]
     public async Task ApplyAsync_RejectedStrategyRetainsConfirmedBasicModeWithoutApplyingOtherPoliciesOrRollback()
     {
         var calls = new List<string>();
@@ -448,6 +530,8 @@ public sealed class PerformanceScheduleControllerTests
         public PlatformModeSelection Current => current;
         public Action? AfterSet { get; set; }
         public PlatformModeSelection? RejectedButConfirmedPlatform { get; init; }
+        public bool RejectFirstSet { get; set; }
+        public PlatformRestorePoint? RestoredAfterRejection { get; init; }
         public ValueTask<PlatformModeSelection?> ReadPlatformModeAsync(CancellationToken cancellationToken)
         {
             calls.Add("read-platform");
@@ -457,6 +541,13 @@ public sealed class PerformanceScheduleControllerTests
         public ValueTask<ControlResult> SetPlatformModeAsync(PlatformModeSelection selection, CancellationToken cancellationToken)
         {
             calls.Add("set-platform");
+            if (RejectFirstSet)
+            {
+                RejectFirstSet = false;
+                AfterSet?.Invoke();
+                current = RestoredAfterRejection?.Selection ?? current;
+                return ValueTask.FromResult(ControlResult.Rejected("模式超时，已恢复原档位") with { RestoredTo = RestoredAfterRejection });
+            }
             if (RejectedButConfirmedPlatform is { } actual)
             {
                 current = actual;
@@ -474,6 +565,8 @@ public sealed class PerformanceScheduleControllerTests
     private sealed class FakeBoostController(ProcessorBoostPolicy current, List<string> calls) : IProcessorBoostController
     {
         public ProcessorBoostPolicy? RejectNextTarget { get; init; }
+
+        public void SetOemCurrent(ProcessorBoostPolicy policy) => current = policy;
 
         public ValueTask<ProcessorBoostPolicy> ReadAsync(CancellationToken cancellationToken)
         {
@@ -547,6 +640,8 @@ public sealed class PerformanceScheduleControllerTests
         List<string> calls) : IProcessorFrequencyLimitController
     {
         public ProcessorFrequencyLimitPolicy? RejectNextTarget { get; init; }
+
+        public void SetOemCurrent(ProcessorFrequencyLimitPolicy policy) => current = policy;
 
         public ValueTask<ProcessorFrequencyLimitPolicy> ReadAsync(CancellationToken cancellationToken)
         {

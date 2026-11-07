@@ -7,6 +7,7 @@ using RevoHelper.App.Lifecycle;
 using RevoHelper.App.SystemControl;
 using RevoHelper.App.Monitoring;
 using RevoHelper.App.Charging;
+using RevoHelper.App.Updates;
 using RevoHelper.Core.Control;
 using RevoHelper.Core.Control.DynamicPower;
 using RevoHelper.Core.Dashboard;
@@ -128,9 +129,9 @@ public partial class App : Application
         {
             settings = settings with
             {
-                // Experimental exports must not migrate the stable version's startup task.
-                StartWithWindows = startupRegistration.IsEnabled()
+                StartWithWindows = StartupRegistrationSynchronizer.Synchronize(startupRegistration)
             };
+            RuntimeDiagnosticLog.Write("startup-registration", $"synchronized enabled={settings.StartWithWindows}");
         }
         catch (Exception exception)
         {
@@ -235,7 +236,8 @@ public partial class App : Application
             experiments: experiments,
             fanBoostController: new GcuFanBoostController(gcuStatusSource),
             shutdownScheduler: new WindowsShutdownScheduler(),
-            diagnostic: RuntimeDiagnosticLog.Write);
+            diagnostic: RuntimeDiagnosticLog.Write,
+            latestReleaseSource: new GitHubLatestReleaseSource());
         var window = new MainWindow(viewModel);
         mainViewModel = viewModel;
 
@@ -274,6 +276,7 @@ public partial class App : Application
         _ = InitializePlatformModeWhenReadyAsync(viewModel);
         _ = InitializePerformancePolicyWhenReadyAsync(viewModel);
         _ = SynchronizeScheduleWhenReadyAsync(viewModel);
+        _ = viewModel.RunAutomaticUpdateChecksAsync(applicationLifetime.Token);
     }
 
     private void StartConflictServiceDetection(MainWindowViewModel viewModel)

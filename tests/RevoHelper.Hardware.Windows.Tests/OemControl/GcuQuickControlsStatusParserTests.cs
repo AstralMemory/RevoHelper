@@ -73,6 +73,21 @@ public sealed class GcuQuickControlsStatusParserTests
         Assert.True(state.Configuration?.Enabled);
     }
     [Fact]
+    public void ParseLightingZone_ReadsDirectionsSpelledOutByTheOfficialStatus()
+    {
+        foreach (var (text, expected) in new[]
+                 {
+                     ("LeftRight", LightingDirection.Left), ("RightLeft", LightingDirection.Right),
+                     ("DownUp", LightingDirection.Up), ("UpDown", LightingDirection.Down), ("1", LightingDirection.Left)
+                 })
+        {
+            var state = GcuQuickControlsStatusParser.ParseLightingZone(LightingZone.Keyboard,
+                $$"""{ "powerStatus":"On", "type":"PerKey", "effect":"Wave", "direction":"{{text}}" }""");
+            Assert.Equal(expected, state!.Configuration!.Direction);
+        }
+    }
+
+    [Fact]
     public void ParseLightingZone_ReadsKeyboardEffectAndCapability()
     {
         var state = GcuQuickControlsStatusParser.ParseLightingZone(LightingZone.Keyboard, """

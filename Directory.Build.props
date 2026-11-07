@@ -6,8 +6,8 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
-    <Version>1.0.3</Version>
-    <InformationalVersion>1.0.3+20261105</InformationalVersion>
+    <Version>1.0.4</Version>
+    <InformationalVersion>1.0.4+20261107</InformationalVersion>
     <Authors>Astral Memory</Authors>
   </PropertyGroup>
 </Project>

@@ -26,14 +26,10 @@ public partial class MainWindow : Window
     private bool refreshingLiquidCooling;
     private readonly DispatcherTimer liquidCoolingRefreshTimer;
     private readonly DispatcherTimer shutdownCountdownTimer;
-    private readonly SemaphoreSlim lightingAutoApplyLock = new(1, 1);
-    private readonly Dictionary<LightingZone, PendingLightingEdit> pendingLightingEdits = [];
     private readonly SemaphoreSlim performanceAutoApplyLock = new(1, 1);
     private readonly SemaphoreSlim customPerformanceAutoApplyLock = new(1, 1);
     private readonly SemaphoreSlim fanAutoApplyLock = new(1, 1);
     private readonly SemaphoreSlim batteryAutoApplyLock = new(1, 1);
-    private readonly LightingMutationVersions lightingMutationVersions = new();
-    private long lightingSleepApplyVersion;
     private long performanceAutoApplyVersion;
     private long customPerformanceAutoApplyVersion;
     private long profileDrawerRefreshVersion;
@@ -189,8 +185,8 @@ public partial class MainWindow : Window
                 _ => Task.CompletedTask
             };
             OpenDrawer();
-            await initialization;
             if (action == "灯光调控") SynchronizeLightingZoneButtons();
+            await initialization;
         }
     }
 
@@ -229,6 +225,14 @@ public partial class MainWindow : Window
         }
     }
 
+    private void CheckForUpdates_Click(object sender, RoutedEventArgs e) => _ = ViewModel.CheckForUpdatesNowAsync();
+
+    private void PossibleUpdateBadge_Click(object sender, RoutedEventArgs e)
+    {
+        ViewModel.DismissPossibleUpdateNotice();
+        AnnouncementLink_Click(sender, e);
+    }
+
     private void MonitorPosition_Click(object sender, RoutedEventArgs e)
     {
         if (sender is FrameworkElement { Tag: string preset } &&
@@ -261,130 +265,58 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void LightingPreset_Click(object sender, RoutedEventArgs e)
+    private void LightingPreset_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not FrameworkElement { Tag: string profileId }) return;
         var profile = LightingProfileCatalog.BuiltIns.FirstOrDefault(candidate => candidate.Id == profileId);
-        if (profile is null) return;
-        foreach (var zone in profile.Zones.Select(configuration => configuration.Zone)) pendingLightingEdits.Remove(zone);
-        var version = lightingMutationVersions.Reserve(LightingZone.Keyboard);
-        await RunLatestLightingMutationAsync(
-            LightingZone.Keyboard, version,
-            () => ViewModel.ApplyLightingProfileAsync(profile, CancellationToken.None));
+        if (profile is not null) ViewModel.QueueLightingProfile(profile);
     }
 
-    private async void OemDefaultLighting_Click(object sender, RoutedEventArgs e)
-    {
-        pendingLightingEdits.Remove(LightingZone.Keyboard);
-        var version = lightingMutationVersions.Reserve(LightingZone.Keyboard);
-        await RunLatestLightingMutationAsync(
-            LightingZone.Keyboard, version,
-            () => ViewModel.ApplyOemDefaultLightingAsync(CancellationToken.None));
-    }
+    private void OemDefaultLighting_Click(object sender, RoutedEventArgs e) => ViewModel.QueueOemDefaultLighting();
 
     private void LightingZonePower_Click(object sender, RoutedEventArgs e) =>
-        QueueLightingAutoApply(powerChange: true);
+        ViewModel.QueueSelectedLightingEdit(powerChange: true);
 
     private void LightingEffect_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (!IsUserLightingComboBoxSelection(sender) ||
-            sender is not ComboBox { SelectedValue: LightingEffect effect }) return;
+        if (!IsLoaded || ViewModel.IsSynchronizingLightingEditor ||
+            sender is not ListBox { SelectedValue: LightingEffect effect }) return;
         ViewModel.SelectedLightingEffect = effect;
-        QueueLightingAutoApply();
+        ViewModel.QueueSelectedLightingEdit();
     }
 
     private void LightingDirection_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (!IsUserLightingComboBoxSelection(sender) ||
-            sender is not ComboBox { SelectedItem: LightingDirection direction }) return;
+            sender is not ComboBox { SelectedValue: LightingDirection direction }) return;
         ViewModel.SelectedLightingDirection = direction;
-        QueueLightingAutoApply();
+        ViewModel.QueueSelectedLightingEdit();
     }
 
     private void LightingSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
-        if (IsLoaded && !ViewModel.IsSynchronizingLightingEditor &&
-            sender is Slider slider && (slider.IsMouseCaptureWithin || slider.IsKeyboardFocusWithin))
-            QueueLightingAutoApply(TimeSpan.FromMilliseconds(220));
+        if (IsLoaded && sender is Slider slider && (slider.IsMouseCaptureWithin || slider.IsKeyboardFocusWithin))
+            ViewModel.QueueSelectedLightingEdit(TimeSpan.FromMilliseconds(120));
     }
 
     private void LightingColorHexBox_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
     {
-        if (ViewModel.CanEditLightingColor && !ViewModel.IsSynchronizingLightingEditor)
-            QueueLightingAutoApply(TimeSpan.FromMilliseconds(120));
+        if (IsLoaded && ViewModel.CanEditLightingColor) ViewModel.QueueSelectedLightingEdit();
     }
 
     private void LightingColorHexBox_KeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key != Key.Enter || !LightingColorHexBox.IsKeyboardFocusWithin) return;
-        QueueLightingAutoApply();
+        ViewModel.QueueSelectedLightingEdit();
         e.Handled = true;
     }
-
-    private void QueueLightingAutoApply(TimeSpan? delay = null, bool powerChange = false)
-    {
-        if (!IsLoaded || ViewModel.IsSynchronizingLightingEditor) return;
-        var configuration = ViewModel.CaptureLightingEditor();
-        if (configuration is null) return;
-        QueueCapturedLightingConfiguration(configuration, delay ?? TimeSpan.Zero, powerChange);
-    }
-
-    private void QueueCapturedLightingConfiguration(LightingZoneConfiguration configuration, TimeSpan delay, bool powerChange)
-    {
-        var version = lightingMutationVersions.Reserve(configuration.Zone);
-        // Coalesce within a zone only. A tab change or a sleep-timer edit must not discard
-        // a color request, and replacing a pending power request must retain its intent.
-        var request = new PendingLightingEdit(version, configuration,
-            powerChange || pendingLightingEdits.GetValueOrDefault(configuration.Zone)?.PowerChange == true);
-        pendingLightingEdits[configuration.Zone] = request;
-        _ = ApplyLatestLightingEditorAsync(request, delay);
-    }
-
-    private async Task ApplyLatestLightingEditorAsync(PendingLightingEdit request, TimeSpan delay)
-    {
-        if (delay > TimeSpan.Zero) await Task.Delay(delay);
-        if (pendingLightingEdits.GetValueOrDefault(request.Configuration.Zone) != request) return;
-
-        await lightingAutoApplyLock.WaitAsync();
-        try
-        {
-            if (pendingLightingEdits.GetValueOrDefault(request.Configuration.Zone) != request) return;
-            pendingLightingEdits.Remove(request.Configuration.Zone);
-            if (request.PowerChange)
-                await ViewModel.SetLightingZonePowerAsync(request.Configuration, CancellationToken.None);
-            else
-                await ViewModel.ApplyLightingConfigurationAsync(request.Configuration, CancellationToken.None);
-        }
-        finally
-        {
-            lightingAutoApplyLock.Release();
-        }
-    }
-
-    private sealed record PendingLightingEdit(long Version, LightingZoneConfiguration Configuration, bool PowerChange);
 
     private void LightingSleepTimer_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (!IsUserLightingComboBoxSelection(sender) ||
             sender is not ComboBox { SelectedValue: int seconds }) return;
         ViewModel.LightingSleepSeconds = seconds;
-        var version = Interlocked.Increment(ref lightingSleepApplyVersion);
-        _ = ApplyLatestLightingSleepTimerAsync(version);
-    }
-
-    private async Task ApplyLatestLightingSleepTimerAsync(long version)
-    {
-        await lightingAutoApplyLock.WaitAsync();
-        try
-        {
-            if (version == Volatile.Read(ref lightingSleepApplyVersion) &&
-                ViewModel.CanApplyLightingSleepTimer)
-                await ViewModel.ApplyLightingSleepTimerAsync(CancellationToken.None);
-        }
-        finally
-        {
-            lightingAutoApplyLock.Release();
-        }
+        ViewModel.QueueLightingSleepTimer();
     }
 
     private bool IsUserComboBoxSelection(object sender) =>
@@ -396,34 +328,14 @@ public partial class MainWindow : Window
         (comboBox.IsDropDownOpen || comboBox.IsKeyboardFocusWithin) &&
         !ViewModel.IsSynchronizingLightingEditor;
 
-    private async Task RunLatestLightingMutationAsync(LightingZone zone, long version, Func<Task> mutation)
-    {
-        await lightingAutoApplyLock.WaitAsync();
-        try
-        {
-            if (lightingMutationVersions.IsCurrent(zone, version)) await mutation();
-        }
-        finally
-        {
-            lightingAutoApplyLock.Release();
-        }
-    }
-
-    private async void ApplyImportedLighting_Click(object sender, RoutedEventArgs e)
-    {
-        pendingLightingEdits.Remove(LightingZone.Keyboard);
-        var version = lightingMutationVersions.Reserve(LightingZone.Keyboard);
-        await RunLatestLightingMutationAsync(
-            LightingZone.Keyboard, version,
-            () => ViewModel.ApplyImportedLightingProfileAsync(CancellationToken.None));
-    }
+    private void ApplyImportedLighting_Click(object sender, RoutedEventArgs e) => ViewModel.QueueImportedLightingProfile();
 
     private void LightingColorChip_Click(object sender, RoutedEventArgs e)
     {
         if (sender is FrameworkElement { Tag: string color })
         {
             ViewModel.SetLightingColor(color);
-            QueueLightingAutoApply();
+            ViewModel.QueueSelectedLightingEdit();
         }
     }
 
@@ -1207,6 +1119,8 @@ public partial class MainWindow : Window
             AppTheme.Apply(Resources, ViewModel.SelectedUiThemeCode);
             SynchronizeLightingZoneButtons();
         }
+        if (e.PropertyName == nameof(MainWindowViewModel.SelectedLightingZone))
+            SynchronizeLightingZoneButtons();
         if (e.PropertyName == nameof(MainWindowViewModel.SelectedUiLanguageCode))
             ApplyWindowGeometry();
         if (e.PropertyName is nameof(MainWindowViewModel.ActiveDrawer) or nameof(MainWindowViewModel.IsShutdownScheduled))

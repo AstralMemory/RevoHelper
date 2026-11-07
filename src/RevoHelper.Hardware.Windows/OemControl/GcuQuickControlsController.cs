@@ -8,7 +8,10 @@ public sealed class GcuQuickControlsController : IQuickControlsController
     private readonly IGcuQuickControlsChannel channel;
     private readonly Func<TimeSpan, CancellationToken, Task> verificationDelay;
     private readonly SemaphoreSlim liquidCoolingOperationLock = new(1, 1);
-    private readonly SemaphoreSlim lightingOperationLock = new(1, 1);
+    private readonly SemaphoreSlim keyboardLightingLock = new(1, 1);
+    // Turning the LOGO off can also turn the coast light bar off, so they share one lock.
+    private readonly SemaphoreSlim lightbarLightingLock = new(1, 1);
+    private readonly SemaphoreSlim waterLightingLock = new(1, 1);
     private readonly ConcurrentDictionary<LightingZone, LightingZoneState> lightingZoneCache = new();
 
     public GcuQuickControlsController(
@@ -199,9 +202,10 @@ public sealed class GcuQuickControlsController : IQuickControlsController
     public async ValueTask<ControlResult> SetLightingZonePowerAsync(
         LightingZone zone, bool enabled, CancellationToken cancellationToken)
     {
-        await lightingOperationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var zoneLock = LightingLockFor(zone);
+        await zoneLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try { return await SetLightingZonePowerCoreAsync(zone, enabled, cancellationToken).ConfigureAwait(false); }
-        finally { lightingOperationLock.Release(); }
+        finally { zoneLock.Release(); }
     }
 
     private async ValueTask<ControlResult> SetLightingZonePowerCoreAsync(
@@ -251,10 +255,18 @@ public sealed class GcuQuickControlsController : IQuickControlsController
     public async ValueTask<ControlResult> ApplyLightingZoneAsync(
         LightingZoneConfiguration configuration, CancellationToken cancellationToken)
     {
-        await lightingOperationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var zoneLock = LightingLockFor(configuration.Zone);
+        await zoneLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try { return await ApplyLightingZoneCoreAsync(configuration, cancellationToken).ConfigureAwait(false); }
-        finally { lightingOperationLock.Release(); }
+        finally { zoneLock.Release(); }
     }
+
+    private SemaphoreSlim LightingLockFor(LightingZone zone) => zone switch
+    {
+        LightingZone.Keyboard => keyboardLightingLock,
+        LightingZone.CoastLightbar or LightingZone.Logo => lightbarLightingLock,
+        _ => waterLightingLock
+    };
 
     private async ValueTask<ControlResult> ApplyLightingZoneCoreAsync(
         LightingZoneConfiguration configuration,
@@ -366,8 +378,32 @@ public sealed class GcuQuickControlsController : IQuickControlsController
                 $"{LightingZoneLabel(configuration.Zone)}命令已发送；仅确认电源已{(configuration.Enabled ? "开启" : "关闭")}，灯效与颜色未回报，请观察实体灯。");
         if (LightingMatches(state?.Configuration, configuration))
             return new(true, $"{LightingZoneLabel(configuration.Zone)}灯效已应用并回读确认。");
+
+        // The first status can be the echo of the power command sent just before this
+        // write, which still shows the previous effect. Ask once more before judging.
+        await verificationDelay(TimeSpan.FromMilliseconds(350), cancellationToken).ConfigureAwait(false);
+        var settled = (await ReadLightingZoneAsync(configuration.Zone, cancellationToken).ConfigureAwait(false))?.Configuration;
+        if (LightingMatches(settled, configuration))
+            return new(true, $"{LightingZoneLabel(configuration.Zone)}灯效已应用并回读确认。");
+
+        var parameters = settled is null ? [] : UnconfirmedLightingParameters(settled, configuration);
+        var detail = settled is null
+            ? "no readback"
+            : $"expected {configuration.Effect} enabled={configuration.Enabled}, read {settled.Effect} enabled={settled.Enabled}; " +
+              string.Join(", ", parameters.Select(parameter => $"{parameter.Name} expected {parameter.Expected} read {parameter.Actual}"));
+        // Power and effect are what the user chose and can see; a parameter that does not
+        // read back is reported as unconfirmed rather than as a failed write.
+        if (settled?.Enabled == configuration.Enabled && settled.Effect == configuration.Effect)
+            return new(true,
+                $"{LightingZoneLabel(configuration.Zone)}灯效已确认；{string.Join("、", parameters.Select(parameter => parameter.Name))}未回读确认，请以实际灯光为准。")
+            {
+                UnconfirmedDetail = detail
+            };
         return ControlResult.Rejected(
-            $"{LightingZoneLabel(configuration.Zone)}命令已发送，但回读未匹配目标状态，未确认生效。");
+            $"{LightingZoneLabel(configuration.Zone)}命令已发送，但回读未匹配目标状态，未确认生效。") with
+        {
+            UnconfirmedDetail = detail
+        };
     }
 
     private async ValueTask<ControlResult> TurnOffLogoPreservingCoastAsync(CancellationToken cancellationToken)
@@ -701,18 +737,33 @@ public sealed class GcuQuickControlsController : IQuickControlsController
     {
         if (actual is null || actual.Enabled != expected.Enabled) return false;
         if (!expected.Enabled || expected.Effect == RevoHelper.Core.Control.LightingEffect.OemDefault) return true;
-        if (actual.Effect != expected.Effect) return false;
+        return actual.Effect == expected.Effect && UnconfirmedLightingParameters(actual, expected).Count == 0;
+    }
 
+    /// <summary>Only parameters the selected effect uses: others are not visible on the hardware.</summary>
+    private static List<(string Name, string Expected, string Actual)> UnconfirmedLightingParameters(
+        LightingZoneConfiguration actual,
+        LightingZoneConfiguration expected)
+    {
+        var parameters = new List<(string Name, string Expected, string Actual)>();
+        var isStatic = expected.Effect == RevoHelper.Core.Control.LightingEffect.Static;
         if (expected.Zone == LightingZone.LiquidCooler)
-            return expected.Effect != RevoHelper.Core.Control.LightingEffect.Static || actual.Color == expected.Color;
-
-        if (actual.Brightness != expected.Brightness || actual.Speed != expected.Speed) return false;
-        var expectedDirection = expected.Zone == LightingZone.Keyboard &&
-                                expected.Effect == RevoHelper.Core.Control.LightingEffect.Wave
-            ? expected.Direction
-            : LightingDirection.None;
-        if (actual.Direction != expectedDirection) return false;
-        return !UsesUserColor(expected.Effect) || actual.Color == expected.Color;
+        {
+            if (isStatic && actual.Color != expected.Color)
+                parameters.Add(("颜色", expected.Color.Hex, actual.Color.Hex));
+            return parameters;
+        }
+        if (actual.Brightness != expected.Brightness)
+            parameters.Add(("亮度", expected.Brightness.ToString(), actual.Brightness.ToString()));
+        if (!isStatic && actual.Speed != expected.Speed)
+            parameters.Add(("速度", expected.Speed.ToString(), actual.Speed.ToString()));
+        if (expected.Zone == LightingZone.Keyboard &&
+            expected.Effect == RevoHelper.Core.Control.LightingEffect.Wave &&
+            actual.Direction != expected.Direction)
+            parameters.Add(("方向", expected.Direction.ToString(), actual.Direction.ToString()));
+        if (UsesUserColor(expected.Effect) && actual.Color != expected.Color)
+            parameters.Add(("颜色", expected.Color.Hex, actual.Color.Hex));
+        return parameters;
     }
 
     private static LightingZoneState? MergeLightingState(

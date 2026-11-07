@@ -69,7 +69,9 @@ public static class UiTextCatalog
         Rule(@"^已只读加载 (\d+) 个 OEM 功耗档案$", m => $"Read {m.Groups[1].Value} OEM power profiles"),
         Rule(@"^(键盘背光|海岸灯带|LOGO 灯|水冷灯)：调整后自动应用，仅控制当前分区。$", m => TranslateKnown(m.Groups[1].Value) + ": Changes apply to this zone only."),
         Rule(@"^(键盘背光|海岸灯带|LOGO 灯|水冷灯)已通过 GCU 状态事件同步。$", m => TranslateKnown(m.Groups[1].Value) + " synchronized through GCU."),
-        Rule(@"^已发现 (\d+) 个灯光分区；每个标签只控制对应硬件，键盘方案不会联动其它灯区。$", m => $"Found {m.Groups[1].Value} lighting zones. Each tab controls its own zone only."),
+        Rule(@"^(键盘背光|海岸灯带|LOGO 灯|水冷灯)灯效已确认；([亮度速方向颜色、]+)未回读确认，请以实际灯光为准。$", m =>
+            $"{TranslateKnown(m.Groups[1].Value)} effect confirmed. {m.Groups[2].Value.Replace("亮度", "brightness").Replace("速度", "speed").Replace("方向", "direction").Replace("颜色", "color").Replace("、", ", ")} not confirmed by readback; check the actual light."),
+        Rule(@"^已发现 (\d+) 个灯光分区；调整后自动应用。$", m => $"Found {m.Groups[1].Value} lighting zones. Changes apply automatically."),
         Rule(@"^发现 (\d+) 个兼容水冷设备，请选择后连接。$", m => $"Found {m.Groups[1].Value} compatible coolers. Select one to connect."),
         Rule(@"^GCU 配置回读 · PL1 (.+) W · PL2 (.+) W · Boost (.+)$", m => $"GCU readback · PL1 {m.Groups[1].Value} W · PL2 {m.Groups[2].Value} W · Boost {m.Groups[3].Value}"),
         Rule(@"^GCU 配置回读 · (.+) · PL1 (.+) W（(启用|未启用)） · PL2 (.+) W（(启用|未启用)）$", m => $"GCU readback · {m.Groups[1].Value} · PL1 {m.Groups[2].Value} W ({TranslateKnown(m.Groups[3].Value)}) · PL2 {m.Groups[4].Value} W ({TranslateKnown(m.Groups[5].Value)})"),
@@ -255,7 +257,13 @@ public static class UiTextCatalog
 键盘灯光方案	Keyboard presets
 键盘低亮静态 · 深蓝	Dim static keyboard · Deep blue
 键盘青蓝呼吸 · 低干扰	Cyan keyboard breathing · Subtle
-键盘与海岸灯带自动熄灯（秒级档位）	Keyboard and light-bar sleep timer (seconds)
+键盘与灯带自动熄灯	Keyboard and light-bar sleep timer
+默认背光	Default backlight
+默认方向	Default direction
+从左到右	Left to right
+从右到左	Right to left
+从下到上	Bottom to top
+从上到下	Top to bottom
 接入电源适配器后自动启动设备	Start the laptop when AC power is connected
 解锁后可直接拖动小窗。	Unlock to drag the monitor window.
 仅本次会话持有；退出自动恢复。生效可能延迟约 5–10 秒	Session only; restored on exit. Applying may take 5–10 seconds.
@@ -557,7 +565,7 @@ RevoHelper 键盘灯光方案 (*.revolight.json)|*.revolight.json	RevoHelper key
 烟火	Fireworks
 极光	Aurora
 游戏	Game
-冲突	Impact
+冲击	Impact
 流星	Meteor
 多彩	Colorful
 旋转	Rotate

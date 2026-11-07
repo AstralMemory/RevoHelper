@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.ComponentModel;
 using System.Collections.ObjectModel;
@@ -7,6 +8,7 @@ using RevoHelper.App.Monitoring;
 using RevoHelper.App.Lifecycle;
 using RevoHelper.App.Settings;
 using RevoHelper.App.SystemControl;
+using RevoHelper.App.Updates;
 using RevoHelper.Core.Dashboard;
 using RevoHelper.Core.Telemetry;
 using RevoHelper.Core.Fans;
@@ -39,6 +41,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
     private readonly IOemFanController? fanController;
     private readonly IFanBoostController? fanBoostController;
     private readonly IShutdownScheduler? shutdownScheduler;
+    private readonly ILatestReleaseSource? latestReleaseSource;
     private readonly Func<bool> officialConsoleRunningProbe;
     private readonly Func<DateTimeOffset> utcNow;
     private readonly PerformanceScheduleController? scheduleController;
@@ -60,9 +63,6 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
     };
     private readonly Dictionary<string, int> frequencyDraftsByProfile = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, bool> frequencyConfiguredByProfile = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<LightingZone, LightingLocalTarget> lightingLocalTargets = [];
-    private readonly Dictionary<LightingZone, LightingZoneConfiguration> lightingEditorDrafts = [];
-    private readonly Dictionary<LightingZone, string> lightingZoneFeedback = [];
     private string statusMessage = "正在初始化设备状态…";
     private string telemetryStatusMessage = "正在初始化设备状态…";
     private bool hasOperationFeedback;
@@ -86,12 +86,12 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
     private bool isApplyingPlatformMode;
     private long platformRequestRevision;
     private long platformCommandRevision = -1;
+    private CancellationTokenSource newerPlatformRequest = new();
     private PlatformModeSelection? confirmedPlatformSelection;
     private readonly SemaphoreSlim performanceTransitionGate = new(1, 1);
     private volatile bool isShuttingDown;
     private PlatformModeSelection? pendingFrequencyObservation;
     private long pendingFrequencyObservationRevision;
-    private PlatformModeSelection? lastSynchronizedPlatformSelection;
     private PlatformModeSelection? modeOnlyPlatformSelection;
     private long platformObservationRevision;
     private LocalizedUiCopy localizedUiCopy;
@@ -115,19 +115,12 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
     private bool isWebcamEnabled;
     private bool isCopilotKeyEnabled;
     private bool isKeyboardLightingEnabled;
-    private readonly Dictionary<LightingZone, LightingZoneState> lightingZoneStates = [];
-    private LightingProfile? importedLightingProfile;
-    private LightingZone selectedLightingZone = LightingZone.Keyboard;
-    private LightingEffect selectedLightingEffect = LightingEffect.OemDefault;
     private bool isSelectedLightingZoneEnabled = true;
     private string lightingColorHex = "#8000FF";
     private int lightingBrightness = 3;
     private int lightingSpeed = 2;
-    private LightingDirection selectedLightingDirection = LightingDirection.Left;
     private int lightingSleepSeconds = 120;
-    private bool isLightingBusy;
     private bool isReadingLighting;
-    private LightingZoneConfiguration? pendingLightingConfiguration;
     private string lightingStatusText = "等待读取灯光设备能力。";
     private string keyboardControlsStatusText = "等待读取官方按键与背光状态。";
     private bool isLiquidCoolingConnected;
@@ -217,8 +210,10 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
         ExperimentalControlsViewModel? experiments = null,
         IFanBoostController? fanBoostController = null,
         IShutdownScheduler? shutdownScheduler = null,
-        Action<string, string>? diagnostic = null)
+        Action<string, string>? diagnostic = null,
+        ILatestReleaseSource? latestReleaseSource = null)
     {
+        this.latestReleaseSource = latestReleaseSource;
         Experiments = experiments ?? new();
         Dashboard = dashboard;
         deviceSampleTimes.Clear();
@@ -320,7 +315,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
 
     public IReadOnlyList<LightingProfile> LightingBuiltInProfiles => LightingProfileCatalog.BuiltIns;
 
-    public IReadOnlyList<LightingDirection> LightingDirections { get; } = Enum.GetValues<LightingDirection>();
+    public IReadOnlyList<LightingDirectionOption> LightingDirectionOptions { get; } = LightingDirectionOption.All;
 
     public IReadOnlyList<LightingSleepOption> LightingSleepOptions { get; } =
     [
@@ -763,9 +758,9 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
     public bool IsPlatformSwitchPending => isApplyingPlatformMode &&
         Volatile.Read(ref platformCommandRevision) == Volatile.Read(ref platformRequestRevision);
 
-    public string ReleaseVersionText => "V1.0.3";
+    public string ReleaseVersionText => "V1.0.4";
 
-    public string ReleaseBadgeText => "V1.0.3";
+    public string ReleaseBadgeText => "V1.0.4";
 
     public string AppVersionText => $"RevoHelper {ReleaseVersionText} · {UiCopy.OpenSourceAndFree}";
 
@@ -794,6 +789,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
             OnPropertyChanged();
             OnPropertyChanged(nameof(UiCopy));
             OnPropertyChanged(nameof(Announcements));
+            RefreshUpdatePresentation();
             RefreshModePresentation();
             OnPropertyChanged(nameof(DrawerTitle));
             OnPropertyChanged(nameof(DrawerDescription));
@@ -873,160 +869,6 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
     public bool SupportsWebcamToggle { get; private set; }
     public bool SupportsCopilotKeyToggle { get; private set; }
 
-    public bool IsKeyboardLightingEnabled
-    {
-        get => isKeyboardLightingEnabled;
-        private set { if (isKeyboardLightingEnabled == value) return; isKeyboardLightingEnabled = value; OnPropertyChanged(); }
-    }
-
-    public LightingZone SelectedLightingZone
-    {
-        get => selectedLightingZone;
-        set
-        {
-            if (selectedLightingZone == value) return;
-            selectedLightingZone = value;
-            OnPropertyChanged();
-            OnPropertyChanged(nameof(SelectedLightingZoneLabel));
-            OnPropertyChanged(nameof(IsKeyboardLightingZoneSelected));
-            OnPropertyChanged(nameof(CanSelectLightingDirection));
-            OnPropertyChanged(nameof(CanEditLightingColor));
-            OnPropertyChanged(nameof(IsWaterDynamicLightingEffectSelected));
-            OnPropertyChanged(nameof(IsFirmwarePaletteLightingEffectSelected));
-            OnPropertyChanged(nameof(IsOemDefaultLightingEffectSelected));
-            LoadLightingEditor(value);
-            LightingStatusText = lightingZoneFeedback.GetValueOrDefault(value) ??
-                $"{LightingZoneLabel(value)}：调整后自动应用，仅控制当前分区。";
-        }
-    }
-
-    public string SelectedLightingZoneLabel => LightingZoneLabel(SelectedLightingZone);
-
-    public LightingEffect SelectedLightingEffect
-    {
-        get => selectedLightingEffect;
-        set
-        {
-            if (selectedLightingEffect == value) return;
-            selectedLightingEffect = value;
-            RememberLightingEditorDraft();
-            OnPropertyChanged();
-            OnPropertyChanged(nameof(CanSelectLightingDirection));
-            OnPropertyChanged(nameof(CanEditLightingColor));
-            OnPropertyChanged(nameof(IsWaterDynamicLightingEffectSelected));
-            OnPropertyChanged(nameof(IsFirmwarePaletteLightingEffectSelected));
-            OnPropertyChanged(nameof(IsOemDefaultLightingEffectSelected));
-        }
-    }
-
-    public bool IsSelectedLightingZoneEnabled
-    {
-        get => isSelectedLightingZoneEnabled;
-        set
-        {
-            if (isSelectedLightingZoneEnabled == value) return;
-            isSelectedLightingZoneEnabled = value;
-            RememberLightingEditorDraft();
-            OnPropertyChanged();
-            OnPropertyChanged(nameof(LightingEditorApplyHint));
-        }
-    }
-
-    public string LightingEditorApplyHint => IsSelectedLightingZoneEnabled
-        ? "调整后自动应用并回读"
-        : "灯区已关闭：参数仅保存，打开后自动应用";
-
-    public string LightingColorHex
-    {
-        get => lightingColorHex;
-        set { if (lightingColorHex == value) return; lightingColorHex = value; RememberLightingEditorDraft(); OnPropertyChanged(); }
-    }
-
-    public int LightingBrightness
-    {
-        get => lightingBrightness;
-        set { var clamped = Math.Clamp(value, 0, 4); if (lightingBrightness == clamped) return; lightingBrightness = clamped; RememberLightingEditorDraft(); OnPropertyChanged(); }
-    }
-
-    public int LightingSpeed
-    {
-        get => lightingSpeed;
-        set { var clamped = Math.Clamp(value, 1, 4); if (lightingSpeed == clamped) return; lightingSpeed = clamped; RememberLightingEditorDraft(); OnPropertyChanged(); }
-    }
-
-    public LightingDirection SelectedLightingDirection
-    {
-        get => selectedLightingDirection;
-        set { if (selectedLightingDirection == value) return; selectedLightingDirection = value; RememberLightingEditorDraft(); OnPropertyChanged(); }
-    }
-
-    public int LightingSleepSeconds
-    {
-        get => lightingSleepSeconds;
-        set { if (lightingSleepSeconds == value) return; lightingSleepSeconds = value; OnPropertyChanged(); }
-    }
-
-    public bool IsLightingBusy
-    {
-        get => isLightingBusy;
-        private set
-        {
-            if (isLightingBusy == value) return;
-            isLightingBusy = value;
-            OnPropertyChanged();
-            OnPropertyChanged(nameof(CanApplyLighting));
-            OnPropertyChanged(nameof(CanToggleSelectedLightingZonePower));
-            OnPropertyChanged(nameof(CanApplyLightingSleepTimer));
-        }
-    }
-
-    public bool CanApplyLighting => quickControlsController is not null && !IsLightingBusy &&
-                                    lightingZoneStates.GetValueOrDefault(SelectedLightingZone)?.Available == true &&
-                                    (SelectedLightingZone != LightingZone.Keyboard || !IsKeyboardLightingPowerOnly);
-
-    public bool CanToggleSelectedLightingZonePower => quickControlsController is not null && !IsLightingBusy &&
-                                    lightingZoneStates.GetValueOrDefault(SelectedLightingZone)?.Available == true;
-
-    public bool CanApplyLightingSleepTimer => quickControlsController is not null && !IsLightingBusy &&
-                                               (IsKeyboardLightingZoneAvailable && !IsKeyboardLightingPowerOnly || IsCoastLightingZoneAvailable);
-
-    public bool IsSynchronizingLightingEditor { get; private set; }
-
-    public bool IsKeyboardLightingZoneSelected => SelectedLightingZone == LightingZone.Keyboard;
-
-    public bool CanSelectLightingDirection => IsKeyboardLightingZoneSelected && SelectedLightingEffect == LightingEffect.Wave;
-
-    public bool IsWaterDynamicLightingEffectSelected =>
-        SelectedLightingZone == LightingZone.LiquidCooler && SelectedLightingEffect != LightingEffect.Static;
-
-    public bool IsOemDefaultLightingEffectSelected => SelectedLightingEffect == LightingEffect.OemDefault;
-
-    public bool IsFirmwarePaletteLightingEffectSelected =>
-        SelectedLightingZone != LightingZone.LiquidCooler &&
-        !IsOemDefaultLightingEffectSelected &&
-        !UsesUserLightingColor(SelectedLightingEffect);
-
-    public bool CanEditLightingColor =>
-        !IsOemDefaultLightingEffectSelected &&
-        !IsWaterDynamicLightingEffectSelected &&
-        !IsFirmwarePaletteLightingEffectSelected;
-
-    public string LightingStatusText
-    {
-        get => lightingStatusText;
-        private set
-        {
-            lightingZoneFeedback[SelectedLightingZone] = value;
-            if (lightingStatusText == value) return;
-            lightingStatusText = value;
-            OnPropertyChanged();
-        }
-    }
-
-    public bool IsKeyboardLightingZoneAvailable => IsLightingZoneAvailable(LightingZone.Keyboard);
-    public bool IsCoastLightingZoneAvailable => IsLightingZoneAvailable(LightingZone.CoastLightbar);
-    public bool IsLogoLightingZoneAvailable => IsLightingZoneAvailable(LightingZone.Logo);
-    public bool IsWaterLightingZoneAvailable => IsLightingZoneAvailable(LightingZone.LiquidCooler);
 
     public string KeyboardControlsStatusText
     {
@@ -2275,488 +2117,17 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
 
     public void SelectProfile(string profileId)
     {
-        if (Profiles.Any(profile => profile.Id == profileId))
-        {
-            SelectedProfileId = profileId;
-            SwitchFanDraftForCurrentProfile();
-            RefreshFanPoints();
-            SwitchFrequencyDraftForCurrentProfile();
-            StatusMessage = "界面预览已切换 · 未向硬件发送指令";
-        }
+        if (ShowProfile(profileId)) StatusMessage = "界面预览已切换 · 未向硬件发送指令";
     }
 
-    public async Task<bool> InitializePlatformModeAsync(CancellationToken cancellationToken)
+    private bool ShowProfile(string profileId)
     {
-        if (platformModeController is null || isApplyingPlatformMode) return false;
-        var requestRevision = Volatile.Read(ref platformRequestRevision);
-        try
-        {
-            var live = await platformModeController.ReadPlatformModeAsync(cancellationToken);
-            if (live is null || isApplyingPlatformMode ||
-                requestRevision != Volatile.Read(ref platformRequestRevision)) return false;
-            ConfirmPlatformSelection(live);
-            ApplyLivePlatformSelection(live);
-            lastSynchronizedPlatformSelection = live;
-            return true;
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            StatusMessage = $"整机档位读取失败 · {exception.Message}";
-            return false;
-        }
-    }
-
-    public async Task<bool> ApplyPlatformProfileAsync(string profileId, CancellationToken cancellationToken)
-    {
-        if (platformModeController is null) return false;
-        var selection = profileId switch
-        {
-            "office" => new PlatformModeSelection(PlatformMode.Office),
-            "balanced" => new PlatformModeSelection(PlatformMode.Balanced),
-            "turbo" => new PlatformModeSelection(PlatformMode.TurboQuiet),
-            "custom" => new PlatformModeSelection(PlatformMode.Custom, SelectedCustomProfileIndex),
-            _ => null
-        };
-        if (selection is null) return false;
-        return await ApplyPlatformSelectionAsync(selection, cancellationToken, basicTurbo: profileId == "turbo");
-    }
-
-    public Task<bool> ApplyTurboStrategyAsync(TurboStrategy strategy, CancellationToken cancellationToken) =>
-        ApplyPlatformSelectionAsync(
-            new(strategy is TurboStrategy.HighEfficiency ? PlatformMode.TurboHigh : PlatformMode.TurboQuiet),
-            cancellationToken);
-
-    public Task<bool> ApplyCustomProfileAsync(int profileIndex, CancellationToken cancellationToken)
-    {
-        if (profileIndex is < 1 or > 3) return Task.FromResult(false);
-        return ApplyPlatformSelectionAsync(new(PlatformMode.Custom, profileIndex), cancellationToken);
-    }
-
-    public Task<bool> ApplyPlatformSelectionFromTrayAsync(
-        PlatformModeSelection selection,
-        CancellationToken cancellationToken) =>
-        ApplyPlatformSelectionAsync(selection, cancellationToken);
-
-    private async Task<bool> ApplyPlatformSelectionAsync(
-        PlatformModeSelection selection,
-        CancellationToken cancellationToken,
-        bool basicTurbo = false)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (isShuttingDown || platformModeController is null) return false;
-        if (!CanAttemptPlatformMode(selection.Mode))
-        {
-            StatusMessage = "当前控制接口尚未确认支持该狂暴子策略；未发送指令。";
-            return false;
-        }
-
-        var previousPresentation = confirmedPlatformSelection ?? CurrentPlatformSelection();
-        var requestRevision = Interlocked.Increment(ref platformRequestRevision);
-        TraceControl("performance-request", $"request={requestRevision} target={selection.Mode}:{selection.ProfileIndex} confirmed={confirmedPlatformSelection?.Mode} chargePending={Experiments.Charge.RecoveryPending} dynamicPending={Experiments.HasRecoveryPending}");
-        Interlocked.Increment(ref platformObservationRevision);
-        isApplyingPlatformMode = true;
-        OnPropertyChanged(nameof(IsPlatformSwitchPending));
-        // A request may first reconcile an orphaned session. Keep the previous
-        // selection and do not advertise a GCU switch before preparation succeeds.
-        StatusMessage = Experiments.Charge.RecoveryPending
-            ? "正在核对并恢复上次控制状态，尚未发送档位指令…"
-            : "正在准备切换整机档位…";
-        NotifyCustomPerformanceAvailability();
-        RefreshPerformanceProperties();
-        var gateHeld = false;
-        try
-        {
-            await performanceTransitionGate.WaitAsync(cancellationToken);
-            gateHeld = true;
-            // A newer click supersedes requests that have not started writing yet.
-            if (isShuttingDown || requestRevision != Volatile.Read(ref platformRequestRevision)) return false;
-            TraceControl("performance-request", $"request={requestRevision} gate-acquired");
-            var succeeded = await ApplyPlatformSelectionCoreAsync(selection, requestRevision, cancellationToken, basicTurbo);
-            if (!succeeded && requestRevision == Volatile.Read(ref platformRequestRevision))
-                await RestorePlatformPresentationAsync(requestRevision, previousPresentation);
-            return succeeded;
-        }
-        catch (OperationCanceledException)
-        {
-            // Cancellation while queued must first let the in-flight switch finish;
-            // otherwise an old confirmation could arrive after the fallback was shown.
-            if (!gateHeld)
-            {
-                await performanceTransitionGate.WaitAsync(CancellationToken.None);
-                gateHeld = true;
-            }
-            if (requestRevision == Volatile.Read(ref platformRequestRevision))
-            {
-                StatusMessage = "档位切换已取消，正在同步实际档位。";
-                await RestorePlatformPresentationAsync(requestRevision, previousPresentation);
-            }
-            throw;
-        }
-        finally
-        {
-            TraceControl("performance-request", $"request={requestRevision} finished confirmed={confirmedPlatformSelection?.Mode}:{confirmedPlatformSelection?.ProfileIndex} latest={requestRevision == Volatile.Read(ref platformRequestRevision)} message={StatusMessage}");
-            if (requestRevision == Volatile.Read(ref platformRequestRevision))
-            {
-                isApplyingPlatformMode = false;
-                OnPropertyChanged(nameof(IsPlatformSwitchPending));
-                NotifyCustomPerformanceAvailability();
-                RefreshPerformanceProperties();
-            }
-            if (gateHeld) performanceTransitionGate.Release();
-        }
-    }
-
-    private async Task<bool> ApplyPlatformSelectionCoreAsync(
-        PlatformModeSelection selection,
-        long requestRevision,
-        CancellationToken cancellationToken,
-        bool basicTurbo)
-    {
-        if (platformModeController is null) return false;
-        bool IsLatestRequest() => requestRevision == Volatile.Read(ref platformRequestRevision);
-        var previousConfirmed = confirmedPlatformSelection;
-        PlatformModeSelection? retainedBasicTurbo = null;
-        try
-        {
-            if (!await PauseDynamicForManualControlAsync(cancellationToken))
-            {
-                TraceControl("performance-request", $"request={requestRevision} prepare-blocked reason={StatusMessage} dynamic={Experiments.DynamicMessage}");
-                return false;
-            }
-            TraceControl("performance-request", $"request={requestRevision} prepared");
-            if (!IsLatestRequest() || isShuttingDown) return false;
-            if (!CanAttemptPlatformMode(selection.Mode))
-            {
-                StatusMessage = "当前控制接口尚未确认支持该狂暴子策略；未发送指令。";
-                return false;
-            }
-            cancellationToken.ThrowIfCancellationRequested();
-            Volatile.Write(ref platformCommandRevision, requestRevision);
-            OnPropertyChanged(nameof(IsPlatformSwitchPending));
-            // Optimistic presentation is allowed only after preparation. Hardware
-            // confirmation remains separate, and failures still read back/restore it.
-            ApplyLivePlatformSelection(selection);
-            StatusMessage = "正在切换整机档位并等待 GCU 回读…";
-            // An explicit typed mode command can be verified without knowing the
-            // starting mode or a capability list. Keep an unobserved target out
-            // of the combined PL/Boost/frequency scheduler and its prerequisites.
-            var modeOnly = scheduleController is null || !SupportsPlatformMode(selection.Mode) ||
-                await platformModeController.ReadPlatformModeAsync(cancellationToken) is null;
-            TraceControl("performance-request", $"request={requestRevision} route={(modeOnly ? "mode-only" : "schedule")}");
-            ControlResult? basicResult = null;
-            if (basicTurbo)
-            {
-                basicResult = await platformModeController.SetBasicTurboModeAsync(selection.ProfileIndex, cancellationToken);
-                TraceControl("performance-request", $"request={requestRevision} basic-turbo={basicResult.Succeeded} reason={basicResult.Reason}");
-                if (basicResult.ConfirmedPlatform is { } confirmed)
-                {
-                    ConfirmPlatformSelection(confirmed);
-                    if (IsLatestRequest()) ApplyLivePlatformSelection(confirmed);
-                }
-                if (!basicResult.Succeeded)
-                {
-                    if (IsLatestRequest()) StatusMessage = basicResult.Reason;
-                    return false;
-                }
-                // The base command can preserve either firmware Turbo strategy. Use
-                // its actual mode for the saved Boost/frequency policy, and do not
-                // turn a base-card click into a subsequent strategy write.
-                selection = basicResult.ConfirmedPlatform ??
-                    await platformModeController.ReadPlatformModeAsync(cancellationToken) ?? selection;
-                if (selection.Mode is not (PlatformMode.TurboQuiet or PlatformMode.TurboHigh))
-                {
-                    if (IsLatestRequest()) StatusMessage = "基础狂暴档位未确认，未应用后续策略。";
-                    return false;
-                }
-                ConfirmPlatformSelection(selection);
-                retainedBasicTurbo = selection;
-                if (IsLatestRequest()) ApplyLivePlatformSelection(selection);
-                if (!IsLatestRequest() || isShuttingDown) return true;
-            }
-            if (modeOnly)
-            {
-                var modeResult = basicResult ?? await platformModeController.SetPlatformModeAsync(selection, cancellationToken);
-                TraceControl("performance-request", $"request={requestRevision} mode-result={modeResult.Succeeded} reason={modeResult.Reason}");
-                if (modeResult.ConfirmedPlatform is { } confirmed)
-                {
-                    ConfirmPlatformSelection(confirmed);
-                    if (IsLatestRequest()) ApplyLivePlatformSelection(confirmed);
-                }
-                if (!modeResult.Succeeded)
-                {
-                    await ReconcileRetainedPlatformAsync(modeResult.ConfirmedPlatform, modeResult.Reason,
-                        requestRevision, cancellationToken);
-                    return false;
-                }
-                ConfirmPlatformSelection(selection);
-                lastSynchronizedPlatformSelection = selection;
-                modeOnlyPlatformSelection = selection;
-                if (!IsLatestRequest()) return true;
-                StatusMessage = modeResult.Reason;
-                if (!ShouldSyncFrequencyAfterModeOnly(previousConfirmed, selection)) return true;
-                var modeOnlySettlement = await TrySettleFrequencyAsync(
-                    CreateFrequencyPolicy(selection), requestRevision, cancellationToken);
-                TraceControl("performance-request", $"request={requestRevision} mode-only-frequency={modeOnlySettlement.Succeeded} reason={modeOnlySettlement.Reason}");
-                if (!IsLatestRequest()) return true;
-                if (!modeOnlySettlement.Succeeded)
-                    StatusMessage = $"{modeResult.Reason} · {modeOnlySettlement.Reason}";
-                return modeOnlySettlement.Succeeded;
-            }
-
-            var schedule = CreateSchedule(selection);
-            var result = await scheduleController!.ApplyAsync(
-                schedule, platformAlreadySelected: basicTurbo, cancellationToken,
-                retainSelectedPlatformOnFailure: basicTurbo);
-            TraceControl("performance-request", $"request={requestRevision} schedule-result={result.Succeeded} reason={result.Reason}");
-            if (!result.Succeeded)
-            {
-                await ReconcileRetainedPlatformAsync(result.ConfirmedPlatform ?? retainedBasicTurbo, result.Reason,
-                    requestRevision, cancellationToken);
-                return false;
-            }
-            modeOnlyPlatformSelection = null;
-            ConfirmPlatformSelection(result.Readback?.Platform ?? selection);
-            lastSynchronizedPlatformSelection = selection;
-            if (!IsLatestRequest()) return true;
-            UpdatePerformanceReadback(result.Readback);
-            StatusMessage = "档位已切换，正在复查 Windows 频率策略…";
-            var frequencySettlement = await SettleFrequencyAfterPlatformSwitchAsync(
-                schedule.Frequency, requestRevision, cancellationToken);
-            TraceControl("performance-request", $"request={requestRevision} frequency-settlement={frequencySettlement.Succeeded} reason={frequencySettlement.Reason}");
-            if (!IsLatestRequest()) return true;
-            SavePerformanceProfile(selection);
-            StatusMessage = frequencySettlement.Succeeded
-                ? frequencySettlement.Reason
-                : $"{result.Reason} · {frequencySettlement.Reason}";
-            return frequencySettlement.Succeeded;
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            TraceControl("performance-request", $"request={requestRevision} exception={exception.GetType().Name}: {exception.Message}");
-            if (retainedBasicTurbo is not null)
-            {
-                // The basic mode was already confirmed, so an unrelated policy read
-                // failure must not leave the previous profile's frequency cap behind.
-                await ReconcileRetainedPlatformAsync(retainedBasicTurbo,
-                    $"已保留当前整机档位，后续策略未完全应用：{exception.Message}",
-                    requestRevision, cancellationToken);
-                return false;
-            }
-            if (IsLatestRequest()) StatusMessage = $"整机档位切换异常 · {exception.Message}";
-            return false;
-        }
-    }
-
-    private async Task ReconcileRetainedPlatformAsync(PlatformModeSelection? actual, string reason,
-        long requestRevision, CancellationToken cancellationToken)
-    {
-        if (actual is not null)
-        {
-            ConfirmPlatformSelection(actual);
-            if (requestRevision != Volatile.Read(ref platformRequestRevision) || isShuttingDown) return;
-            ApplyLivePlatformSelection(actual);
-            // Keep the failed strategy's PL/Boost draft out of this path, while
-            // removing a prior Office cap or restoring the actual mode's saved cap.
-            var frequencyResult = await TrySettleFrequencyAsync(
-                CreateFrequencyPolicy(actual), requestRevision, cancellationToken);
-            if (!frequencyResult.Succeeded) reason += $" · {frequencyResult.Reason}";
-        }
-        if (requestRevision == Volatile.Read(ref platformRequestRevision)) StatusMessage = reason;
-    }
-
-    private async Task<ControlResult> TrySettleFrequencyAsync(
-        ProcessorFrequencyLimitPolicy expected,
-        long requestRevision,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            return await SettleFrequencyAfterPlatformSwitchAsync(expected, requestRevision, cancellationToken);
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            return ControlResult.Rejected($"频率策略同步失败：{exception.Message}");
-        }
-    }
-
-    /// <summary>
-    /// A mode-only switch still must not leave a cap this app applied for the previous
-    /// profile. Without a saved setting on either side it touches nothing, so an unknown
-    /// or externally set Windows value is never replaced by a default.
-    /// </summary>
-    private bool ShouldSyncFrequencyAfterModeOnly(PlatformModeSelection? previous, PlatformModeSelection target) =>
-        frequencyLimitController is not null &&
-        (frequencyConfiguredByProfile.GetValueOrDefault(FrequencyProfileKey(target)) ||
-         previous is not null && previous != target &&
-         CreateFrequencyPolicy(previous) != ProcessorFrequencyLimitPolicy.Uniform(0));
-
-    private void ConfirmPlatformSelection(PlatformModeSelection selection)
-    {
-        if (confirmedPlatformSelection == selection) return;
-        confirmedPlatformSelection = selection;
-        OnPropertyChanged(nameof(ConfirmedPlatformSelection));
-    }
-
-    private async Task RestorePlatformPresentationAsync(long requestRevision, PlatformModeSelection fallback)
-    {
-        var reason = StatusMessage;
-        var actual = confirmedPlatformSelection ?? fallback;
-        var readSucceeded = false;
-        try
-        {
-            using var readTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-            var live = await platformModeController!.ReadPlatformModeAsync(readTimeout.Token);
-            if (live is not null)
-            {
-                actual = live;
-                readSucceeded = true;
-            }
-        }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
-        {
-            // A failed read must not keep the optimistic target displayed as confirmed.
-        }
-        if (requestRevision != Volatile.Read(ref platformRequestRevision)) return;
-        if (readSucceeded) ConfirmPlatformSelection(actual);
-        ApplyLivePlatformSelection(actual);
-        StatusMessage = readSucceeded ? reason : $"{reason} · 实际档位暂时无法回读，已恢复上次显示。";
-    }
-
-    public async Task<bool> ObservePlatformModeAsync(
-        PlatformModeSelection selection,
-        CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (isApplyingPlatformMode || isApplyingPerformancePolicy)
-        {
-            return false;
-        }
-
-        if (modeOnlyPlatformSelection is { } modeOnly)
-        {
-            if (modeOnly == selection)
-            {
-                // Status echoes/reconnects must not turn a verified mode-only
-                // request into an unsolicited application of old/default limits.
-                ConfirmPlatformSelection(selection);
-                ApplyLivePlatformSelection(selection);
-                return true;
-            }
-            // A genuinely different externally selected mode follows the existing
-            // per-profile frequency reconciliation path.
-            modeOnlyPlatformSelection = null;
-        }
-
-        // Repeated notifications for the same mode share the existing settle window.
-        if (pendingFrequencyObservation == selection) return true;
-
-        var observationRevision = Interlocked.Increment(ref platformObservationRevision);
-        ConfirmPlatformSelection(selection);
-        ApplyLivePlatformSelection(selection);
-        lastSynchronizedPlatformSelection = selection;
-        if (frequencyLimitController is null)
-        {
-            StatusMessage = "已同步显示当前 OEM 档位；未向硬件追加写入。";
-            return true;
-        }
-
-        pendingFrequencyObservation = selection;
-        pendingFrequencyObservationRevision = observationRevision;
-        var gateHeld = false;
-
-        try
-        {
-            StatusMessage = "已同步当前 OEM 档位，正在核对对应的 Windows 频率策略…";
-            await verificationDelay(TimeSpan.FromSeconds(2), cancellationToken);
-            await performanceTransitionGate.WaitAsync(cancellationToken);
-            gateHeld = true;
-            if (observationRevision != Volatile.Read(ref platformObservationRevision))
-            {
-                return true;
-            }
-
-            var expected = CreateFrequencyPolicy(selection);
-            var current = await frequencyLimitController.ReadAsync(cancellationToken);
-            ProcessorFrequencyLimitStatusText = FormatFrequencyReadback(current);
-            if (current == expected)
-            {
-                StatusMessage = "OEM 档位与对应的 Windows 频率策略已同步。";
-                return true;
-            }
-
-            if (observationRevision != Volatile.Read(ref platformObservationRevision))
-            {
-                return true;
-            }
-
-            var applied = await frequencyLimitController.ApplyAsync(expected, cancellationToken);
-            if (!applied.Succeeded)
-            {
-                StatusMessage = $"已同步 OEM 档位，但频率策略恢复失败：{applied.Reason}";
-                return false;
-            }
-
-            ProcessorFrequencyLimitStatusText = FormatFrequencyReadback(expected);
-            StatusMessage = "检测到上一档位遗留的频率限制，已按当前 OEM 档位恢复。";
-            return true;
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            StatusMessage = $"已同步 OEM 档位，但核对频率策略时发生异常：{exception.Message}";
-            return false;
-        }
-        finally
-        {
-            if (gateHeld) performanceTransitionGate.Release();
-            if (pendingFrequencyObservationRevision == observationRevision)
-                pendingFrequencyObservation = null;
-        }
-    }
-
-    public async Task<bool> SynchronizeControlSessionAsync(CancellationToken cancellationToken)
-    {
-        if (platformModeController is null || isApplyingPlatformMode) return false;
-        var requestRevision = Volatile.Read(ref platformRequestRevision);
-        try
-        {
-            var live = await platformModeController.ReadPlatformModeAsync(cancellationToken);
-            if (live is null || isApplyingPlatformMode ||
-                requestRevision != Volatile.Read(ref platformRequestRevision)) return false;
-            lastSynchronizedPlatformSelection = null;
-            return await ObservePlatformModeAsync(live, cancellationToken);
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            StatusMessage = $"控制会话恢复同步失败 · {exception.Message}";
-            return false;
-        }
-    }
-
-    private void ApplyLivePlatformSelection(PlatformModeSelection selection)
-    {
-        if (selection.Mode is PlatformMode.Custom && selection.ProfileIndex is >= 1 and <= 3)
-        {
-            if (selectedCustomProfileIndex != selection.ProfileIndex)
-                InvalidateGpuRangesForProfileChange();
-            selectedCustomProfileIndex = selection.ProfileIndex;
-            OnPropertyChanged(nameof(SelectedCustomProfileIndex));
-        }
-
-        if (selection.Mode is PlatformMode.TurboQuiet or PlatformMode.TurboHigh)
-        {
-            SelectedTurboStrategy = selection.Mode is PlatformMode.TurboHigh
-                ? TurboStrategy.HighEfficiency
-                : TurboStrategy.Quiet;
-        }
-
-        SelectProfile(selection.Mode switch
-        {
-            PlatformMode.Office => "office",
-            PlatformMode.Balanced => "balanced",
-            PlatformMode.TurboQuiet or PlatformMode.TurboHigh => "turbo",
-            PlatformMode.Custom => "custom",
-            _ => selectedProfileId
-        });
+        if (!Profiles.Any(profile => profile.Id == profileId)) return false;
+        SelectedProfileId = profileId;
+        SwitchFanDraftForCurrentProfile();
+        RefreshFanPoints();
+        SwitchFrequencyDraftForCurrentProfile();
+        return true;
     }
 
     private void InvalidateGpuRangesForProfileChange()
@@ -3298,126 +2669,44 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
                 return;
             }
         }
-        if (!IsCurrentTarget() || !IsPerformanceApplyEnabled || cpuPolicyController is null || boostController is null)
+        if (!IsCurrentTarget() || !IsPerformanceApplyEnabled || scheduleController is null)
         {
             return;
         }
 
         Interlocked.Increment(ref platformObservationRevision);
 
-        if (scheduleController is not null)
-        {
-            isApplyingPerformancePolicy = true;
-            RefreshPerformanceProperties();
-            try
-            {
-                var schedule = CreateSchedule(selection) with
-                {
-                    Cpu = CanEditPowerLimits
-                        ? new CpuPolicy(SelectedPl1Watts, SelectedPl2Watts, null)
-                        : null,
-                    Boost = new ProcessorBoostPolicy(
-                        SelectedProcessorBoostMode, SelectedProcessorBoostMode)
-                };
-                var result = await scheduleController.ApplyAsync(
-                    schedule, platformAlreadySelected: true, cancellationToken);
-                if (!result.Succeeded)
-                {
-                    if (IsCurrentTarget()) StatusMessage = result.Reason;
-                    return;
-                }
-
-                ConfirmPlatformSelection(result.Readback?.Platform ?? selection);
-                if (!IsCurrentTarget()) return;
-                UpdatePerformanceReadback(result.Readback);
-                SavePerformanceProfile(selection);
-                var verification = await VerifyPerformancePolicyStabilityAsync(
-                    result.Readback!, cancellationToken);
-                if (IsCurrentTarget()) StatusMessage = verification;
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-                if (IsCurrentTarget()) StatusMessage = $"性能策略应用异常 · {exception.Message}";
-            }
-            finally
-            {
-                isApplyingPerformancePolicy = false;
-                RefreshPerformanceProperties();
-            }
-            return;
-        }
-
         isApplyingPerformancePolicy = true;
         RefreshPerformanceProperties();
-        ProcessorBoostPolicy? previousBoost = null;
         try
         {
-            var targetBoost = new ProcessorBoostPolicy(SelectedProcessorBoostMode, SelectedProcessorBoostMode);
-            var targetCpu = CanEditPowerLimits ? new CpuPolicy(SelectedPl1Watts, SelectedPl2Watts, null) : null;
-            previousBoost = await boostController.ReadAsync(cancellationToken);
-            if (!IsCurrentTarget()) return;
-            var boostResult = await boostController.ApplyAsync(targetBoost, cancellationToken);
-            if (!boostResult.Succeeded)
+            var schedule = CreateSchedule(selection) with
             {
-                if (IsCurrentTarget()) StatusMessage = $"睿频策略应用失败 · {boostResult.Reason}";
+                Cpu = CanEditPowerLimits
+                    ? new CpuPolicy(SelectedPl1Watts, SelectedPl2Watts, null)
+                    : null,
+                Boost = new ProcessorBoostPolicy(
+                    SelectedProcessorBoostMode, SelectedProcessorBoostMode)
+            };
+            var result = await scheduleController.ApplyAsync(
+                schedule, platformAlreadySelected: true, cancellationToken);
+            if (!result.Succeeded)
+            {
+                if (IsCurrentTarget()) StatusMessage = result.Reason;
                 return;
             }
 
+            ConfirmPlatformSelection(result.Readback?.Platform ?? selection);
             if (!IsCurrentTarget()) return;
-            if (targetCpu is not null)
-            {
-                var cpuResult = await cpuPolicyController.ApplyCpuPolicyAsync(targetCpu, cancellationToken);
-                if (!cpuResult.Succeeded)
-                {
-                    var rollback = await boostController.ApplyAsync(previousBoost, cancellationToken);
-                    if (IsCurrentTarget())
-                        StatusMessage = rollback.Succeeded
-                            ? $"PL1 / PL2 应用失败，已恢复睿频策略 · {cpuResult.Reason}"
-                            : $"PL1 / PL2 应用失败，睿频策略恢复也失败 · {cpuResult.Reason}；{rollback.Reason}";
-                    return;
-                }
-            }
-
-            if (!IsCurrentTarget()) return;
-            var cpuReadback = await cpuPolicyController.ReadCpuPolicyAsync(cancellationToken);
-            if (!IsCurrentTarget()) return;
-            var boostReadback = await boostController.ReadAsync(cancellationToken);
-            if (!IsCurrentTarget()) return;
-            if (cpuReadback is null)
-            {
-                StatusMessage = "设置已发送，但最终 GCU 回读不可用";
-                return;
-            }
-
-            livePerformanceReadbackText = CanEditPowerLimits
-                ? FormatLivePerformanceReadback(cpuReadback, boostReadback)
-                : null;
-            StatusMessage = CanEditPowerLimits
-                ? $"已应用并回读 · PL1 {cpuReadback.Pl1Watts} W / PL2 {cpuReadback.Pl2Watts} W · {BoostModeLabel(boostReadback.AcMode)}"
-                : $"已应用并回读 Boost · {BoostModeLabel(boostReadback.AcMode)}；OEM 预设 PL 未改动";
-            RefreshPerformanceProperties();
+            UpdatePerformanceReadback(result.Readback);
+            SavePerformanceProfile(selection);
+            var verification = await VerifyPerformancePolicyStabilityAsync(
+                result.Readback!, cancellationToken);
+            if (IsCurrentTarget()) StatusMessage = verification;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            if (previousBoost is not null)
-            {
-                try
-                {
-                    var rollback = await boostController.ApplyAsync(previousBoost, cancellationToken);
-                    if (IsCurrentTarget())
-                        StatusMessage = rollback.Succeeded
-                            ? $"性能策略应用异常，已恢复睿频策略 · {exception.Message}"
-                            : $"性能策略应用及睿频恢复均异常 · {exception.Message}";
-                }
-                catch (Exception rollbackException) when (rollbackException is not OperationCanceledException)
-                {
-                    if (IsCurrentTarget()) StatusMessage = $"性能策略应用及睿频恢复均异常 · {exception.Message}；{rollbackException.Message}";
-                }
-            }
-            else
-            {
-                if (IsCurrentTarget()) StatusMessage = $"性能策略应用异常 · {exception.Message}";
-            }
+            if (IsCurrentTarget()) StatusMessage = $"性能策略应用异常 · {exception.Message}";
         }
         finally
         {
@@ -3767,111 +3056,6 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
     {
         ActiveDrawer = HomeDrawer.GpuOutput;
         await InitializeGpuOutputModeAsync(cancellationToken);
-    }
-
-    public async Task OpenLightingAsync(CancellationToken cancellationToken)
-    {
-        ActiveDrawer = HomeDrawer.Lighting;
-        if (isReadingLighting) return;
-        if (quickControlsController is null)
-        {
-            LightingStatusText = "官方灯光控制通道未接入。";
-            return;
-        }
-
-        isReadingLighting = true;
-        try
-        {
-            var reads = Enum.GetValues<LightingZone>().Select(async zone =>
-            {
-                try
-                {
-                    return (Zone: zone, State: await quickControlsController.ReadLightingZoneAsync(zone, cancellationToken));
-                }
-                catch (Exception exception) when (exception is not OperationCanceledException)
-                {
-                    return (Zone: zone, State: (LightingZoneState?)new(false, exception.Message, null, []));
-                }
-            });
-            var results = await Task.WhenAll(reads);
-            foreach (var (zone, state) in results)
-            {
-                ApplyLightingZoneState(zone, state ?? new(false, null, null, []));
-            }
-            // Older keyboards can report a plain backlight switch without a detailed RGB zone.
-            // Discover that switch independently; missing RGB state must not remove its sole power control.
-            if (!IsKeyboardLightingZoneAvailable)
-            {
-                try
-                {
-                    ApplyKeyboardLighting(await quickControlsController.ReadKeyboardLightingAsync(cancellationToken));
-                }
-                catch (Exception exception) when (exception is not OperationCanceledException) { }
-            }
-            if (lightingZoneStates.GetValueOrDefault(LightingZone.Keyboard)?.Configuration is { } keyboard)
-                IsKeyboardLightingEnabled = keyboard.Enabled;
-            NotifyLightingCapabilitiesChanged();
-            var firstAvailable = Enum.GetValues<LightingZone>().FirstOrDefault(IsLightingZoneAvailable);
-            SelectedLightingZone = IsLightingZoneAvailable(SelectedLightingZone) ? SelectedLightingZone : firstAvailable;
-            LoadLightingEditor(SelectedLightingZone);
-            var count = lightingZoneStates.Values.Count(state => state.Available);
-            LightingStatusText = count == 0
-                ? "未收到灯光状态；请确认 GCUBridge 正在运行后重试。"
-                : $"已发现 {count} 个灯光分区；每个标签只控制对应硬件，键盘方案不会联动其它灯区。";
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            LightingStatusText = $"读取灯光能力失败：{exception.Message}";
-        }
-        finally
-        {
-            isReadingLighting = false;
-        }
-    }
-
-    public void ApplyLightingZoneState(LightingZone zone, LightingZoneState state)
-    {
-        if (lightingLocalTargets.TryGetValue(zone, out var localTarget))
-        {
-            if (utcNow() >= localTarget.ExpiresAt)
-            {
-                lightingLocalTargets.Remove(zone);
-            }
-            else if (!state.HasDetailedConfiguration ||
-                     !LightingConfigurationsMatch(state.Configuration, localTarget.Configuration))
-            {
-                var previous = lightingZoneStates.GetValueOrDefault(zone);
-                lightingZoneStates[zone] = LightingStateAccumulator.Merge(previous, state)! with
-                {
-                    HardwareType = state.HardwareType ?? previous?.HardwareType,
-                    Configuration = localTarget.Configuration,
-                    SupportedEffects = state.SupportedEffects.Count > 0
-                        ? state.SupportedEffects
-                        : previous?.SupportedEffects ?? [localTarget.Configuration.Effect]
-                };
-                if (zone == LightingZone.Keyboard)
-                    IsKeyboardLightingEnabled = localTarget.Configuration.Enabled;
-                NotifyLightingCapabilitiesChanged();
-                return;
-            }
-            // Keep the local target for the complete settlement window. One matching acknowledgement
-            // does not prove that an older queued MQTT packet cannot still arrive afterward.
-        }
-
-        var previousState = lightingZoneStates.GetValueOrDefault(zone);
-        state = LightingStateAccumulator.Merge(previousState, state)!;
-        lightingZoneStates[zone] = state;
-        if (zone == LightingZone.Keyboard && state.Configuration is { } keyboard)
-            IsKeyboardLightingEnabled = keyboard.Enabled;
-        NotifyLightingCapabilitiesChanged();
-        if (SelectedLightingZone != zone) return;
-
-        // A user edit is intent, not hardware evidence. Keep it intact until that exact
-        // immutable request completes; an older acknowledgement must not edit the next request.
-        if (lightingEditorDrafts.ContainsKey(zone)) return;
-
-        LoadLightingEditor(zone);
-        LightingStatusText = $"{LightingZoneLabel(zone)}已通过 GCU 状态事件同步。";
     }
 
     public async Task OpenKeyboardControlsAsync(CancellationToken cancellationToken)
@@ -4265,435 +3449,6 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
         }
     }
 
-    public Task SetKeyboardLightingAsync(bool enabled, CancellationToken cancellationToken) =>
-        SetKeyboardLightingAsync(CaptureKeyboardLightingPower(enabled), cancellationToken);
-
-    public LightingZoneConfiguration CaptureKeyboardLightingPower(bool enabled)
-    {
-        var target = BuildLightingDraft("keyboard-power", "keyboard-power").Zones[0] with { Enabled = enabled };
-        if (lightingZoneStates.GetValueOrDefault(LightingZone.Keyboard)?.Configuration is null)
-            target = target with { Effect = LightingEffect.OemDefault };
-        lightingEditorDrafts[LightingZone.Keyboard] = target;
-        if (SelectedLightingZone == LightingZone.Keyboard) LoadLightingEditor(LightingZone.Keyboard);
-        return target;
-    }
-
-    public Task SetKeyboardLightingAsync(LightingZoneConfiguration target, CancellationToken cancellationToken) =>
-        SetLightingZonePowerAsync(target, cancellationToken);
-
-    public void SelectLightingZone(LightingZone zone)
-    {
-        if (IsLightingZoneAvailable(zone)) SelectedLightingZone = zone;
-    }
-
-    public void SetLightingColor(string hex)
-    {
-        if (TryParseLightingColor(hex, out var color)) LightingColorHex = color.Hex;
-    }
-
-    public Task ApplyOemDefaultLightingAsync(CancellationToken cancellationToken) =>
-        ApplyLightingProfileAsync(LightingProfileCatalog.OemDefault, cancellationToken);
-
-    public Task SetSelectedLightingZonePowerAsync(CancellationToken cancellationToken)
-    {
-        var target = CaptureLightingEditor();
-        return target is null ? Task.CompletedTask : SetLightingZonePowerAsync(target, cancellationToken);
-    }
-
-    public async Task SetLightingZonePowerAsync(LightingZoneConfiguration targetConfiguration, CancellationToken cancellationToken)
-    {
-        if (quickControlsController is null || IsLightingBusy) return;
-        var zone = targetConfiguration.Zone;
-        var enabled = targetConfiguration.Enabled;
-        var useLegacyKeyboardPower = zone == LightingZone.Keyboard &&
-            (!IsKeyboardLightingZoneAvailable || IsKeyboardLightingPowerOnly);
-        var hardwareTarget = useLegacyKeyboardPower
-            ? targetConfiguration with { Effect = LightingEffect.OemDefault }
-            : targetConfiguration;
-        var previousEnabled = lightingZoneStates.GetValueOrDefault(zone)?.Configuration?.Enabled;
-        IsLightingBusy = true;
-        try
-        {
-            ControlResult result;
-            pendingLightingConfiguration = targetConfiguration;
-            TrackLightingLocalTarget(hardwareTarget);
-            if (useLegacyKeyboardPower)
-            {
-                // Choose one protocol path, never send both the zone command and its legacy equivalent.
-                result = await quickControlsController.SetKeyboardLightingAsync(enabled, cancellationToken);
-            }
-            else if (enabled && (zone != LightingZone.Keyboard || lightingEditorDrafts.ContainsKey(zone)))
-            {
-                result = await quickControlsController.ApplyLightingZoneAsync(targetConfiguration, cancellationToken);
-            }
-            else
-            {
-                result = await quickControlsController.SetLightingZonePowerAsync(zone, enabled, cancellationToken);
-            }
-            if (result.Succeeded)
-            {
-                if (useLegacyKeyboardPower)
-                    StoreKeyboardLightingPower(hardwareTarget, lightingZoneStates.GetValueOrDefault(zone)?.HardwareType);
-                else
-                    StoreLightingZoneConfiguration(targetConfiguration);
-            }
-            if (zone == LightingZone.Keyboard) KeyboardControlsStatusText = result.Reason;
-            ReportLightingFeedback(zone,
-                lightingEditorDrafts.TryGetValue(zone, out var newer) && newer != targetConfiguration
-                    ? $"{LightingZoneLabel(zone)}已保留最新选择，等待应用。"
-                    : result.Reason);
-            StatusMessage = result.Reason;
-            if (result.Succeeded)
-            {
-                CompleteLightingEditorDraft(targetConfiguration);
-                TrackLightingLocalTarget(hardwareTarget);
-                if (useLegacyKeyboardPower && SelectedLightingZone == zone) LoadLightingEditor(zone);
-            }
-            else if (!result.Succeeded)
-                lightingLocalTargets.Remove(zone);
-            if (!result.Succeeded && previousEnabled is { } value &&
-                lightingEditorDrafts.GetValueOrDefault(zone) == targetConfiguration)
-            {
-                lightingEditorDrafts[zone] = targetConfiguration with { Enabled = value };
-                if (SelectedLightingZone == zone) LoadLightingEditor(zone);
-            }
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            lightingLocalTargets.Remove(zone);
-            var reason = $"切换{LightingZoneLabel(zone)}失败：{exception.Message}";
-            if (zone == LightingZone.Keyboard) KeyboardControlsStatusText = reason;
-            ReportLightingFeedback(zone, reason);
-        }
-        finally
-        {
-            pendingLightingConfiguration = null;
-            IsLightingBusy = false;
-        }
-    }
-
-    public Task ApplySelectedLightingZoneAsync(CancellationToken cancellationToken)
-    {
-        var configuration = CaptureLightingEditor();
-        return configuration is null ? Task.CompletedTask : ApplyLightingConfigurationAsync(configuration, cancellationToken);
-    }
-
-    public LightingZoneConfiguration? CaptureLightingEditor()
-    {
-        if (TryBuildSelectedLightingConfiguration(out var configuration)) return configuration;
-        LightingStatusText = "颜色格式无效，请输入 #RRGGBB；尚未发送。";
-        return null;
-    }
-
-    public async Task ApplyLightingConfigurationAsync(
-        LightingZoneConfiguration configuration, CancellationToken cancellationToken)
-    {
-        if (quickControlsController is null || IsLightingBusy) return;
-        if (configuration.Zone == LightingZone.Keyboard && IsKeyboardLightingPowerOnly)
-        {
-            ReportLightingFeedback(configuration.Zone, "当前键盘仅确认支持背光开关，未发送灯效、颜色或亮度配置。");
-            return;
-        }
-        if (!configuration.Enabled)
-        {
-            StoreLightingZoneConfiguration(configuration);
-            ReportLightingFeedback(configuration.Zone,
-                $"{LightingZoneLabel(configuration.Zone)}当前已关闭；颜色 {configuration.Color.Hex} 与灯效参数已保存，打开后自动应用。");
-            return;
-        }
-        pendingLightingConfiguration = configuration;
-        TrackLightingLocalTarget(configuration);
-        IsLightingBusy = true;
-        try
-        {
-            var result = await quickControlsController.ApplyLightingZoneAsync(configuration, cancellationToken);
-            if (result.Succeeded)
-            {
-                StoreLightingZoneConfiguration(configuration);
-                CompleteLightingEditorDraft(configuration);
-                TrackLightingLocalTarget(configuration);
-            }
-            else
-                lightingLocalTargets.Remove(configuration.Zone);
-            ReportLightingFeedback(configuration.Zone,
-                lightingEditorDrafts.TryGetValue(configuration.Zone, out var newer) && newer != configuration
-                    ? $"{LightingZoneLabel(configuration.Zone)}已保留最新选择，等待应用；上一条反馈不会覆盖编辑值。"
-                    : result.Reason);
-            StatusMessage = result.Reason;
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            lightingLocalTargets.Remove(configuration.Zone);
-            ReportLightingFeedback(configuration.Zone, $"应用灯效失败：{exception.Message}");
-        }
-        finally
-        {
-            pendingLightingConfiguration = null;
-            IsLightingBusy = false;
-        }
-    }
-
-    private void StoreLightingZoneConfiguration(LightingZoneConfiguration configuration)
-    {
-        var previous = lightingZoneStates.GetValueOrDefault(configuration.Zone);
-        lightingZoneStates[configuration.Zone] = new(
-            true,
-            previous?.HardwareType,
-            configuration,
-            previous?.SupportedEffects ?? [configuration.Effect]);
-        if (configuration.Zone == LightingZone.Keyboard)
-            IsKeyboardLightingEnabled = configuration.Enabled;
-    }
-
-    private void RememberLightingEditorDraft()
-    {
-        if (IsSynchronizingLightingEditor ||
-            lightingZoneStates.GetValueOrDefault(SelectedLightingZone)?.Configuration is not { } previous) return;
-        var color = TryParseLightingColor(LightingColorHex, out var parsed)
-            ? parsed : lightingEditorDrafts.GetValueOrDefault(SelectedLightingZone)?.Color ?? previous.Color;
-        lightingEditorDrafts[SelectedLightingZone] = new(SelectedLightingZone, IsSelectedLightingZoneEnabled,
-            SelectedLightingEffect, color, LightingBrightness, LightingSpeed, SelectedLightingDirection, LightingSleepSeconds);
-        LightingStatusText = IsSelectedLightingZoneEnabled
-            ? $"{SelectedLightingZoneLabel}已选择 {color.Hex}；等待自动应用。"
-            : $"{SelectedLightingZoneLabel}已保存 {color.Hex}；打开后自动应用。";
-    }
-
-    private void ReportLightingFeedback(LightingZone zone, string message)
-    {
-        lightingZoneFeedback[zone] = message;
-        if (SelectedLightingZone == zone) LightingStatusText = message;
-    }
-
-    private void CompleteLightingEditorDraft(LightingZoneConfiguration completed)
-    {
-        if (lightingEditorDrafts.GetValueOrDefault(completed.Zone) == completed)
-            lightingEditorDrafts.Remove(completed.Zone);
-    }
-
-    private bool TryBuildSelectedLightingConfiguration(out LightingZoneConfiguration configuration)
-    {
-        if (!TryParseLightingColor(LightingColorHex, out var color))
-        {
-            configuration = default!;
-            return false;
-        }
-
-        configuration = new(
-            SelectedLightingZone,
-            IsSelectedLightingZoneEnabled,
-            SelectedLightingEffect,
-            color,
-            LightingBrightness,
-            LightingSpeed,
-            SelectedLightingDirection,
-            LightingSleepSeconds);
-
-        if (configuration.Enabled &&
-            configuration.Zone is LightingZone.CoastLightbar or LightingZone.Logo)
-        {
-            var normalizedColor = UsesUserLightingColor(configuration.Effect) &&
-                                  configuration.Color == new LightingRgb(0, 0, 0)
-                ? new LightingRgb(0, 176, 255)
-                : configuration.Color;
-            configuration = configuration with
-            {
-                Color = normalizedColor,
-                Brightness = configuration.Brightness == 0 ? 1 : configuration.Brightness
-            };
-            LightingColorHex = configuration.Color.Hex;
-            LightingBrightness = configuration.Brightness;
-        }
-        else if (configuration.Enabled &&
-                 configuration.Zone == LightingZone.LiquidCooler &&
-                 configuration.Effect == LightingEffect.Static &&
-                 configuration.Color == new LightingRgb(0, 0, 0))
-        {
-            configuration = configuration with { Color = new(0, 176, 255) };
-            LightingColorHex = configuration.Color.Hex;
-        }
-        return true;
-    }
-
-    private static bool UsesUserLightingColor(LightingEffect effect) => effect is not (
-        LightingEffect.Rainbow or
-        LightingEffect.ColorMarquee or
-        LightingEffect.Colorful);
-
-    private void TrackLightingLocalTarget(LightingZoneConfiguration configuration) =>
-        lightingLocalTargets[configuration.Zone] = new(
-            configuration,
-            utcNow().AddSeconds(3));
-
-    private static bool LightingConfigurationsMatch(
-        LightingZoneConfiguration? actual,
-        LightingZoneConfiguration expected)
-    {
-        if (actual is null || actual.Enabled != expected.Enabled) return false;
-        if (!expected.Enabled || expected.Effect == LightingEffect.OemDefault) return true;
-        if (actual.Effect != expected.Effect) return false;
-
-        if (expected.Zone == LightingZone.LiquidCooler)
-            return expected.Effect != LightingEffect.Static || actual.Color == expected.Color;
-
-        if (actual.Brightness != expected.Brightness || actual.Speed != expected.Speed) return false;
-        var expectedDirection = expected.Zone == LightingZone.Keyboard && expected.Effect == LightingEffect.Wave
-            ? expected.Direction
-            : LightingDirection.None;
-        if (actual.Direction != expectedDirection) return false;
-        return !UsesUserLightingColor(expected.Effect) || actual.Color == expected.Color;
-    }
-
-    public async Task ApplyLightingSleepTimerAsync(CancellationToken cancellationToken)
-    {
-        if (quickControlsController is null || IsLightingBusy) return;
-        IsLightingBusy = true;
-        try
-        {
-            var result = await quickControlsController.SetLightingSleepTimerAsync(
-                LightingSleepSeconds, cancellationToken);
-            LightingStatusText = result.Succeeded
-                ? $"灯效休眠：{result.Reason}"
-                : result.Reason;
-            StatusMessage = LightingStatusText;
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            LightingStatusText = $"应用灯效休眠失败：{exception.Message}";
-        }
-        finally
-        {
-            IsLightingBusy = false;
-        }
-    }
-
-    public async Task ApplyLightingProfileAsync(LightingProfile profile, CancellationToken cancellationToken)
-    {
-        if (quickControlsController is null || IsLightingBusy) return;
-        if (!LightingProfileCatalog.Validate(profile, out var validationReason))
-        {
-            LightingStatusText = validationReason;
-            return;
-        }
-
-        IsLightingBusy = true;
-        var applied = 0;
-        var skipped = 0;
-        var lastReason = string.Empty;
-        LightingZoneConfiguration? pendingProfileConfiguration = null;
-        try
-        {
-            foreach (var configuration in profile.Zones)
-            {
-                if (!IsLightingZoneAvailable(configuration.Zone) ||
-                    configuration.Zone == LightingZone.Keyboard && IsKeyboardLightingPowerOnly)
-                {
-                    skipped++;
-                    continue;
-                }
-                var capability = lightingZoneStates[configuration.Zone];
-                if (configuration.Effect != LightingEffect.OemDefault &&
-                    !capability.SupportedEffects.Contains(configuration.Effect))
-                {
-                    skipped++;
-                    continue;
-                }
-                pendingProfileConfiguration = configuration;
-                lightingEditorDrafts[configuration.Zone] = configuration;
-                if (SelectedLightingZone == configuration.Zone) LoadLightingEditor(configuration.Zone);
-                TrackLightingLocalTarget(configuration);
-                var result = await quickControlsController.ApplyLightingZoneAsync(configuration, cancellationToken);
-                lastReason = result.Reason;
-                if (!result.Succeeded)
-                {
-                    lightingLocalTargets.Remove(configuration.Zone);
-                    if (lightingEditorDrafts.GetValueOrDefault(configuration.Zone) == configuration)
-                        lightingEditorDrafts.Remove(configuration.Zone);
-                    skipped++;
-                    pendingProfileConfiguration = null;
-                    continue;
-                }
-                applied++;
-                lightingZoneStates[configuration.Zone] = capability with { Configuration = configuration };
-                CompleteLightingEditorDraft(configuration);
-                TrackLightingLocalTarget(configuration);
-                pendingProfileConfiguration = null;
-            }
-            importedLightingProfile = profile;
-            LightingStatusText = applied > 0
-                ? $"{profile.Name}键盘方案已应用并回读。"
-                : string.IsNullOrWhiteSpace(lastReason) ? $"{profile.Name}没有可应用的已发现分区。" : lastReason;
-            StatusMessage = LightingStatusText;
-            LoadLightingEditor(SelectedLightingZone);
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            if (pendingProfileConfiguration is { } failedConfiguration)
-            {
-                lightingLocalTargets.Remove(failedConfiguration.Zone);
-                if (lightingEditorDrafts.GetValueOrDefault(failedConfiguration.Zone) == failedConfiguration)
-                    lightingEditorDrafts.Remove(failedConfiguration.Zone);
-                if (SelectedLightingZone == failedConfiguration.Zone)
-                    LoadLightingEditor(failedConfiguration.Zone);
-            }
-            LightingStatusText = $"应用灯光方案失败：{exception.Message}";
-        }
-        finally
-        {
-            IsLightingBusy = false;
-        }
-    }
-
-    public void SaveMyLightingProfile()
-    {
-        try
-        {
-            var profile = BuildLightingDraft("my-lighting", "我的灯光方案");
-            lightingProfileStore.Save(profile);
-            importedLightingProfile = profile;
-            LightingStatusText = "我的灯光方案已保存；可继续导出为 .revolight.json 分享。";
-        }
-        catch (Exception exception)
-        {
-            LightingStatusText = $"保存灯光方案失败：{exception.Message}";
-        }
-    }
-
-    public void ImportLightingProfile(string path)
-    {
-        try
-        {
-            importedLightingProfile = lightingProfileStore.Import(path);
-            var keyboard = importedLightingProfile.Zones[0];
-            SelectedLightingZone = LightingZone.Keyboard;
-            LoadLightingConfiguration(keyboard,
-                lightingZoneStates.GetValueOrDefault(LightingZone.Keyboard)?.SupportedEffects ?? [keyboard.Effect]);
-            LightingStatusText = $"已载入 {importedLightingProfile.Name}；确认参数后点击应用并回读。";
-        }
-        catch (Exception exception)
-        {
-            LightingStatusText = $"导入灯光方案失败：{exception.Message}";
-        }
-    }
-
-    public void ExportLightingProfile(string path)
-    {
-        try
-        {
-            var profile = importedLightingProfile ?? BuildLightingDraft("my-lighting", "我的灯光方案");
-            lightingProfileStore.Export(path, profile);
-            LightingStatusText = $"已导出 {profile.Name}。";
-        }
-        catch (Exception exception)
-        {
-            LightingStatusText = $"导出灯光方案失败：{exception.Message}";
-        }
-    }
-
-    public Task ApplyImportedLightingProfileAsync(CancellationToken cancellationToken) =>
-        importedLightingProfile is null
-            ? Task.CompletedTask
-            : ApplyLightingProfileAsync(importedLightingProfile, cancellationToken);
-
     public async Task SetBatteryProtectionAsync(BatteryProtectionMode mode, CancellationToken cancellationToken)
     {
         if (quickControlsController is null) return;
@@ -5025,28 +3780,6 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
             case SystemToggleControl.Webcam: IsWebcamEnabled = enabled; break;
             case SystemToggleControl.CopilotKey: IsCopilotKeyEnabled = enabled; break;
         }
-    }
-
-    private void ApplyKeyboardLighting(KeyboardLightingState? state)
-    {
-        if (state is null) return;
-        IsKeyboardLightingEnabled = state.Enabled;
-        if (IsKeyboardLightingZoneAvailable && !IsKeyboardLightingPowerOnly) return;
-        var configuration = lightingZoneStates.GetValueOrDefault(LightingZone.Keyboard)?.Configuration ??
-            new(LightingZone.Keyboard, state.Enabled, LightingEffect.OemDefault, new(0, 0, 0),
-                3, 2, LightingDirection.None, 120);
-        StoreKeyboardLightingPower(configuration with { Enabled = state.Enabled }, state.Type);
-        if (SelectedLightingZone == LightingZone.Keyboard) LoadLightingEditor(LightingZone.Keyboard);
-    }
-
-    private void StoreKeyboardLightingPower(LightingZoneConfiguration configuration, string? hardwareType)
-    {
-        // A confirmed power acknowledgement is not evidence of RGB configuration support.
-        lightingZoneStates[LightingZone.Keyboard] = new(true, hardwareType,
-            configuration with { Effect = LightingEffect.OemDefault }, [LightingEffect.OemDefault],
-            HasDetailedConfiguration: false, ReportedFields: LightingReportedFields.Power);
-        IsKeyboardLightingEnabled = configuration.Enabled;
-        NotifyLightingCapabilitiesChanged();
     }
 
     private void ApplyBattery(BatteryProtectionState? state)
@@ -5429,60 +4162,6 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
         _ => $"{SelectedProfileId}:1"
     };
 
-    private PerformanceSchedule CreateSchedule(PlatformModeSelection selection)
-    {
-        var key = selection.Mode switch
-        {
-            PlatformMode.Office => "office:1",
-            PlatformMode.Balanced => "balanced:1",
-            PlatformMode.TurboQuiet => "turbo:Quiet",
-            PlatformMode.TurboHigh => "turbo:HighEfficiency",
-            PlatformMode.Custom => $"custom:{Math.Clamp(selection.ProfileIndex, 1, 3)}",
-            _ => throw new ArgumentOutOfRangeException(nameof(selection))
-        };
-        var draft = GetPowerDraft(key);
-        var boost = boostDraftsByProfile.TryGetValue(key, out var savedBoost)
-            ? savedBoost
-            : ProcessorBoostMode.Aggressive;
-        return new(
-            selection,
-            CanEditPowerLimitsFor(selection)
-                ? new CpuPolicy(draft.Pl1Watts, draft.Pl2Watts, null)
-                : null,
-            new ProcessorBoostPolicy(boost, boost),
-            CreateFrequencyPolicy(key));
-    }
-
-    private ProcessorFrequencyLimitPolicy CreateFrequencyPolicy(PlatformModeSelection selection) =>
-        CreateFrequencyPolicy(FrequencyProfileKey(selection));
-
-    private static string FrequencyProfileKey(PlatformModeSelection selection) => selection.Mode switch
-    {
-        PlatformMode.Office => "office:1",
-        PlatformMode.Balanced => "balanced:1",
-        PlatformMode.TurboQuiet => "turbo:Quiet",
-        PlatformMode.TurboHigh => "turbo:HighEfficiency",
-        PlatformMode.Custom => $"custom:{Math.Clamp(selection.ProfileIndex, 1, 3)}",
-        _ => throw new ArgumentOutOfRangeException(nameof(selection))
-    };
-
-    private ProcessorFrequencyLimitPolicy CreateFrequencyPolicy(string key) =>
-        ProcessorFrequencyLimitPolicy.Uniform((uint)(
-            frequencyConfiguredByProfile.GetValueOrDefault(key)
-                ? Math.Max(0, frequencyDraftsByProfile.GetValueOrDefault(key))
-                : 0));
-
-    private PlatformModeSelection CurrentPlatformSelection() => SelectedProfileId switch
-    {
-        "office" => new(PlatformMode.Office),
-        "balanced" => new(PlatformMode.Balanced),
-        "turbo" => new(SelectedTurboStrategy is TurboStrategy.HighEfficiency
-            ? PlatformMode.TurboHigh
-            : PlatformMode.TurboQuiet),
-        "custom" => new(PlatformMode.Custom, SelectedCustomProfileIndex),
-        _ => throw new InvalidOperationException($"未知性能档位：{SelectedProfileId}")
-    };
-
     private void UpdatePerformanceReadback(PerformanceSchedule? readback)
     {
         if (readback is null)
@@ -5533,47 +4212,6 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
             : "整套性能策略已应用、回读，并在 1 秒复查后保持不变。";
     }
 
-    private async Task<ControlResult> SettleFrequencyAfterPlatformSwitchAsync(
-        ProcessorFrequencyLimitPolicy expected,
-        long requestRevision,
-        CancellationToken cancellationToken)
-    {
-        if (frequencyLimitController is null)
-        {
-            return new(true, "整机档位已应用并回读。");
-        }
-
-        await verificationDelay(TimeSpan.FromSeconds(2), cancellationToken);
-        if (requestRevision != Volatile.Read(ref platformRequestRevision))
-            return new(true, "已有更新的档位请求，跳过旧档位复查。");
-        var settled = await frequencyLimitController.ReadAsync(cancellationToken);
-        if (requestRevision != Volatile.Read(ref platformRequestRevision))
-            return new(true, "已有更新的档位请求，跳过旧档位复查。");
-        ProcessorFrequencyLimitStatusText = FormatFrequencyReadback(settled);
-        if (settled == expected)
-        {
-            return new(true, "整机档位与 Windows 频率策略已应用，并在延迟复查后保持一致。");
-        }
-
-        var reapplied = await frequencyLimitController.ApplyAsync(expected, cancellationToken);
-        if (!reapplied.Succeeded)
-        {
-            return ControlResult.Rejected($"检测到 OEM 延迟覆盖，但恢复失败：{reapplied.Reason}");
-        }
-
-        await verificationDelay(TimeSpan.FromSeconds(1), cancellationToken);
-        if (requestRevision != Volatile.Read(ref platformRequestRevision))
-            return new(true, "已有更新的档位请求，跳过旧档位复查。");
-        var confirmed = await frequencyLimitController.ReadAsync(cancellationToken);
-        if (requestRevision != Volatile.Read(ref platformRequestRevision))
-            return new(true, "已有更新的档位请求，跳过旧档位复查。");
-        ProcessorFrequencyLimitStatusText = FormatFrequencyReadback(confirmed);
-        return confirmed == expected
-            ? new(true, "检测到 OEM 延迟覆盖，已重新应用 Windows 频率策略并回读确认。")
-            : ControlResult.Rejected(
-                $"OEM 延迟覆盖仍在发生：期望 {FormatFrequencyReadback(expected)}，实际 {FormatFrequencyReadback(confirmed)}");
-    }
-
     private static string FormatFrequencyReadback(ProcessorFrequencyLimitPolicy frequency) =>
         $"频率回读 · C0 {frequency.AcMaximumMhz} · C1 {frequency.AcClass1MaximumMhz} · C2 {frequency.AcClass2MaximumMhz} MHz";
 
@@ -5601,15 +4239,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
 
     private void SavePerformanceProfile(PlatformModeSelection selection)
     {
-        var key = selection.Mode switch
-        {
-            PlatformMode.Office => "office:1",
-            PlatformMode.Balanced => "balanced:1",
-            PlatformMode.TurboQuiet => "turbo:Quiet",
-            PlatformMode.TurboHigh => "turbo:HighEfficiency",
-            PlatformMode.Custom => $"custom:{Math.Clamp(selection.ProfileIndex, 1, 3)}",
-            _ => CurrentPowerLimitKey
-        };
+        var key = PerformanceProfileKey(selection);
         var draft = GetPowerDraft(key);
         var profiles = applicationSettings.PerformanceProfiles is null
             ? new Dictionary<string, PerformanceProfileSettings>(StringComparer.OrdinalIgnoreCase)
@@ -5754,139 +4384,6 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
     {
         Cpu = table.Cpu.ToArray(),
         Gpu = table.Gpu.ToArray()
-    };
-
-    private bool IsLightingZoneAvailable(LightingZone zone) =>
-        lightingZoneStates.GetValueOrDefault(zone)?.Available == true;
-
-    private bool IsKeyboardLightingPowerOnly =>
-        lightingZoneStates.GetValueOrDefault(LightingZone.Keyboard) is { Available: true, HasDetailedConfiguration: false } state &&
-        state.SupportedEffects.All(effect => effect == LightingEffect.OemDefault);
-
-    private void NotifyLightingCapabilitiesChanged()
-    {
-        OnPropertyChanged(nameof(IsKeyboardLightingZoneAvailable));
-        OnPropertyChanged(nameof(IsCoastLightingZoneAvailable));
-        OnPropertyChanged(nameof(IsLogoLightingZoneAvailable));
-        OnPropertyChanged(nameof(IsWaterLightingZoneAvailable));
-        OnPropertyChanged(nameof(CanApplyLighting));
-        OnPropertyChanged(nameof(CanToggleSelectedLightingZonePower));
-        OnPropertyChanged(nameof(CanApplyLightingSleepTimer));
-    }
-
-    private void LoadLightingEditor(LightingZone zone)
-    {
-        var state = lightingZoneStates.GetValueOrDefault(zone);
-        if (lightingEditorDrafts.GetValueOrDefault(zone) is { } draft)
-        {
-            LoadLightingConfiguration(draft, state?.SupportedEffects ?? [draft.Effect]);
-        }
-        else if (state?.Configuration is { } configuration)
-        {
-            LoadLightingConfiguration(configuration, state.SupportedEffects);
-        }
-        else
-        {
-            LoadLightingConfiguration(
-                new(zone, true, LightingEffect.Static, new(0, 176, 255), 3, 2, LightingDirection.Left, 120),
-                state?.SupportedEffects ?? [LightingEffect.Static]);
-        }
-        OnPropertyChanged(nameof(CanApplyLighting));
-        OnPropertyChanged(nameof(CanToggleSelectedLightingZonePower));
-    }
-
-    private void LoadLightingConfiguration(
-        LightingZoneConfiguration configuration,
-        IReadOnlyList<LightingEffect> supportedEffects)
-    {
-        IsSynchronizingLightingEditor = true;
-        try
-        {
-            var effects = supportedEffects.Distinct().ToList();
-            if (!effects.Contains(configuration.Effect)) effects.Add(configuration.Effect);
-            var optionsChanged = !LightingEffectOptions.Select(option => option.Value).SequenceEqual(effects);
-            if (optionsChanged)
-            {
-                LightingEffectOptions.Clear();
-                foreach (var effect in effects) LightingEffectOptions.Add(LightingEffectOption.From(effect));
-            }
-            SelectedLightingEffect = configuration.Effect;
-            // Resetting the options collection clears WPF's selected item even when the enum value did not change.
-            if (optionsChanged) OnPropertyChanged(nameof(SelectedLightingEffect));
-            IsSelectedLightingZoneEnabled = configuration.Enabled;
-            LightingColorHex = configuration.Color.Hex;
-            LightingBrightness = configuration.Brightness;
-            LightingSpeed = configuration.Speed;
-            SelectedLightingDirection = configuration.Direction;
-        }
-        finally
-        {
-            IsSynchronizingLightingEditor = false;
-        }
-    }
-
-    private LightingProfile BuildLightingDraft(string id, string name)
-    {
-        var keyboard = lightingEditorDrafts.GetValueOrDefault(LightingZone.Keyboard) ??
-                       lightingZoneStates.GetValueOrDefault(LightingZone.Keyboard)?.Configuration ??
-                       new LightingZoneConfiguration(
-                           LightingZone.Keyboard, true, LightingEffect.Static, new(0, 176, 255),
-                            3, 2, LightingDirection.Left, LightingSleepSeconds);
-        if (SelectedLightingZone == LightingZone.Keyboard)
-        {
-            if (!TryParseLightingColor(LightingColorHex, out var editorColor)) editorColor = new(0, 176, 255);
-            keyboard = new(
-                LightingZone.Keyboard,
-                IsSelectedLightingZoneEnabled,
-                SelectedLightingEffect,
-                editorColor,
-                LightingBrightness,
-                LightingSpeed,
-                SelectedLightingDirection,
-                LightingSleepSeconds);
-        }
-        return new(LightingProfileCatalog.CurrentSchemaVersion, id, name, [keyboard]);
-    }
-
-    private void RestoreSavedLightingProfile()
-    {
-        try
-        {
-            var profile = lightingProfileStore.Load();
-            if (profile is null) return;
-            if (!LightingProfileCatalog.Validate(profile, out var reason))
-            {
-                LightingStatusText = $"已保存的灯光方案无效：{reason}";
-                return;
-            }
-
-            importedLightingProfile = profile;
-            LightingStatusText = $"已恢复 {profile.Name}；打开灯光页后可显式应用。";
-        }
-        catch (Exception exception)
-        {
-            LightingStatusText = $"恢复已保存灯光方案失败：{exception.Message}";
-        }
-    }
-
-    private static bool TryParseLightingColor(string? text, out LightingRgb color)
-    {
-        color = new(0, 0, 0);
-        if (string.IsNullOrWhiteSpace(text)) return false;
-        var value = text.Trim().TrimStart('#');
-        if (value.Length != 6 || !uint.TryParse(value, System.Globalization.NumberStyles.HexNumber,
-                System.Globalization.CultureInfo.InvariantCulture, out var rgb)) return false;
-        color = new((byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb);
-        return true;
-    }
-
-    private static string LightingZoneLabel(LightingZone zone) => zone switch
-    {
-        LightingZone.Keyboard => "键盘背光",
-        LightingZone.CoastLightbar => "海岸灯带",
-        LightingZone.Logo => "LOGO 灯",
-        LightingZone.LiquidCooler => "水冷灯",
-        _ => zone.ToString()
     };
 
     private static string FormatTemperature(double temperature) =>

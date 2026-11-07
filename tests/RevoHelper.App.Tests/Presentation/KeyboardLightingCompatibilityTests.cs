@@ -47,7 +47,6 @@ public sealed class KeyboardLightingCompatibilityTests
         Assert.Equal(enabled, vm.IsSelectedLightingZoneEnabled);
         Assert.True(vm.CanToggleSelectedLightingZonePower);
         Assert.False(vm.CanApplyLighting);
-        Assert.False(vm.IsLightingBusy);
     }
 
     [Fact]

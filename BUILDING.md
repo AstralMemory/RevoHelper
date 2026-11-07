@@ -1,10 +1,10 @@
 # RevoHelper
 
-轻量、免费的第三方机械革命笔记本控制台。V1.0.3，开发与维护：Astral Memory。
+轻量、免费的第三方机械革命笔记本控制台。V1.0.4，开发与维护：Astral Memory。
 
-本仓库当前源码对应 RevoHelper V1.0.3（产品版本 `1.0.3+20261105`，文件版本 `1.0.3.9`）。RevoHelper 自有代码采用 MIT，版权声明为 `Copyright (c) 2026 Astral Memory`，详见 `LICENSE`。第三方组件、嵌入二进制及其对应源码保留各自许可；项目 MIT 不替代它们的许可条件。下载、源码获取与更新以 [项目仓库](https://github.com/AstralMemory/RevoHelper) 为准。
+本仓库当前源码对应 RevoHelper V1.0.4（产品版本 `1.0.4+20261107`，文件版本 `1.0.4.9`）。RevoHelper 自有代码采用 MIT，版权声明为 `Copyright (c) 2026 Astral Memory`，详见 `LICENSE`。第三方组件、嵌入二进制及其对应源码保留各自许可；项目 MIT 不替代它们的许可条件。下载、源码获取与更新以 [项目仓库](https://github.com/AstralMemory/RevoHelper) 为准。
 
-本版的限充适配、会话恢复与源码分发边界见 [V1.0.3 源码说明](./docs/release/V1.0.3_SOURCE_README.md)，用户说明见 [V1.0.3 使用说明](./docs/release/V1.0.3_USER_README.txt)。构建与离线测试不会启用限充，不要为了构建而运行硬件实验。
+本版的源码分发边界见 [V1.0.4 源码说明](./docs/release/V1.0.4_SOURCE_README.md)，用户说明见 [V1.0.4 使用说明](./docs/release/V1.0.4_USER_README.txt)。构建与离线测试不会启用限充，不要为了构建而运行硬件实验。
 
 实验性限充不按型号、BIOS/EC 版本或固定 EC 项目号预先拒绝，可手动尝试；不保证每台实际生效。仍保留必要协议、唯一接口路线、控制值所有权、回读及恢复检查；构建或模拟测试通过不等于具体机器已验证有效。
 
@@ -63,13 +63,13 @@ dotnet test tests/RevoHelper.App.Tests/RevoHelper.App.Tests.csproj
 
 ## 重新打包
 
-使用 PowerShell 7 运行打包脚本（`pwsh`）。
+打包脚本可以用 Windows 自带的 PowerShell 5.1 或 PowerShell 7 运行。
 
 ```powershell
-pwsh -NoProfile -File packaging/Prepare-V103Release.ps1 -PublishExe artifacts/publish/RevoHelper.exe -OutputDirectory artifacts/release-v1.0.3
+powershell -NoProfile -ExecutionPolicy Bypass -File packaging/Prepare-V104Release.ps1 -PublishExe artifacts/publish/RevoHelper.exe -OutputDirectory artifacts/release-v1.0.4
 ```
 
-输出目录必须为新目录或空目录，包含运行目录、`RevoHelper v1.0.3.zip`、`RevoHelper v1.0.3 Source Code.zip` 与更新日志。再次打包时使用新的输出路径；脚本不会覆盖已有资源。该步骤只生成本地文件，不操作 GitHub，也不生成哈希。源包需要联网还原 NuGet 依赖，不是全部工具链的离线镜像。历史打包脚本与固定输入仅为兼容既有离线测试而保留，请以本版脚本和说明为准。
+输出目录必须为新目录或空目录，包含运行目录、`RevoHelper v1.0.4.zip`、`RevoHelper v1.0.4 Source Code.zip` 与更新日志。再次打包时使用新的输出路径；脚本不会覆盖已有资源。该步骤只生成本地文件，不操作 GitHub，也不生成哈希。源包需要联网还原 NuGet 依赖，不是全部工具链的离线镜像。历史打包脚本与固定输入仅为兼容既有离线测试而保留，请以本版脚本和说明为准。
 
 ## 功能边界
 
@@ -78,6 +78,7 @@ pwsh -NoProfile -File packaging/Prepare-V103Release.ps1 -PublishExe artifacts/pu
 - GPU 滑块拖动期间只更新草稿，松手后提交；隔离过期回读，避免旧操作结果覆盖新草稿或使开关无故跳回。切换模式时界面立即响应，后台完成后再核对；失败时提示并同步已确认状态。
 - OEM 确认的配置与驱动当前功耗上限分别报告，不再用旧公式自动补偿 TGP，也不重映射请求目标、保存值或设备回读。驱动上限与配置不同，不应仅凭两者差异就显示为另一个“已设置目标”。
 - GPU 调节范围来自机型实时回报。70 W 仅是范围允许时可尝试的目标，不是通用最低值；175 W 等最大值也不应写死为所有机型的上限。是否接受设置及负载下的实际效果需分别确认，不能仅凭滑块范围认定支持，也不保证本机可达到 70 W。
+- 唯一的联网代码在 `src/RevoHelper.App/Updates`：只读取 GitHub 最新正式版的版本号，不带账号信息，不发送设备数据，不下载、安装或运行任何内容；设置中可以关闭。离线测试不会联网。
 - 官方控制台和 RevoHelper 操作同一硬件，不停止或禁用官方程序及后端服务。
 - 官方预设风扇曲线通常只供参考，自定义模式才能调整。
 - 主程序不会静默安装驱动。AMD 直连功耗后端使用可选的外部 RyzenAdj，源码包只附说明，不附其可执行文件。

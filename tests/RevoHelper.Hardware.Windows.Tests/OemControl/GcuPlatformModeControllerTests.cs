@@ -59,6 +59,7 @@ public sealed class GcuPlatformModeControllerTests
         var result = await controller.SetPlatformModeAsync(new(PlatformMode.Balanced), CancellationToken.None);
 
         Assert.False(result.Succeeded);
+        Assert.Equal(new PlatformRestorePoint(new(PlatformMode.Office), false), result.RestoredTo);
         Assert.Equal(10, channel.ReadCount); // Baseline + 8 target checks + one rollback check.
         Assert.All(entries, entry => Assert.Equal("platform-gcu", entry.Area));
         Assert.Contains(entries, entry => entry.Message.Contains("stage=mode-verify result=unconfirmed", StringComparison.Ordinal)
@@ -329,6 +330,7 @@ public sealed class GcuPlatformModeControllerTests
         Assert.Equal(["OPERATING_OFFICE_MODE:0", "OPERATING_TURBO_MODE:0", "COMPANION:TurboQuiet"], channel.Writes);
         Assert.Equal(0, channel.Status.Silent);
         Assert.Equal(0, channel.Status.Extreme);
+        Assert.Equal(new PlatformRestorePoint(new(PlatformMode.TurboQuiet), false), result.RestoredTo);
     }
 
     [Theory]
@@ -343,6 +345,7 @@ public sealed class GcuPlatformModeControllerTests
 
         Assert.False(result.Succeeded);
         Assert.Contains(expected, channel.Writes);
+        Assert.True(result.RestoredTo?.RestoreStrategy);
     }
 
     [Theory]

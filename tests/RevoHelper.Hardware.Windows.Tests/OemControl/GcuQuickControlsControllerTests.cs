@@ -294,7 +294,49 @@ public sealed class GcuQuickControlsControllerTests
     }
 
     [Fact]
-    public async Task ApplyLightingZone_WhenEffectMatchesButParametersDoNot_RejectsUnconfirmedWrite()
+    public async Task ApplyLightingZone_EchoOfThePowerCommandIsNotTreatedAsTheResult()
+    {
+        const string status = """
+            {"powerStatus":"On","type":"PerKey","effect":"Breathing","light":3,"speed":2,"direction":"0","R":0,"G":180,"B":255}
+            """;
+        var channel = new FakeChannel();
+        channel.LightingStatuses[LightingZone.Keyboard] = status;
+        var controller = new GcuQuickControlsController(channel, (_, _) => Task.CompletedTask);
+        await controller.ReadLightingZoneAsync(LightingZone.Keyboard, CancellationToken.None);
+        channel.LightingReadbacks.Enqueue("""
+            {"powerStatus":"On","type":"PerKey","effect":"Rainbow","light":3,"speed":2,"direction":"0","R":0,"G":180,"B":255}
+            """);
+
+        var result = await controller.ApplyLightingZoneAsync(new(LightingZone.Keyboard, true,
+            LightingEffect.Breathing, new(0, 180, 255), 3, 2, LightingDirection.None, 120), CancellationToken.None);
+
+        Assert.True(result.Succeeded, result.Reason);
+        Assert.Contains("回读确认", result.Reason, StringComparison.Ordinal);
+        Assert.Null(result.UnconfirmedDetail);
+    }
+
+    [Theory]
+    [InlineData(LightingEffect.Breathing, "None", 3, 1, true)]
+    [InlineData(LightingEffect.Static, "None", 3, 1, false)]
+    [InlineData(LightingEffect.Wave, "LeftRight", 3, 2, false)]
+    public async Task ApplyLightingZone_OnlyComparesParametersTheEffectUses(
+        LightingEffect effect, string direction, int brightness, int speed, bool unconfirmed)
+    {
+        var channel = new FakeChannel();
+        var name = effect == LightingEffect.Static ? "Single" : effect.ToString();
+        channel.LightingStatuses[LightingZone.Keyboard] =
+            $$"""{"powerStatus":"On","type":"PerKey","effect":"{{name}}","light":{{brightness}},"speed":{{speed}},"direction":"{{direction}}","R":0,"G":180,"B":255}""";
+        var controller = new GcuQuickControlsController(channel, (_, _) => Task.CompletedTask);
+
+        var result = await controller.ApplyLightingZoneAsync(new(LightingZone.Keyboard, true, effect, new(0, 180, 255), 3, 2,
+            effect == LightingEffect.Wave ? LightingDirection.Left : LightingDirection.None, 120), CancellationToken.None);
+
+        Assert.True(result.Succeeded, result.Reason);
+        Assert.Equal(unconfirmed, result.UnconfirmedDetail is not null);
+    }
+
+    [Fact]
+    public async Task ApplyLightingZone_WhenEffectMatchesButParametersDoNot_ReportsThemWithoutFailing()
     {
         var channel = new FakeChannel();
         channel.LightingStatuses[LightingZone.Keyboard] =
@@ -306,8 +348,10 @@ public sealed class GcuQuickControlsControllerTests
 
         var result = await controller.ApplyLightingZoneAsync(configuration, CancellationToken.None);
 
-        Assert.False(result.Succeeded);
-        Assert.Contains("未确认生效", result.Reason, StringComparison.Ordinal);
+        Assert.True(result.Succeeded, result.Reason);
+        Assert.Contains("灯效已确认", result.Reason, StringComparison.Ordinal);
+        Assert.Contains("亮度、速度、颜色未回读确认", result.Reason, StringComparison.Ordinal);
+        Assert.Contains("亮度 expected 3 read 1", result.UnconfirmedDetail, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -888,6 +932,34 @@ public sealed class GcuQuickControlsControllerTests
         Assert.Contains("ColorCalibrationFail", result.Reason, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task LightingWrites_OnlyWaitForZonesThatShareHardware()
+    {
+        var channel = new FakeChannel();
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        foreach (var zone in Enum.GetValues<LightingZone>())
+            channel.LightingStatuses[zone] = """{"type":"MEZone_Lightbar2","powerStatus":"On"}""";
+        var controller = new GcuQuickControlsController(channel);
+        foreach (var zone in Enum.GetValues<LightingZone>())
+            await controller.ReadLightingZoneAsync(zone, CancellationToken.None);
+        channel.LightingReadbackGate = zone => zone == LightingZone.CoastLightbar ? release.Task : Task.CompletedTask;
+        LightingZoneConfiguration Target(LightingZone zone) =>
+            new(zone, true, LightingEffect.Static, new(255, 0, 0), 3, 2, LightingDirection.None, 120);
+
+        var coast = controller.ApplyLightingZoneAsync(Target(LightingZone.CoastLightbar), CancellationToken.None).AsTask();
+        var logo = controller.ApplyLightingZoneAsync(Target(LightingZone.Logo), CancellationToken.None).AsTask();
+        await channel.WaitForLightingWriteAsync(LightingZone.CoastLightbar).WaitAsync(TimeSpan.FromSeconds(2));
+        var keyboardWrite = controller.SetLightingZonePowerAsync(LightingZone.Keyboard, true, CancellationToken.None).AsTask();
+
+        await keyboardWrite.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.False(logo.IsCompleted);
+        Assert.DoesNotContain(channel.LightingWrites, write => write.Zone == LightingZone.Logo);
+
+        release.SetResult();
+        await Task.WhenAll(coast, logo).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Contains(channel.LightingWrites, write => write.Zone == LightingZone.Logo);
+    }
+
     private sealed class FakeChannel : IGcuQuickControlsChannel
     {
         public Exception? SettingReadException { get; set; }
@@ -964,6 +1036,8 @@ public sealed class GcuQuickControlsControllerTests
         {
             AtomicLightingWrites++;
             await WriteLightingAsync(zone, payload, cancellationToken);
+            if (LightingReadbackGate is not null) await LightingReadbackGate(zone);
+            if (LightingReadbacks.TryDequeue(out var readback)) return readback;
             return LightingStatuses.GetValueOrDefault(zone, zone switch
             {
                 LightingZone.Keyboard => KeyboardStatus,
@@ -972,6 +1046,12 @@ public sealed class GcuQuickControlsControllerTests
             });
         }
         public bool SimulateKeyboardPower { get; init; }
+        public Func<LightingZone, Task>? LightingReadbackGate { get; set; }
+        public Queue<string> LightingReadbacks { get; } = new();
+        public async Task WaitForLightingWriteAsync(LightingZone zone)
+        {
+            while (!LightingWrites.Any(write => write.Zone == zone)) await Task.Delay(5);
+        }
         public ValueTask WriteBatteryProtectionAsync(string payload, CancellationToken cancellationToken) { LastBatteryCommand = payload; return ValueTask.CompletedTask; }
         public ValueTask WriteLiquidCoolingAsync(string payload, CancellationToken cancellationToken) { LastLiquidCommand = payload; return ValueTask.CompletedTask; }
         public ValueTask WriteBatteryChargeLimitAsync(string payload, CancellationToken cancellationToken) { LastBatteryChargeLimitCommand = payload; return ValueTask.CompletedTask; }
