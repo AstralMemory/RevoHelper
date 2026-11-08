@@ -23,11 +23,12 @@ public sealed record AnnouncementCopy(
     // "the newest release" without the app having to reach GitHub first.
     public const string LatestPackageUrl = DownloadsUrl + "/latest/download/RevoHelper.zip";
 
-    // Public relays for users who cannot reach GitHub. They fetch the same file from GitHub;
-    // on 2026-11-08 both returned the v1.0.4 package byte for byte (SHA256 dda31d37…).
-    // They are opened only when the user clicks; update checks never use them.
-    public const string MirrorUrl = "https://ghfast.top/" + LatestPackageUrl;
-    public const string MirrorBackupUrl = "https://ghproxy.net/" + LatestPackageUrl;
+    // Public relays for users who cannot reach GitHub, opened only when the user clicks; update
+    // checks never use them. Given a repository address, gh-proxy.com lists its releases and files
+    // so users choose for themselves; ghfast.top downloads the newest package directly.
+    // On 2026-11-08 both returned the v1.0.4 package byte for byte (SHA256 dda31d37…).
+    public const string MirrorUrl = "https://gh-proxy.com/" + ProjectUrl;
+    public const string MirrorBackupUrl = "https://ghfast.top/" + LatestPackageUrl;
 
     // 【禁止修改】开发者公告的内容由产品负责人指定，永久固定。
     // 无论发布什么版本，AI 或开发者都不得改写、替换这两段文字，也不得加入版本号或更新内容。
@@ -66,7 +67,7 @@ public sealed record AnnouncementCopy(
                 "Please include your laptop model, CPU/GPU, Windows version, the affected feature, steps and screenshots. Confirmation that a feature works is useful too. Do not upload full system reports containing personal information.",
                 "This page is bundled and never fetches announcements. Update checks only read the latest version number from GitHub and can be turned off in Settings. Instructions and licenses come with the release package.",
                 "Mirror download", "Backup mirror",
-                "Third-party relays of the same GitHub file, opened only on click. Check the SHA256 in the release notes.")
+                "Third-party relays of the GitHub files, opened only on click; ads on their pages are not ours. Check the SHA256 in the release notes.")
             : new("关于与公告", "版本、更新和使用提醒", "当前版本", version,
                 "更新日期", UpdateDate, "产品介绍",
                 DeveloperNoticeChinese,
@@ -83,5 +84,5 @@ public sealed record AnnouncementCopy(
                 "欢迎提供机型、CPU/GPU、Windows 版本、所用功能、复现步骤和截图；确认某项功能正常也很有帮助。请勿上传包含个人信息的完整系统报告。",
                 "本页内容随版本提供，不会联网获取公告。检查更新只读取 GitHub 上的最新版本号，不下载任何内容，可在设置中关闭自动检查。使用说明与第三方许可随发布包提供。",
                 "国内加速下载", "备用加速线路",
-                "加速线路由第三方服务转发 GitHub 上的同一个文件，只在点击时打开。下载后可对照更新日志核对 SHA256。");
+                "加速线路由第三方服务转发 GitHub 上的文件，只在点击时打开，其页面上的广告与本项目无关。下载后可对照更新日志核对 SHA256。");
 }

@@ -74,10 +74,10 @@ public sealed class Snapshot4AnnouncementTests
         Assert.Equal("https://github.com/AstralMemory/RevoHelper", AnnouncementCopy.LinkFor("project"));
         Assert.Equal("https://github.com/AstralMemory/RevoHelper/releases", AnnouncementCopy.LinkFor("downloads"));
         Assert.Equal("https://github.com/AstralMemory/RevoHelper/issues", AnnouncementCopy.LinkFor("feedback"));
-        // Mirrors relay the newest release's fixed-name package from GitHub, nothing else.
+        // One mirror lists this repository's releases; the other relays the newest fixed-name package.
         const string package = "https://github.com/AstralMemory/RevoHelper/releases/latest/download/RevoHelper.zip";
-        Assert.Equal("https://ghfast.top/" + package, AnnouncementCopy.LinkFor("mirror"));
-        Assert.Equal("https://ghproxy.net/" + package, AnnouncementCopy.LinkFor("mirror-backup"));
+        Assert.Equal("https://gh-proxy.com/https://github.com/AstralMemory/RevoHelper", AnnouncementCopy.LinkFor("mirror"));
+        Assert.Equal("https://ghfast.top/" + package, AnnouncementCopy.LinkFor("mirror-backup"));
         foreach (var unknown in new string?[] { null, "", "other", "PROJECT", "MIRROR", "https://example.com", "../settings", "javascript:alert(1)" })
             Assert.Null(AnnouncementCopy.LinkFor(unknown));
     }

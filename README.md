@@ -37,13 +37,13 @@
 - **水冷启动组件**：BootWater 已内置；只有需要登录前连接水冷并主动点击“安装／修复”时，才会在系统目录部署辅助组件，用于开机后自动连接水冷设备。
 - **联网与检查更新**：从 V1.0.4 起，除了与本机官方服务的本地通信，RevoHelper 只在检查更新时访问互联网。程序启动约 2 分钟后，读取本仓库 GitHub Releases 上最新正式版的版本号；成功后每天最多检查一次，失败则约 3 小时后重试。请求不带账号信息，不发送设备、硬件或使用数据，也不会下载、安装或运行任何内容。
   - 发现新版本时，主页版本号旁会出现提示，点击打开“关于与公告”页，可选择 GitHub 下载或国内加速线路，是否更新由你决定。主页的刷新图标和“关于与公告”页可以随时手动检查。
-  - “关于与公告”页的“国内加速下载”和“备用加速线路”通过第三方公共加速服务（ghfast.top、ghproxy.net）转发本仓库最新版本的 `RevoHelper.zip`，文件与 GitHub 上相同。只有点击按钮时才会打开，检查更新不会经过这些服务。下载后可对照 Release 中的 SHA256 核对。
+  - “关于与公告”页的“国内加速下载”打开第三方加速站 gh-proxy.com 的版本列表，可自己选择版本和文件；“备用加速线路”通过第三方服务 ghfast.top 直接下载最新运行包 `RevoHelper.zip`。文件都转发自本仓库的 GitHub Releases，第三方页面上的广告与本项目无关。只有点击按钮时才会打开，检查更新不会经过这些服务。下载后可对照 Release 中的 SHA256 核对。
   - 部分网络无法连接 GitHub，此时检查会失败，但不影响其它功能，也不会弹出提示。如果当前版本已使用 15 天，且这段时间一直没能连上 GitHub，主页会提示一次“可能有新版本”。
   - 可在“设置 → 更新”关闭自动检查，关闭后程序不会自动联网。实现代码见 [`src/RevoHelper.App/Updates`](./src/RevoHelper.App/Updates)。
 
 ## 快速开始：下载与运行
 
-1. 前往 [最新正式版](https://github.com/AstralMemory/RevoHelper/releases/latest)，下载运行包 `RevoHelper.v1.0.4.1.zip`，不要将 `Source Code` 源码包当作运行包。无法打开 GitHub 时，可用加速链接下载最新运行包：`https://ghfast.top/https://github.com/AstralMemory/RevoHelper/releases/latest/download/RevoHelper.zip`。
+1. 前往 [最新正式版](https://github.com/AstralMemory/RevoHelper/releases/latest)，下载运行包 `RevoHelper.v1.0.4.1.zip`，不要将 `Source Code` 源码包当作运行包。无法打开 GitHub 时，可在第三方加速站查看版本并下载：`https://gh-proxy.com/https://github.com/AstralMemory/RevoHelper`。
 2. 解压后运行 `RevoHelper.exe`，建议以管理员身份运行。**RevoHelper是绿色免安装的。**
 3. 系统需要 **Windows 11 64 位**和 [.NET 10 Desktop Runtime（桌面运行时）](https://dotnet.microsoft.com/zh-cn/download/dotnet/10.0)。若提示缺少运行库，请选择 **Desktop Runtime**，而不是普通 Runtime。
 
@@ -117,13 +117,13 @@ The following images preview the application interface (The UI text in the image
 - **Liquid-cooling startup helper:** BootWater is bundled. The helper is deployed to the system directory only when you need to connect the cooler before sign-in and explicitly click “Install / Repair.” It is used to connect the liquid-cooling device automatically after startup.
 - **Internet access and update checks:** Starting with V1.0.4, apart from local communication with the official services on your laptop, RevoHelper goes online only to check for updates. About 2 minutes after launch, it reads the version number of the latest stable release from this repository's GitHub Releases. After a successful check it checks at most once a day; if a check fails, it retries about 3 hours later. The request carries no account information, sends no device, hardware or usage data, and never downloads, installs or runs anything.
   - When a new version is available, a notice appears next to the version number on the home screen. Clicking it opens the About page, where you can download from GitHub or through a mirror; whether to update is up to you. You can check manually at any time with the refresh icon on the home screen or on the About page.
-  - “Mirror download” and “Backup mirror” on the About page use public third-party relays (ghfast.top, ghproxy.net) that fetch this repository's latest `RevoHelper.zip`, the same file as on GitHub. They open only when you click them; update checks never use them. You can compare the SHA256 listed in each Release.
+  - On the About page, “Mirror download” opens the release list on the third-party relay gh-proxy.com, where you choose a version and file; “Backup mirror” downloads the latest `RevoHelper.zip` directly through the third-party relay ghfast.top. The files come from this repository's GitHub Releases, and ads on those third-party pages are not ours. They open only when you click them; update checks never use them. You can compare the SHA256 listed in each Release.
   - Some networks cannot reach GitHub. The check then fails without affecting other features or showing a popup. If the current version has been in use for 15 days without ever reaching GitHub in that time, the home screen shows “Maybe a new version” once.
   - You can turn off automatic checks under Settings → Updates; the app then does not go online on its own. See [`src/RevoHelper.App/Updates`](./src/RevoHelper.App/Updates) for the implementation.
 
 ### Quick start: download and run
 
-1. Go to the [latest stable release](https://github.com/AstralMemory/RevoHelper/releases/latest) and download the application package, `RevoHelper.v1.0.4.1.zip`. Do not use the `Source Code` archive as the application package. If GitHub is unreachable, the latest package is also available through a mirror: `https://ghfast.top/https://github.com/AstralMemory/RevoHelper/releases/latest/download/RevoHelper.zip`.
+1. Go to the [latest stable release](https://github.com/AstralMemory/RevoHelper/releases/latest) and download the application package, `RevoHelper.v1.0.4.1.zip`. Do not use the `Source Code` archive as the application package. If GitHub is unreachable, releases can also be viewed and downloaded through a third-party mirror: `https://gh-proxy.com/https://github.com/AstralMemory/RevoHelper`.
 2. Extract the archive and run `RevoHelper.exe`. Running as administrator is recommended. **RevoHelper is portable and requires no installation.**
 3. You need **64-bit Windows 11** and the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/en-us/download/dotnet/10.0). If prompted to install a missing runtime, choose **Desktop Runtime**, not the standard Runtime.
 

@@ -424,7 +424,7 @@ public sealed class UpdateNotificationTests
         {
             var source = File.ReadAllText(file);
             Assert.DoesNotContain("ghfast", source, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("ghproxy", source, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("gh-proxy", source, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("Mirror", source, StringComparison.Ordinal);
         }
     }
