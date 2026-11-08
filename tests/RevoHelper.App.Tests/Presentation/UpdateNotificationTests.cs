@@ -390,7 +390,7 @@ public sealed class UpdateNotificationTests
     }
 
     [Fact]
-    public void HomeNotices_OnlyOpenTheFixedDownloadsPage()
+    public void HomeNotices_OpenTheAboutPageWithGitHubAndMirrorDownloads()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "RevoHelper.sln"))) directory = directory.Parent;
@@ -399,12 +399,34 @@ public sealed class UpdateNotificationTests
         XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
         XElement Named(string name) => document.Descendants().Single(element => (string?)element.Attribute(x + "Name") == name);
 
-        Assert.Equal("downloads", (string?)Named("UpdateAvailableBadge").Attribute("Tag"));
-        Assert.Equal("AnnouncementLink_Click", (string?)Named("UpdateAvailableBadge").Attribute("Click"));
-        Assert.Equal("downloads", (string?)Named("PossibleUpdateBadge").Attribute("Tag"));
+        // Users who cannot reach GitHub must not be sent straight to a page that never loads.
+        Assert.Equal("UpdateBadge_Click", (string?)Named("UpdateAvailableBadge").Attribute("Click"));
+        Assert.Null(Named("UpdateAvailableBadge").Attribute("Tag"));
         Assert.Equal("PossibleUpdateBadge_Click", (string?)Named("PossibleUpdateBadge").Attribute("Click"));
+        Assert.Null(Named("PossibleUpdateBadge").Attribute("Tag"));
         Assert.Equal("CheckForUpdates_Click", (string?)Named("ManualUpdateCheckButton").Attribute("Click"));
+        Assert.Equal("mirror", (string?)Named("MirrorDownloadButton").Attribute("Tag"));
+        Assert.Equal("mirror-backup", (string?)Named("MirrorBackupDownloadButton").Attribute("Tag"));
         Assert.Equal("https://github.com/AstralMemory/RevoHelper/releases", AnnouncementCopy.LinkFor("downloads"));
+
+        var codeBehind = File.ReadAllText(Path.Combine(directory.FullName, "src", "RevoHelper.App", "MainWindow.xaml.cs"));
+        Assert.Contains("private void UpdateBadge_Click(object sender, RoutedEventArgs e) => Announcements_Click(sender, e);", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("ViewModel.DismissPossibleUpdateNotice();\n        Announcements_Click(sender, e);", codeBehind.Replace("\r\n", "\n"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UpdateCheck_NeverTalksToTheDownloadMirrors()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "RevoHelper.sln"))) directory = directory.Parent;
+        Assert.NotNull(directory);
+        foreach (var file in Directory.EnumerateFiles(Path.Combine(directory.FullName, "src", "RevoHelper.App", "Updates"), "*.cs"))
+        {
+            var source = File.ReadAllText(file);
+            Assert.DoesNotContain("ghfast", source, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("ghproxy", source, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("Mirror", source, StringComparison.Ordinal);
+        }
     }
 
     internal static ApplicationSettings PossibleUpdateSettings() => new(

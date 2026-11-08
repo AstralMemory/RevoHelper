@@ -515,13 +515,18 @@
             <Setter Property="FontSize" Value="{presentation:UiFont 19}" />
             <Setter Property="FontWeight" Value="Normal" />
             <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
                         <Border x:Name="ActionBorder" Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="10">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <ContentPresenter Margin="{TemplateBinding Padding}"
+                                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
@@ -728,14 +733,14 @@
                                            HorizontalAlignment="Center" VerticalAlignment="Center" />
                             </Border>
                             <Button x:Name="UpdateAvailableBadge" Margin="6,4,0,0" Height="22" VerticalAlignment="Center"
-                                    Tag="downloads" Click="AnnouncementLink_Click" Style="{StaticResource UpdateBadgeStyle}"
+                                    Click="UpdateBadge_Click" Style="{StaticResource UpdateBadgeStyle}"
                                     ToolTip="{Binding UiCopy.UpdateBadgeTooltip}" AutomationProperties.Name="{Binding UpdateBadgeText}"
                                     Visibility="{Binding ShowUpdateBadge, Converter={StaticResource ModeVisibilityConverter}}">
                                 <TextBlock x:Name="UpdateAvailableBadgeText" Text="{Binding UpdateBadgeText}" Foreground="#0B7A45"
                                            FontSize="{presentation:UiFont 10}" FontWeight="Medium" />
                             </Button>
                             <Button x:Name="PossibleUpdateBadge" Margin="6,4,0,0" Height="22" VerticalAlignment="Center"
-                                    Tag="downloads" Click="PossibleUpdateBadge_Click" Style="{StaticResource UpdateBadgeStyle}"
+                                    Click="PossibleUpdateBadge_Click" Style="{StaticResource UpdateBadgeStyle}"
                                     ToolTip="{Binding UiCopy.PossibleUpdateTooltip}" AutomationProperties.Name="{Binding UiCopy.PossibleUpdateBadge}"
                                     Visibility="{Binding ShowPossibleUpdateBadge, Converter={StaticResource ModeVisibilityConverter}}">
                                 <TextBlock x:Name="PossibleUpdateBadgeText" Text="{Binding UiCopy.PossibleUpdateBadge}" Foreground="#0B7A45"
@@ -1360,7 +1365,7 @@
                                   VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                         <StackPanel Margin="0,0,8,10">
                             <Button x:Name="AnnouncementsBackButton" Content="{Binding Announcements.BackButton}" Click="AnnouncementsBack_Click"
-                                    Style="{StaticResource IconButtonStyle}" HorizontalAlignment="Left" Width="108" Height="28" FontSize="{presentation:UiFont 9}" Margin="0,0,0,9" />
+                                    Style="{StaticResource IconButtonStyle}" HorizontalAlignment="Left" Width="108" Height="28" FontSize="{presentation:UiFont 9}" Margin="0,0,0,7" />
                             <Border Padding="13,11" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource ControlBorderBrush}" BorderThickness="1" CornerRadius="12">
                                 <Grid>
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
@@ -1396,9 +1401,19 @@
                                         <Button Content="{Binding Announcements.DownloadsButton}" Tag="downloads" Click="AnnouncementLink_Click" Style="{StaticResource IconButtonStyle}" FontSize="{presentation:UiFont 9}" Height="29" Margin="2,0" />
                                         <Button Content="{Binding Announcements.FeedbackButton}" Tag="feedback" Click="AnnouncementLink_Click" Style="{StaticResource IconButtonStyle}" FontSize="{presentation:UiFont 9}" Height="29" Margin="2,0" />
                                     </UniformGrid>
+                                    <!-- 给打不开 GitHub 的用户：第三方加速线路转发 GitHub 上同一个 RevoHelper.zip，只在点击时打开。 -->
+                                    <UniformGrid x:Name="MirrorDownloadButtons" Columns="2" Margin="-2,4,-2,0">
+                                        <Button x:Name="MirrorDownloadButton" Content="{Binding Announcements.MirrorButton}" Tag="mirror" Click="AnnouncementLink_Click"
+                                                Background="#EAF4FF" BorderBrush="#B9D5F2" Foreground="#2676B8" presentation:ThemeScope.AccentSurface="True"
+                                                Style="{StaticResource IconButtonStyle}" FontSize="{presentation:UiFont 9}" Height="29" Margin="2,0" />
+                                        <Button x:Name="MirrorBackupDownloadButton" Content="{Binding Announcements.MirrorBackupButton}" Tag="mirror-backup" Click="AnnouncementLink_Click"
+                                                Style="{StaticResource IconButtonStyle}" FontSize="{presentation:UiFont 9}" Height="29" Margin="2,0" />
+                                    </UniformGrid>
+                                    <TextBlock x:Name="MirrorDownloadNote" Text="{Binding Announcements.MirrorNote}" Foreground="{DynamicResource MutedBrush}"
+                                               FontSize="{presentation:UiFont 8.4}" TextWrapping="Wrap" Margin="0,4,0,0" />
                                 </StackPanel>
                             </Border>
-                            <TextBlock Text="{Binding Announcements.OfflineNote}" Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 8.8}" TextWrapping="Wrap" Margin="2,9,2,0" />
+                            <TextBlock Text="{Binding Announcements.OfflineNote}" Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 8.8}" TextWrapping="Wrap" Margin="2,7,2,0" />
                         </StackPanel>
                     </ScrollViewer>
                     <ScrollViewer x:Name="PerformanceMonitorDrawerContent" Grid.Row="2" Visibility="Collapsed"
@@ -1557,7 +1572,7 @@
                                     </StackPanel>
                                 </StackPanel>
                             </Border>
-                            <TextBlock Text="{presentation:UiText '没有可测画面时显示 FPS —，硬件信息仍会更新。'}" Foreground="{DynamicResource MutedBrush}"
+                            <TextBlock Text="{presentation:UiText '没有可测画面时 FPS 显示为“—”，硬件信息仍会更新。'}" Foreground="{DynamicResource MutedBrush}"
                                        FontSize="{presentation:UiFont 8.8}" Margin="2,8,2,0" TextWrapping="Wrap" />
                         </StackPanel>
                     </ScrollViewer>
@@ -2146,10 +2161,10 @@
                                     </StackPanel>
                                 </Button>
                                 <UniformGrid Columns="2" Margin="0,6,0,0">
-                                    <Button presentation:ThemeScope.AccentSurface="True" Tag="revo-flow" Height="48" Margin="0,0,3,3" Background="#F0EBFF" BorderBrush="#B8A3F2" Style="{StaticResource IconButtonStyle}" Click="LightingPreset_Click"><StackPanel><TextBlock Text="{presentation:UiText '耀世流光'}" FontWeight="SemiBold" FontSize="{presentation:UiFont 9.5}" /><TextBlock Text="{presentation:UiText '键盘彩虹 · 平滑流动'}" FontSize="{presentation:UiFont 7.2}" Foreground="#7559B8" /></StackPanel></Button>
-                                    <Button presentation:ThemeScope.AccentSurface="True" Tag="ice-breath" Height="48" Margin="3,0,0,3" Background="#EAF8FF" BorderBrush="#88C9EC" Style="{StaticResource IconButtonStyle}" Click="LightingPreset_Click"><StackPanel><TextBlock Text="{presentation:UiText '冰海呼吸'}" FontWeight="SemiBold" FontSize="{presentation:UiFont 9.5}" /><TextBlock Text="{presentation:UiText '键盘青蓝呼吸 · 低干扰'}" FontSize="{presentation:UiFont 7.2}" Foreground="#297DAA" /></StackPanel></Button>
-                                    <Button presentation:ThemeScope.AccentSurface="True" Tag="quiet-night" Height="48" Margin="0,3,3,0" Background="#EEF1F8" BorderBrush="#B9C4D7" Style="{StaticResource IconButtonStyle}" Click="LightingPreset_Click"><StackPanel><TextBlock Text="{presentation:UiText '静夜微光'}" FontWeight="SemiBold" FontSize="{presentation:UiFont 9.5}" /><TextBlock Text="{presentation:UiText '键盘低亮静态 · 深蓝'}" FontSize="{presentation:UiFont 7.2}" Foreground="{DynamicResource Neutral52647CBrush}" /></StackPanel></Button>
-                                    <Button presentation:ThemeScope.AccentSurface="True" x:Name="ApplyImportedLightingButton" Height="48" Margin="3,3,0,0" Background="#EEFAF3" BorderBrush="#94D2AE" Style="{StaticResource IconButtonStyle}" Click="ApplyImportedLighting_Click"><StackPanel><TextBlock Text="{presentation:UiText '应用已载入方案'}" FontWeight="SemiBold" FontSize="{presentation:UiFont 9.2}" /><TextBlock Text="{presentation:UiText '只改变键盘灯光'}" FontSize="{presentation:UiFont 7.2}" Foreground="#34815A" /></StackPanel></Button>
+                                    <Button presentation:ThemeScope.AccentSurface="True" Tag="revo-flow" Height="48" Padding="12,0" HorizontalContentAlignment="Left" Margin="0,0,3,3" Background="#F0EBFF" BorderBrush="#B8A3F2" Style="{StaticResource IconButtonStyle}" Click="LightingPreset_Click"><StackPanel><TextBlock Text="{presentation:UiText '耀世流光'}" FontWeight="SemiBold" FontSize="{presentation:UiFont 9.5}" /><TextBlock Text="{presentation:UiText '键盘彩虹 · 平滑流动'}" FontSize="{presentation:UiFont 7.2}" Foreground="#7559B8" /></StackPanel></Button>
+                                    <Button presentation:ThemeScope.AccentSurface="True" Tag="ice-breath" Height="48" Padding="12,0" HorizontalContentAlignment="Left" Margin="3,0,0,3" Background="#EAF8FF" BorderBrush="#88C9EC" Style="{StaticResource IconButtonStyle}" Click="LightingPreset_Click"><StackPanel><TextBlock Text="{presentation:UiText '冰海呼吸'}" FontWeight="SemiBold" FontSize="{presentation:UiFont 9.5}" /><TextBlock Text="{presentation:UiText '键盘青蓝呼吸 · 低干扰'}" FontSize="{presentation:UiFont 7.2}" Foreground="#297DAA" /></StackPanel></Button>
+                                    <Button presentation:ThemeScope.AccentSurface="True" Tag="quiet-night" Height="48" Padding="12,0" HorizontalContentAlignment="Left" Margin="0,3,3,0" Background="#EEF1F8" BorderBrush="#B9C4D7" Style="{StaticResource IconButtonStyle}" Click="LightingPreset_Click"><StackPanel><TextBlock Text="{presentation:UiText '静夜微光'}" FontWeight="SemiBold" FontSize="{presentation:UiFont 9.5}" /><TextBlock Text="{presentation:UiText '键盘低亮静态 · 深蓝'}" FontSize="{presentation:UiFont 7.2}" Foreground="{DynamicResource Neutral52647CBrush}" /></StackPanel></Button>
+                                    <Button presentation:ThemeScope.AccentSurface="True" x:Name="ApplyImportedLightingButton" Height="48" Padding="12,0" HorizontalContentAlignment="Left" Margin="3,3,0,0" Background="#EEFAF3" BorderBrush="#94D2AE" Style="{StaticResource IconButtonStyle}" Click="ApplyImportedLighting_Click"><StackPanel><TextBlock Text="{presentation:UiText '应用已载入方案'}" FontWeight="SemiBold" FontSize="{presentation:UiFont 9.2}" /><TextBlock Text="{presentation:UiText '只改变键盘灯光'}" FontSize="{presentation:UiFont 7.2}" Foreground="#34815A" /></StackPanel></Button>
                                 </UniformGrid>
                             </StackPanel>
                             <StackPanel x:Name="KeyboardLightingProfileActionsSection" Margin="0,8,0,0">
@@ -2170,7 +2185,7 @@
                             </StackPanel>
                             <Border presentation:ThemeScope.AccentSurface="True" Margin="0,8,0,0" Padding="11,9" Background="#F7F4FF" BorderBrush="#BBA7FF" BorderThickness="1" CornerRadius="10">
                                 <StackPanel>
-                                    <TextBlock Text="{presentation:UiText '键盘与灯带自动熄灯'}" FontSize="{presentation:UiFont 9.2}" FontWeight="SemiBold" />
+                                    <TextBlock Text="{presentation:UiText '键盘与灯带自动熄灯'}" Foreground="{DynamicResource TextBrush}" FontSize="{presentation:UiFont 9.2}" FontWeight="SemiBold" />
                                     <ComboBox x:Name="LightingSleepTimerSelector" Height="33" Margin="0,6,0,0"
                                               Style="{StaticResource ModernComboBoxStyle}"
                                               ToolTip="{presentation:UiText '官方协议与状态回读均使用秒值；选择后自动应用，切换灯效不会改动此项。'}"
@@ -2416,7 +2431,7 @@
                                         <Button x:Name="BootWaterInstallButton" Content="{presentation:UiText '安装 / 修复'}" Height="29" FontSize="{presentation:UiFont 8.5}" Margin="2,0" Style="{StaticResource IconButtonStyle}" Click="BootWaterInstall_Click" />
                                         <Button x:Name="BootWaterRemoveButton" Content="{presentation:UiText '移除'}" Height="29" FontSize="{presentation:UiFont 8.5}" Margin="3,0,0,0" Style="{StaticResource IconButtonStyle}" Click="BootWaterRemove_Click" />
                                     </UniformGrid>
-                                    <Expander Header="{presentation:UiText '连接记录与说明'}" FontSize="{presentation:UiFont 8.5}" Margin="0,8,0,0" IsExpanded="False">
+                                    <Expander Header="{presentation:UiText '连接记录与说明'}" Foreground="{DynamicResource TextBrush}" FontSize="{presentation:UiFont 8.5}" Margin="0,8,0,0" IsExpanded="False">
                                         <StackPanel>
                                             <TextBlock Text="{presentation:UiText Value={Binding Experiments.BootWaterLastResult}}" FontSize="{presentation:UiFont 8}" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,6,0,6" />
                                             <TextBlock Text="{presentation:UiText '需先在本页成功连接并记住设备，开机时也要开启水冷箱电源。安装仅创建 RevoHelper 的 SYSTEM 启动任务，不停止或禁用官方服务；移除保留日志。任务已安装不等于蓝牙连接已成功，请冷启动测试。'}" FontSize="{presentation:UiFont 8}" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" />
@@ -2488,10 +2503,10 @@
                             <TextBlock Text="{presentation:UiText '电源'}" Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 9.3}" FontWeight="SemiBold" Margin="2,0,0,6" />
                             <Border Padding="13,8" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource NeutralD7E0EBBrush}" BorderThickness="1" CornerRadius="12">
                                 <StackPanel>
-                                    <Grid x:Name="UsbChargingControlRow" Height="60"><Grid.Style><Style TargetType="Grid"><Setter Property="Visibility" Value="Collapsed" /><Style.Triggers><DataTrigger Binding="{Binding SupportsUsbChargingWhileOff}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers></Style></Grid.Style><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="50" /></Grid.ColumnDefinitions><StackPanel VerticalAlignment="Center"><TextBlock x:Name="UsbChargingSettingLabel" Text="{presentation:UiText '关机下使用 USB 供电'}" Foreground="{DynamicResource TextBrush}" FontSize="{presentation:UiFont 10.5}" FontWeight="SemiBold" /><TextBlock Text="{presentation:UiText '关机或休眠时为兼容设备保留 USB 供电'}" Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 7.8}" Margin="0,2,0,0" /></StackPanel><CheckBox Grid.Column="1" Tag="UsbChargingWhileOff" IsChecked="{Binding IsUsbChargingWhileOffEnabled, Mode=OneWay}" Click="PowerToggle_Click" Style="{StaticResource SettingsToggleStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" /></Grid>
-                                    <Separator Background="{DynamicResource NeutralE3E9F1Brush}" />
-                                    <Grid x:Name="AcAutoBootControlRow" Height="60"><Grid.Style><Style TargetType="Grid"><Setter Property="Visibility" Value="Collapsed" /><Style.Triggers><DataTrigger Binding="{Binding SupportsAcAutoBoot}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers></Style></Grid.Style><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="50" /></Grid.ColumnDefinitions><StackPanel VerticalAlignment="Center"><TextBlock x:Name="AcAutoBootSettingLabel" Text="{presentation:UiText '来电自动开机'}" Foreground="{DynamicResource TextBrush}" FontSize="{presentation:UiFont 10.5}" FontWeight="SemiBold" /><TextBlock Text="{presentation:UiText '接入电源适配器后自动启动设备'}" Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 7.8}" Margin="0,2,0,0" /></StackPanel><CheckBox Grid.Column="1" Tag="AcAutoBoot" IsChecked="{Binding IsAcAutoBootEnabled, Mode=OneWay}" Click="PowerToggle_Click" Style="{StaticResource SettingsToggleStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" /></Grid>
-                                    <Separator Background="{DynamicResource NeutralE3E9F1Brush}" />
+                                    <Grid x:Name="UsbChargingControlRow" Height="60"><Grid.Style><Style TargetType="Grid"><Setter Property="Visibility" Value="Collapsed" /><Style.Triggers><DataTrigger Binding="{Binding SupportsUsbChargingWhileOff}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers></Style></Grid.Style><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="50" /></Grid.ColumnDefinitions><StackPanel VerticalAlignment="Center" Margin="0,0,7,0"><TextBlock x:Name="UsbChargingSettingLabel" Text="{presentation:UiText '关机下使用 USB 供电'}" Foreground="{DynamicResource TextBrush}" FontSize="{presentation:UiFont 10.5}" FontWeight="SemiBold" /><TextBlock Text="{presentation:UiText '关机或休眠时为兼容设备保留 USB 供电'}" Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 7.8}" Margin="0,2,0,0" TextWrapping="Wrap" /></StackPanel><CheckBox Grid.Column="1" Tag="UsbChargingWhileOff" IsChecked="{Binding IsUsbChargingWhileOffEnabled, Mode=OneWay}" Click="PowerToggle_Click" Style="{StaticResource SettingsToggleStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" /></Grid>
+                                    <Separator Background="{DynamicResource NeutralE3E9F1Brush}" Visibility="{Binding SupportsAcAutoBoot, Converter={StaticResource ModeVisibilityConverter}}" />
+                                    <Grid x:Name="AcAutoBootControlRow" Height="60"><Grid.Style><Style TargetType="Grid"><Setter Property="Visibility" Value="Collapsed" /><Style.Triggers><DataTrigger Binding="{Binding SupportsAcAutoBoot}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers></Style></Grid.Style><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="50" /></Grid.ColumnDefinitions><StackPanel VerticalAlignment="Center" Margin="0,0,7,0"><TextBlock x:Name="AcAutoBootSettingLabel" Text="{presentation:UiText '来电自动开机'}" Foreground="{DynamicResource TextBrush}" FontSize="{presentation:UiFont 10.5}" FontWeight="SemiBold" /><TextBlock Text="{presentation:UiText '接入电源适配器后自动启动设备'}" Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 7.8}" Margin="0,2,0,0" TextWrapping="Wrap" /></StackPanel><CheckBox Grid.Column="1" Tag="AcAutoBoot" IsChecked="{Binding IsAcAutoBootEnabled, Mode=OneWay}" Click="PowerToggle_Click" Style="{StaticResource SettingsToggleStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" /></Grid>
+                                    <Separator Background="{DynamicResource NeutralE3E9F1Brush}" Visibility="{Binding SupportsHighPerformancePowerMode, Converter={StaticResource ModeVisibilityConverter}}" />
                                     <Grid x:Name="HighPerformancePowerControlRow" Height="60">
                                         <Grid.Style><Style TargetType="Grid"><Setter Property="Visibility" Value="Collapsed" /><Style.Triggers><DataTrigger Binding="{Binding SupportsHighPerformancePowerMode}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers></Style></Grid.Style>
                                         <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="50" /></Grid.ColumnDefinitions>
@@ -2510,13 +2525,13 @@
                                         </StackPanel>
                                         <CheckBox Grid.Column="1" Tag="HighPerformancePowerMode" IsChecked="{Binding IsHighPerformancePowerModeEnabled, Mode=OneWay}" Click="PowerToggle_Click" Style="{StaticResource SettingsToggleStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" />
                                     </Grid>
-                                    <Separator Background="{DynamicResource NeutralE3E9F1Brush}" />
+                                    <Separator Background="{DynamicResource NeutralE3E9F1Brush}" Visibility="{Binding SupportsDeepSleep, Converter={StaticResource ModeVisibilityConverter}}" />
                                     <Grid x:Name="DeepSleepControlRow" Height="64">
                                         <Grid.Style><Style TargetType="Grid"><Setter Property="Visibility" Value="Collapsed" /><Style.Triggers><DataTrigger Binding="{Binding SupportsDeepSleep}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers></Style></Grid.Style>
-                                        <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="78" /><ColumnDefinition Width="54" /></Grid.ColumnDefinitions>
-                                        <StackPanel VerticalAlignment="Center" Margin="0,0,7,0"><TextBlock x:Name="DeepSleepSettingLabel" Text="{presentation:UiText '深度睡眠'}" Foreground="{DynamicResource TextBrush}" FontSize="{presentation:UiFont 10.5}" FontWeight="SemiBold" /><TextBlock Text="{presentation:UiText '睡眠指定时间后进入深度睡眠'}" Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 7.8}" Margin="0,2,0,0" TextWrapping="Wrap" /></StackPanel>
-                                        <ComboBox x:Name="DeepSleepMinuteSelector" Grid.Column="1" ItemsSource="{Binding DeepSleepMinuteOptions}" SelectedItem="{Binding SelectedDeepSleepMinutes, Mode=TwoWay}" Margin="4,0" VerticalAlignment="Center" Height="30" Style="{StaticResource ModernComboBoxStyle}">
-                                            <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{presentation:UiText Value={Binding StringFormat={}{0} min}}" /></DataTemplate></ComboBox.ItemTemplate>
+                                        <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="92" /><ColumnDefinition Width="54" /></Grid.ColumnDefinitions>
+                                        <StackPanel VerticalAlignment="Center" Margin="0,0,7,0"><TextBlock x:Name="DeepSleepSettingLabel" Text="{presentation:UiText '深度睡眠'}" Foreground="{DynamicResource TextBrush}" FontSize="{presentation:UiFont 10.5}" FontWeight="SemiBold" /><TextBlock Text="{presentation:UiText '按所选时长进入深度睡眠'}" Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 7.8}" Margin="0,2,0,0" TextWrapping="Wrap" /></StackPanel>
+                                        <ComboBox x:Name="DeepSleepMinuteSelector" Grid.Column="1" ItemsSource="{Binding DeepSleepMinuteOptions}" SelectedItem="{Binding SelectedDeepSleepMinutes, Mode=TwoWay}" Margin="4,0" Padding="10,0,28,0" VerticalAlignment="Center" Height="30" Style="{StaticResource ModernComboBoxStyle}">
+                                            <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{presentation:UiText Value={Binding StringFormat={}{0} 分钟}}" /></DataTemplate></ComboBox.ItemTemplate>
                                         </ComboBox>
                                         <CheckBox Grid.Column="2" IsChecked="{Binding IsDeepSleepEnabled, Mode=OneWay}" Click="DeepSleep_Click" Style="{StaticResource SettingsToggleStyle}" HorizontalAlignment="Right" />
                                     </Grid>
@@ -2663,19 +2678,20 @@
                                     </Grid>
                                 </Border>
 
+                                <!-- The gradients sit on the borders themselves: ClipToBounds clips square, CornerRadius rounds. -->
                                 <Border x:Name="DisplayColorArtwork" Height="116" Margin="0,10,0,0" CornerRadius="12"
-                                        BorderBrush="{DynamicResource NeutralC7D7E8Brush}" BorderThickness="1" ClipToBounds="True">
+                                        BorderBrush="{DynamicResource NeutralC7D7E8Brush}" BorderThickness="1">
+                                    <Border.Background>
+                                        <LinearGradientBrush StartPoint="0,1" EndPoint="1,0">
+                                            <GradientStop Color="#16BE9D" Offset="0" />
+                                            <GradientStop Color="#2AC4D5" Offset="0.28" />
+                                            <GradientStop Color="#F3DB67" Offset="0.60" />
+                                            <GradientStop Color="#FF956A" Offset="0.82" />
+                                            <GradientStop Color="#F45379" Offset="1" />
+                                        </LinearGradientBrush>
+                                    </Border.Background>
                                     <Grid>
-                                        <Grid.Background>
-                                            <LinearGradientBrush StartPoint="0,1" EndPoint="1,0">
-                                                <GradientStop Color="#16BE9D" Offset="0" />
-                                                <GradientStop Color="#2AC4D5" Offset="0.28" />
-                                                <GradientStop Color="#F3DB67" Offset="0.60" />
-                                                <GradientStop Color="#FF956A" Offset="0.82" />
-                                                <GradientStop Color="#F45379" Offset="1" />
-                                            </LinearGradientBrush>
-                                        </Grid.Background>
-                                        <Border Opacity="0.34">
+                                        <Border Opacity="0.34" CornerRadius="11">
                                             <Border.Background>
                                                 <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
                                                     <GradientStop Color="#41E0C6" Offset="0" />
@@ -2951,7 +2967,7 @@
                                         <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="112" /></Grid.ColumnDefinitions>
                                         <StackPanel>
                                             <TextBlock Text="{presentation:UiText '定时关机'}" FontSize="{presentation:UiFont 10.5}" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" />
-                                            <TextBlock Text="{presentation:UiText '使用 Windows 原生关机提醒'}" FontSize="{presentation:UiFont 8}" Foreground="{DynamicResource MutedBrush}" Margin="0,3,8,0" />
+                                            <TextBlock Text="{presentation:UiText '使用 Windows 原生关机提醒'}" FontSize="{presentation:UiFont 8}" Foreground="{DynamicResource MutedBrush}" Margin="0,3,8,0" TextWrapping="Wrap" />
                                         </StackPanel>
                                         <ComboBox x:Name="ShutdownMinuteSelector" Grid.Column="1" Height="30"
                                                   Style="{StaticResource ModernComboBoxStyle}"
@@ -3142,7 +3158,7 @@
                                         <Grid>
                                             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                             <StackPanel>
-                                                <TextBlock Text="{presentation:UiText '机械革命官方控制台（CCUWinUI）'}" Foreground="{DynamicResource TextBrush}" FontSize="{presentation:UiFont 9.5}" FontWeight="SemiBold" />
+                                                <TextBlock Text="{presentation:UiText '机械革命官方控制台（CCUWinUI）'}" Foreground="{DynamicResource TextBrush}" FontSize="{presentation:UiFont 9.5}" FontWeight="SemiBold" Margin="0,0,8,0" TextWrapping="Wrap" />
                                                 <TextBlock Text="{presentation:UiText 'RevoHelper 可以与官方控制台共存。请保留 GCUBridge、GCUService 和 OSD 热键后台运行。'}"
                                                            Foreground="#6652B8" FontSize="{presentation:UiFont 8.2}" Margin="0,3,8,0" TextWrapping="Wrap" />
                                             </StackPanel>

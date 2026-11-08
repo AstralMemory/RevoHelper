@@ -763,13 +763,13 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public void AppVersionText_UsesV104ReleaseIdentity()
+    public void AppVersionText_UsesV1041Identity()
     {
         var viewModel = new MainWindowViewModel(CreateDashboard());
 
-        Assert.Equal("V1.0.4", viewModel.ReleaseVersionText);
-        Assert.Equal("V1.0.4", viewModel.ReleaseBadgeText);
-        Assert.Equal("RevoHelper V1.0.4 · 免费使用", viewModel.AppVersionText);
+        Assert.Equal("V1.0.4.1", viewModel.ReleaseVersionText);
+        Assert.Equal("V1.0.4.1", viewModel.ReleaseBadgeText);
+        Assert.Equal("RevoHelper V1.0.4.1 · 免费使用", viewModel.AppVersionText);
     }
 
     [Fact]
@@ -786,7 +786,7 @@ public sealed class MainWindowViewModelTests
         Assert.Equal("en-US", store.LastSaved?.UiLanguageCode);
         Assert.Equal("Laptop performance profiles", viewModel.UiCopy.HomeTitle);
         Assert.Equal("Performance", viewModel.DrawerTitle);
-        Assert.Equal("RevoHelper V1.0.4 · Free to use", viewModel.AppVersionText);
+        Assert.Equal("RevoHelper V1.0.4.1 · Free to use", viewModel.AppVersionText);
     }
 
     [Fact]
@@ -2793,6 +2793,33 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public async Task SetSelectedLightingZonePower_Unconfirmed_LetsALaterStatusEventMoveTheSwitch()
+    {
+        var controls = new RecordingQuickControlsController
+        {
+            LightingPowerResult = ControlResult.Rejected("海岸灯带电源写入后未得到目标状态回读。")
+        };
+        controls.AvailableLightingZones.Add(LightingZone.CoastLightbar);
+        var viewModel = CreateViewModel(quickControlsController: controls);
+        await viewModel.OpenLightingAsync(CancellationToken.None);
+        viewModel.SelectLightingZone(LightingZone.CoastLightbar);
+        viewModel.IsSelectedLightingZoneEnabled = false;
+
+        await viewModel.SetSelectedLightingZonePowerAsync(CancellationToken.None);
+
+        // Unconfirmed: the switch returns to the last reported state and says so.
+        Assert.True(viewModel.IsSelectedLightingZoneEnabled);
+        Assert.True(viewModel.IsLightingStatusProblem);
+
+        // The light did turn off and reports it later: the switch must follow.
+        viewModel.ApplyLightingZoneState(LightingZone.CoastLightbar, new(true, "MEZone_Lighbar4",
+            new(LightingZone.CoastLightbar, false, LightingEffect.Static, new(0, 180, 255), 3, 2, LightingDirection.None, 2),
+            [LightingEffect.Static], ReportedFields: LightingReportedFields.Power));
+
+        Assert.False(viewModel.IsSelectedLightingZoneEnabled);
+    }
+
+    [Fact]
     public async Task SetSelectedLightingZonePower_WhenTurningOn_AppliesCompleteVisibleConfiguration()
     {
         var controls = new RecordingQuickControlsController();
@@ -4514,13 +4541,15 @@ public sealed class MainWindowViewModelTests
             return LightingApplyResult ?? new ControlResult(true, "灯效已应用并回读");
         }
 
+        public ControlResult? LightingPowerResult { get; set; }
+
         public ValueTask<ControlResult> SetLightingZonePowerAsync(
             LightingZone zone,
             bool enabled,
             CancellationToken cancellationToken)
         {
             LightingPowerRequests.Add((zone, enabled));
-            return ValueTask.FromResult(new ControlResult(true, "分区电源已应用并回读"));
+            return ValueTask.FromResult(LightingPowerResult ?? new ControlResult(true, "分区电源已应用并回读"));
         }
 
         public ValueTask<ControlResult> SetLightingSleepTimerAsync(int seconds, CancellationToken cancellationToken)

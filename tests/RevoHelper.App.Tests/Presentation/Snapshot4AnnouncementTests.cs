@@ -52,7 +52,7 @@ public sealed class Snapshot4AnnouncementTests
     {
         var copy = AnnouncementCopy.For(language, "V1.0.2");
         Assert.Equal("V1.0.2", copy.Version);
-        Assert.Equal("2026-11-07", copy.UpdatedDate);
+        Assert.Equal("2026-11-08", copy.UpdatedDate);
         Assert.Contains("MIT", copy.Release);
         Assert.Contains("GitHub Releases", copy.Release);
         Assert.DoesNotContain(language == "en-US" ? "has been publicly released" : "已正式发布", copy.Release);
@@ -69,13 +69,30 @@ public sealed class Snapshot4AnnouncementTests
     }
 
     [Fact]
-    public void AnnouncementLinks_OnlyAllowThreeDeveloperControlledGitHubDestinations()
+    public void AnnouncementLinks_OnlyAllowGitHubAndTwoNamedMirrorsOfTheSamePackage()
     {
         Assert.Equal("https://github.com/AstralMemory/RevoHelper", AnnouncementCopy.LinkFor("project"));
         Assert.Equal("https://github.com/AstralMemory/RevoHelper/releases", AnnouncementCopy.LinkFor("downloads"));
         Assert.Equal("https://github.com/AstralMemory/RevoHelper/issues", AnnouncementCopy.LinkFor("feedback"));
-        foreach (var unknown in new string?[] { null, "", "other", "PROJECT", "https://example.com", "../settings", "javascript:alert(1)" })
+        // Mirrors relay the newest release's fixed-name package from GitHub, nothing else.
+        const string package = "https://github.com/AstralMemory/RevoHelper/releases/latest/download/RevoHelper.zip";
+        Assert.Equal("https://ghfast.top/" + package, AnnouncementCopy.LinkFor("mirror"));
+        Assert.Equal("https://ghproxy.net/" + package, AnnouncementCopy.LinkFor("mirror-backup"));
+        foreach (var unknown in new string?[] { null, "", "other", "PROJECT", "MIRROR", "https://example.com", "../settings", "javascript:alert(1)" })
             Assert.Null(AnnouncementCopy.LinkFor(unknown));
+    }
+
+    [Theory]
+    [InlineData("zh-CN", "国内加速下载", "备用加速线路", "SHA256")]
+    [InlineData("en-US", "Mirror download", "Backup mirror", "SHA256")]
+    public void MirrorCopy_NamesBothLinesAndExplainsTheThirdPartyRelay(string language, string mirror, string backup, string hash)
+    {
+        var copy = AnnouncementCopy.For(language, "V1.0.5");
+        Assert.Equal(mirror, copy.MirrorButton);
+        Assert.Equal(backup, copy.MirrorBackupButton);
+        Assert.Contains(hash, copy.MirrorNote, StringComparison.Ordinal);
+        Assert.Contains(language == "en-US" ? "third-party" : "第三方", copy.MirrorNote, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("GitHub", copy.MirrorNote, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -134,7 +151,7 @@ public sealed class Snapshot4AnnouncementTests
                     // "Feedback". Check the removed section bindings rather than matching button ink.
                     Assert.DoesNotContain(Descendants(scroll).OfType<TextBlock>(), body =>
                         BindingOperations.GetBinding(body, TextBlock.TextProperty)?.Path?.Path == $"Announcements.{removedField}");
-                foreach (var link in new[] { "project", "downloads", "feedback" })
+                foreach (var link in new[] { "project", "downloads", "feedback", "mirror", "mirror-backup" })
                     Assert.Contains(Descendants(scroll).OfType<Button>(), button => Equals(button.Tag, link));
 
                 foreach (var body in Descendants(scroll).OfType<TextBlock>().Where(text => text.TextWrapping == TextWrapping.Wrap && !string.IsNullOrWhiteSpace(text.Text)))

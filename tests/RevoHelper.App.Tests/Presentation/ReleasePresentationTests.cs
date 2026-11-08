@@ -104,8 +104,8 @@ public sealed class ReleasePresentationTests
         Assert.Equal("{Binding AppVersionText}", (string?)Named(window, "HomeVersionFooter").Attribute("Text"));
         Assert.Equal("Collapsed", (string?)Named(window, "HomeVersionFooter").Attribute("Visibility"));
         var source = File.ReadAllText(Locate("src", "RevoHelper.App", "Presentation", "MainWindowViewModel.cs"));
-        Assert.Contains("public string ReleaseVersionText => \"V1.0.4\";", source, StringComparison.Ordinal);
-        Assert.Contains("public string ReleaseBadgeText => \"V1.0.4\";", source, StringComparison.Ordinal);
+        Assert.Contains("public string ReleaseVersionText => \"V1.0.4.1\";", source, StringComparison.Ordinal);
+        Assert.Contains("public string ReleaseBadgeText => \"V1.0.4.1\";", source, StringComparison.Ordinal);
         Assert.Contains("public string AppVersionText => $\"RevoHelper {ReleaseVersionText} · {UiCopy.OpenSourceAndFree}\";", source, StringComparison.Ordinal);
         foreach (var old in new[] { "BETA · V1", "Beta v1 ·", "Beta v0.0.1", "界面预览 v23" })
         {
@@ -159,13 +159,13 @@ public sealed class ReleasePresentationTests
     }
 
     [Fact]
-    public void ReleaseMetadata_Uses104Release()
+    public void ReleaseMetadata_Uses1041Release()
     {
         var project = XDocument.Load(Locate("src", "RevoHelper.App", "RevoHelper.App.csproj"));
-        Assert.Equal("1.0.4", project.Descendants("Version").Single().Value);
-        Assert.Equal("1.0.4.0", project.Descendants("AssemblyVersion").Single().Value);
-        Assert.Equal("1.0.4.9", project.Descendants("FileVersion").Single().Value);
-        Assert.Equal("1.0.4+20261107", project.Descendants("InformationalVersion").Single().Value);
+        Assert.Equal("1.0.4.1", project.Descendants("Version").Single().Value);
+        Assert.Equal("1.0.4.1", project.Descendants("AssemblyVersion").Single().Value);
+        Assert.Equal("1.0.4.10", project.Descendants("FileVersion").Single().Value);
+        Assert.Equal("1.0.4.1+20261108", project.Descendants("InformationalVersion").Single().Value);
         Assert.Empty(project.Descendants("Content"));
     }
 
@@ -173,8 +173,8 @@ public sealed class ReleasePresentationTests
     public void SharedBuildMetadata_UsesTheSameReleaseForCurrentAssemblies()
     {
         var defaults = XDocument.Load(Locate("Directory.Build.props"));
-        Assert.Equal("1.0.4", defaults.Descendants("Version").Single().Value);
-        Assert.Equal("1.0.4+20261107", defaults.Descendants("InformationalVersion").Single().Value);
+        Assert.Equal("1.0.4.1", defaults.Descendants("Version").Single().Value);
+        Assert.Equal("1.0.4.1+20261108", defaults.Descendants("InformationalVersion").Single().Value);
         Assert.Equal("Astral Memory", defaults.Descendants("Authors").Single().Value);
     }
 

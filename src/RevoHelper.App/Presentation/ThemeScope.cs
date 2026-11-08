@@ -4,7 +4,10 @@ using System.Windows.Media;
 
 namespace RevoHelper.App.Presentation;
 
-/// <summary>Pastel surfaces retain dark copy even inside a dark-themed window.</summary>
+/// <summary>
+/// Pastel surfaces stay light in both themes, so everything inside them uses the light palette:
+/// dark copy, and light inputs, buttons and lines (a dark input on a pastel card was unreadable).
+/// </summary>
 public static class ThemeScope
 {
     private static readonly object Missing = new();
@@ -40,13 +43,18 @@ public static class ThemeScope
         Set("TextBrush", primary);
         Set("MutedBrush", secondary);
         Set("QuietTextBrush", secondary);
+        foreach (var key in AppTheme.SurfaceKeys)
+            Set(key, Brush(AppTheme.LightColorOf(key)));
         foreach (var pair in AppTheme.NeutralBrushKeys)
         {
             var color = (Color)ColorConverter.ConvertFromString(pair.Key);
-            // Only text-like neutrals: borders and pale surfaces keep their own palette.
-            if (Math.Max(color.R, Math.Max(color.G, color.B)) < 200)
-                Set(pair.Value, color.R < 80 ? primary : secondary);
+            // Text-like neutrals become the dark copy; pale surfaces and borders keep their light color.
+            Set(pair.Value, Math.Max(color.R, Math.Max(color.G, color.B)) < 200
+                ? color.R < 80 ? primary : secondary
+                : Brush(pair.Key));
         }
+        // Inherited Foreground is deliberately left alone: some pastel borders sit inside control
+        // templates whose text follows the control. Text on a pastel card names TextBrush instead.
     }
 
     private static SolidColorBrush Brush(string color)

@@ -483,6 +483,63 @@ public sealed class GcuQuickControlsControllerTests
         Assert.Equal(1, channel.AtomicLightingWrites);
     }
 
+    // runtime.log 2026-11-08: each coast power write read back the state from before that write.
+    private const string CoastOn =
+        "{\"powerStatus\":\"On\",\"type\":\"MEZone_Lighbar4\",\"effect\":\"Single\",\"light\":3,\"speed\":2,\"R\":0,\"G\":176,\"B\":255}";
+    private const string CoastOff = "{\"powerStatus\":\"Off\",\"type\":\"MEZone_Lighbar4\"}";
+
+    [Fact]
+    public async Task SetLightingZonePower_CoastOffReadbackOneCommandBehind_AsksAgainAndConfirms()
+    {
+        var delays = new List<TimeSpan>();
+        var channel = new FakeChannel();
+        channel.LightingStatuses[LightingZone.CoastLightbar] = CoastOn;
+        var controller = new GcuQuickControlsController(channel, (delay, _) => { delays.Add(delay); return Task.CompletedTask; });
+        await controller.ReadLightingZoneAsync(LightingZone.CoastLightbar, CancellationToken.None);
+        channel.LightingReadbacks.Enqueue(CoastOn);
+        channel.LightingStatuses[LightingZone.CoastLightbar] = CoastOff;
+
+        var result = await controller.SetLightingZonePowerAsync(LightingZone.CoastLightbar, false, CancellationToken.None);
+
+        Assert.True(result.Succeeded, result.Reason);
+        Assert.Single(channel.LightingWrites);
+        Assert.Single(delays);
+        Assert.Equal(2, channel.LightingReads);
+    }
+
+    [Fact]
+    public async Task SetLightingZonePower_CoastOnReadbackOneCommandBehind_AsksAgainAndConfirms()
+    {
+        var channel = new FakeChannel();
+        channel.LightingStatuses[LightingZone.CoastLightbar] = CoastOff;
+        var controller = new GcuQuickControlsController(channel, (_, _) => Task.CompletedTask);
+        await controller.ReadLightingZoneAsync(LightingZone.CoastLightbar, CancellationToken.None);
+        channel.LightingReadbacks.Enqueue(CoastOff);
+        channel.LightingStatuses[LightingZone.CoastLightbar] = CoastOn;
+
+        var result = await controller.SetLightingZonePowerAsync(LightingZone.CoastLightbar, true, CancellationToken.None);
+
+        Assert.True(result.Succeeded, result.Reason);
+        Assert.DoesNotContain("最终开启状态", result.Reason, StringComparison.Ordinal);
+        Assert.Equal(3, channel.LightingWrites.Count);
+    }
+
+    [Fact]
+    public async Task SetLightingZonePower_CoastThatNeverChanges_StillRejectsAfterBoundedRereads()
+    {
+        var delays = 0;
+        var channel = new FakeChannel();
+        channel.LightingStatuses[LightingZone.CoastLightbar] = CoastOn;
+        var controller = new GcuQuickControlsController(channel, (_, _) => { delays++; return Task.CompletedTask; });
+        await controller.ReadLightingZoneAsync(LightingZone.CoastLightbar, CancellationToken.None);
+
+        var result = await controller.SetLightingZonePowerAsync(LightingZone.CoastLightbar, false, CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Single(channel.LightingWrites);
+        Assert.Equal(3, delays);
+    }
+
     [Fact]
     public async Task SetLightingZonePower_DisablingCoastLightbar_SendsOnlyPowerOff()
     {

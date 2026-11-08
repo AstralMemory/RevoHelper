@@ -243,9 +243,9 @@ public sealed class GcuQuickControlsController : IQuickControlsController
             zone,
             GcuQuickControlsCommand.KeyboardBacklight(enabled),
             cancellationToken).ConfigureAwait(false);
-        var state = MergeLightingState(
-            baseline,
-            GcuQuickControlsStatusParser.ParseLightingZone(zone, readbackPayload));
+        var parsed = await SettleLightingPowerAsync(zone, baseline,
+            GcuQuickControlsStatusParser.ParseLightingZone(zone, readbackPayload), enabled, cancellationToken).ConfigureAwait(false);
+        var state = MergeLightingState(baseline, parsed);
         if (state is not null) lightingZoneCache[zone] = state;
         return state?.Configuration?.Enabled == enabled
             ? new(true, $"{LightingZoneLabel(zone)}已{(enabled ? "开启" : "关闭")}并回读确认。")
@@ -347,6 +347,10 @@ public sealed class GcuQuickControlsController : IQuickControlsController
                 cancellationToken).ConfigureAwait(false);
         }
         var parsedState = GcuQuickControlsStatusParser.ParseLightingZone(configuration.Zone, readbackPayload);
+        if (configuration.Enabled &&
+            configuration.Zone is LightingZone.CoastLightbar or LightingZone.Logo)
+            parsedState = await SettleLightingPowerAsync(configuration.Zone, baseline, parsedState, true, cancellationToken)
+                .ConfigureAwait(false);
         var state = MergeLightingState(baseline, parsedState);
         var reportedFields = parsedState?.EffectiveReportedFields ?? LightingReportedFields.None;
         var sparseEffectAccepted = reportedFields.HasFlag(LightingReportedFields.Power) &&
@@ -421,9 +425,11 @@ public sealed class GcuQuickControlsController : IQuickControlsController
         string? failure = null;
         try
         {
-            var logo = GcuQuickControlsStatusParser.ParseLightingZone(LightingZone.Logo,
-                await channel.WriteLightingAndReadStatusAsync(LightingZone.Logo,
-                    GcuQuickControlsCommand.KeyboardBacklight(false), cancellationToken).ConfigureAwait(false));
+            var logo = await SettleLightingPowerAsync(LightingZone.Logo, null,
+                GcuQuickControlsStatusParser.ParseLightingZone(LightingZone.Logo,
+                    await channel.WriteLightingAndReadStatusAsync(LightingZone.Logo,
+                        GcuQuickControlsCommand.KeyboardBacklight(false), cancellationToken).ConfigureAwait(false)),
+                false, cancellationToken).ConfigureAwait(false);
             if (logo is not null) lightingZoneCache[LightingZone.Logo] = logo;
             if (logo?.Configuration?.Enabled != false) failure = "LOGO 关闭未得到回读确认。";
         }
@@ -434,9 +440,11 @@ public sealed class GcuQuickControlsController : IQuickControlsController
         {
             try
             {
-                var restored = GcuQuickControlsStatusParser.ParseLightingZone(LightingZone.CoastLightbar,
-                    await channel.WriteLightingAndReadStatusAsync(LightingZone.CoastLightbar,
-                        GcuQuickControlsCommand.KeyboardBacklight(true), cancellationToken).ConfigureAwait(false));
+                var restored = await SettleLightingPowerAsync(LightingZone.CoastLightbar, coast,
+                    GcuQuickControlsStatusParser.ParseLightingZone(LightingZone.CoastLightbar,
+                        await channel.WriteLightingAndReadStatusAsync(LightingZone.CoastLightbar,
+                            GcuQuickControlsCommand.KeyboardBacklight(true), cancellationToken).ConfigureAwait(false)),
+                    true, cancellationToken).ConfigureAwait(false);
                 if (restored is not null) lightingZoneCache[LightingZone.CoastLightbar] = MergeLightingState(coast, restored)!;
                 if (restored?.Configuration?.Enabled != true) failure = "LOGO 关闭已请求，但海岸灯补偿未得到回读确认。";
             }
@@ -769,6 +777,37 @@ public sealed class GcuQuickControlsController : IQuickControlsController
     private static LightingZoneState? MergeLightingState(
         LightingZoneState? previous,
         LightingZoneState? current) => LightingStateAccumulator.Merge(previous, current);
+
+    private const int LightingPowerSettleReads = 3;
+    private static readonly TimeSpan LightingPowerSettleDelay = TimeSpan.FromMilliseconds(300);
+
+    /// <summary>
+    /// The light bar answers a write with the status it had just before applying it, so the
+    /// first readback can be one command behind (runtime.log, 2026-11-08: every coast power
+    /// write read back the previous state within 5 ms). Ask again before judging the power;
+    /// this only sends status requests and never repeats the command.
+    /// </summary>
+    private async ValueTask<LightingZoneState?> SettleLightingPowerAsync(
+        LightingZone zone,
+        LightingZoneState? baseline,
+        LightingZoneState? parsed,
+        bool enabled,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 0;
+             attempt < LightingPowerSettleReads && MergeLightingState(baseline, parsed)?.Configuration?.Enabled != enabled;
+             attempt++)
+        {
+            await verificationDelay(LightingPowerSettleDelay, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                parsed = GcuQuickControlsStatusParser.ParseLightingZone(zone,
+                    await channel.ReadLightingStatusAsync(zone, cancellationToken).ConfigureAwait(false)) ?? parsed;
+            }
+            catch (TimeoutException) { }
+        }
+        return parsed;
+    }
 
     private static bool UsesUserColor(RevoHelper.Core.Control.LightingEffect effect) => effect is not (
         RevoHelper.Core.Control.LightingEffect.Rainbow or

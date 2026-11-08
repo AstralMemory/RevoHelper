@@ -102,6 +102,15 @@ public static class AppTheme
             pair => $"Neutral{pair.Key[1..]}Brush",
             StringComparer.OrdinalIgnoreCase));
 
+    /// <summary>Theme keys for the neutral surfaces, lines and controls (not text).</summary>
+    public static IReadOnlyList<string> SurfaceKeys { get; } =
+    [
+        "SurfaceBrush", "RaisedBrush", "LineBrush", "ControlSurfaceBrush", "ControlHoverBrush",
+        "ControlSelectedBrush", "ControlBorderBrush", "DisabledTrackBrush"
+    ];
+
+    public static string LightColorOf(string key) => Colors[key].LightColor;
+
     public static string Normalize(string? themeCode) =>
         string.Equals(themeCode, Dark, StringComparison.OrdinalIgnoreCase) ? Dark : Light;
 

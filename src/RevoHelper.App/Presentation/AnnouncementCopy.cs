@@ -11,12 +11,23 @@ public sealed record AnnouncementCopy(
     string ProjectButton, string DownloadsButton, string FeedbackButton, string BackButton,
     string ReleaseTitle, string Release, string CompatibilityTitle, string Compatibility,
     string UsageTitle, string Usage, string DevelopmentTitle, string Development,
-    string FeedbackTitle, string Feedback, string OfflineNote)
+    string FeedbackTitle, string Feedback, string OfflineNote,
+    string MirrorButton, string MirrorBackupButton, string MirrorNote)
 {
-    public const string UpdateDate = "2026-11-07";
+    public const string UpdateDate = "2026-11-08";
     public const string ProjectUrl = "https://github.com/AstralMemory/RevoHelper";
     public const string DownloadsUrl = ProjectUrl + "/releases";
     public const string FeedbackUrl = ProjectUrl + "/issues";
+
+    // Every release also carries a copy named RevoHelper.zip, so this link always means
+    // "the newest release" without the app having to reach GitHub first.
+    public const string LatestPackageUrl = DownloadsUrl + "/latest/download/RevoHelper.zip";
+
+    // Public relays for users who cannot reach GitHub. They fetch the same file from GitHub;
+    // on 2026-11-08 both returned the v1.0.4 package byte for byte (SHA256 dda31d37…).
+    // They are opened only when the user clicks; update checks never use them.
+    public const string MirrorUrl = "https://ghfast.top/" + LatestPackageUrl;
+    public const string MirrorBackupUrl = "https://ghproxy.net/" + LatestPackageUrl;
 
     // 【禁止修改】开发者公告的内容由产品负责人指定，永久固定。
     // 无论发布什么版本，AI 或开发者都不得改写、替换这两段文字，也不得加入版本号或更新内容。
@@ -26,12 +37,14 @@ public sealed record AnnouncementCopy(
     public const string DeveloperNoticeChinese = "轻量、免费且开源的机械革命笔记本第三方控制台。在官方控制台的功能基础上拓展更多功能，且性能开销更低、启动更快。";
     public const string DeveloperNoticeEnglish = "RevoHelper is a lightweight, free and open-source third-party control panel for MECHREVO laptops. It extends the functionality of the official control panel, with lower overhead and faster startup.";
 
-    // Only these developer-controlled destinations can be opened by page buttons.
+    // Only these fixed destinations can be opened by page buttons.
     public static string? LinkFor(string? action) => action switch
     {
         "project" => ProjectUrl,
         "downloads" => DownloadsUrl,
         "feedback" => FeedbackUrl,
+        "mirror" => MirrorUrl,
+        "mirror-backup" => MirrorBackupUrl,
         _ => null
     };
 
@@ -51,7 +64,9 @@ public sealed record AnnouncementCopy(
                 "RevoHelper is a Vibe Coding project, with code mainly written with AI assistance. The developer is responsible for product logic, approving designs and changes, UI design, real-device testing and iteration.",
                 "Feedback",
                 "Please include your laptop model, CPU/GPU, Windows version, the affected feature, steps and screenshots. Confirmation that a feature works is useful too. Do not upload full system reports containing personal information.",
-                "This page is bundled with the app and never fetches announcements. Update checks only read the latest version number from GitHub and download nothing; automatic checks can be turned off in Settings. Instructions and third-party licenses are included in the release package.")
+                "This page is bundled and never fetches announcements. Update checks only read the latest version number from GitHub and can be turned off in Settings. Instructions and licenses come with the release package.",
+                "Mirror download", "Backup mirror",
+                "Third-party relays of the same GitHub file, opened only on click. Check the SHA256 in the release notes.")
             : new("关于与公告", "版本、更新和使用提醒", "当前版本", version,
                 "更新日期", UpdateDate, "产品介绍",
                 DeveloperNoticeChinese,
@@ -66,5 +81,7 @@ public sealed record AnnouncementCopy(
                 "本产品属于 Vibe Coding 产物，代码主要由 AI 辅助编写。开发者负责产品逻辑、方案与改动审批、UI 设计、真机测试和迭代改进等工作。",
                 "反馈说明",
                 "欢迎提供机型、CPU/GPU、Windows 版本、所用功能、复现步骤和截图；确认某项功能正常也很有帮助。请勿上传包含个人信息的完整系统报告。",
-                "本页内容随版本提供，不会联网获取公告。检查更新只读取 GitHub 上的最新版本号，不下载任何内容，可在设置中关闭自动检查。使用说明与第三方许可随发布包提供。");
+                "本页内容随版本提供，不会联网获取公告。检查更新只读取 GitHub 上的最新版本号，不下载任何内容，可在设置中关闭自动检查。使用说明与第三方许可随发布包提供。",
+                "国内加速下载", "备用加速线路",
+                "加速线路由第三方服务转发 GitHub 上的同一个文件，只在点击时打开。下载后可对照更新日志核对 SHA256。");
 }

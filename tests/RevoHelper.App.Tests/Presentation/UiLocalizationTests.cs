@@ -61,6 +61,35 @@ public sealed class UiLocalizationTests
         Assert.Equal(chinese, UiTextCatalog.Translate(chinese, "zh-CN"));
     }
 
+    // V1.0.5: status lines the English UI used to show in Chinese (lighting first: the reported screenshot).
+    [Theory]
+    [InlineData("海岸灯带灯效已发送，但最终开启状态未得到回读确认。", "Light bar: effect sent, but the readback did not confirm that it is on.")]
+    [InlineData("灯区已关闭：参数仅保存，打开后自动应用", "Zone is off: settings are saved and apply when it turns on")]
+    [InlineData("海岸灯带已关闭并回读确认。", "Light bar turned off and verified.")]
+    [InlineData("海岸灯带电源写入后未得到目标状态回读。", "Light bar: power was sent, but the readback did not confirm it.")]
+    [InlineData("海岸灯带已选择 #00B0FF；等待自动应用。", "Light bar: #00B0FF selected; applying automatically.")]
+    [InlineData("耀世流光键盘方案已应用并回读。", "Rainbow flow keyboard preset applied and verified.")]
+    [InlineData("键盘与灯带自动熄灯档位 2 分钟 已回读确认。", "Keyboard and light-bar sleep timer set to 2 min and verified.")]
+    [InlineData("蓝牙已开启并回读确认。", "Bluetooth turned on and verified.")]
+    [InlineData("Wi-Fi写入后未得到目标状态回读。", "Wi-Fi change was sent, but the readback did not confirm it.")]
+    [InlineData("电源与电池状态已读取 · 当前电量 70%", "Power and battery status read · Battery 70%")]
+    [InlineData("读取灯光能力失败：GCU timeout", "Reading lighting capabilities failed: GCU timeout")]
+    [InlineData("整机档位读取失败 · GCU timeout", "Reading the profile failed · GCU timeout")]
+    [InlineData("显卡输出控制器未接入", "GPU output control is not connected")]
+    [InlineData("没有可测画面时 FPS 显示为“—”，硬件信息仍会更新。", "FPS shows “—” when no frames can be measured; hardware readings still update.")]
+    public void RuntimeStatusLines_HaveEnglishCopy(string chinese, string english)
+    {
+        Assert.Equal(english, UiTextCatalog.Translate(chinese, "en-US"));
+        Assert.Equal(chinese, UiTextCatalog.Translate(chinese, "zh-CN"));
+    }
+
+    [Fact]
+    public void UnknownPrefixBeforeAColon_IsLeftAsReported()
+    {
+        const string text = "某个未知操作失败：设备忙";
+        Assert.Equal(text, UiTextCatalog.Translate(text, "en-US"));
+    }
+
     [Fact]
     public void UserProgramNamesAndUnknownNativeErrors_AreNotRewritten()
     {

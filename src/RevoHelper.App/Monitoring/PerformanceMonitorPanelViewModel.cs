@@ -102,7 +102,7 @@ public sealed class PerformanceMonitorPanelViewModel : INotifyPropertyChanged
     public void ApplyFrameRateStatus(FrameRateSnapshot frame)
     {
         if (frame.Status == FrameRateStatus.Stopped) { StatusText = "监控已关闭。"; return; }
-        if (IsManual && selectedProgram is null) { StatusText = "请先添加并选择一个程序；没有目标时显示 FPS —。"; return; }
+        if (IsManual && selectedProgram is null) { StatusText = "请先添加并选择一个程序；没有目标时 FPS 显示为“—”。"; return; }
         if (IsManual && frame.Status == FrameRateStatus.TargetExited)
         {
             StatusText = $"未运行：{selectedProgram!.DisplayName}\n启动后会自动匹配该程序。";
@@ -115,7 +115,7 @@ public sealed class PerformanceMonitorPanelViewModel : INotifyPropertyChanged
             FrameRateStatus.Available => "显示程序提交的帧率；插帧后的帧数可能不同。",
             FrameRateStatus.Unavailable => frame.Detail ?? "帧率暂不可用，硬件读数不受影响。",
             FrameRateStatus.TargetExited => "目标程序已退出，等待读取新的前台程序。",
-            _ => "等待有效帧数据；暂时无法测量时显示 FPS —。"
+            _ => "等待有效帧数据；暂时无法测量时 FPS 显示为“—”。"
         });
     }
 

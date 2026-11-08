@@ -328,7 +328,6 @@ public sealed partial class MainWindowViewModel
         var hardwareTarget = useLegacyKeyboardPower
             ? targetConfiguration with { Effect = LightingEffect.OemDefault }
             : targetConfiguration;
-        var previousEnabled = lightingZoneStates.GetValueOrDefault(zone)?.Configuration?.Enabled;
         try
         {
             ControlResult result;
@@ -366,23 +365,31 @@ public sealed partial class MainWindowViewModel
                 TrackLightingLocalTarget(hardwareTarget);
                 if (useLegacyKeyboardPower && SelectedLightingZone == zone) LoadLightingEditor(zone);
             }
-            else if (!result.Succeeded)
-                lightingLocalTargets.Remove(zone);
-            if (!result.Succeeded && previousEnabled is { } value &&
-                lightingEditorDrafts.GetValueOrDefault(zone) == targetConfiguration)
-            {
-                lightingEditorDrafts[zone] = targetConfiguration with { Enabled = value };
-                if (SelectedLightingZone == zone) LoadLightingEditor(zone);
-            }
+            else
+                ReleaseUnconfirmedPowerDraft(targetConfiguration);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            lightingLocalTargets.Remove(zone);
+            ReleaseUnconfirmedPowerDraft(targetConfiguration);
             var reason = $"切换{LightingZoneLabel(zone)}失败：{exception.Message}";
             if (zone == LightingZone.Keyboard) KeyboardControlsStatusText = reason;
             MarkLightingProblem(zone, true);
             ReportLightingFeedback(zone, reason);
         }
+    }
+
+    /// <summary>
+    /// An unconfirmed switch shows the last reported state again. It must not stay behind as an
+    /// editor draft: a draft blocks status events, so a late report that the light did change
+    /// could never move the switch back to the truth.
+    /// </summary>
+    private void ReleaseUnconfirmedPowerDraft(LightingZoneConfiguration target)
+    {
+        var zone = target.Zone;
+        lightingLocalTargets.Remove(zone);
+        if (lightingEditorDrafts.GetValueOrDefault(zone) != target) return;
+        lightingEditorDrafts.Remove(zone);
+        if (SelectedLightingZone == zone) LoadLightingEditor(zone);
     }
 
     public Task ApplySelectedLightingZoneAsync(CancellationToken cancellationToken)

@@ -24,6 +24,38 @@ public static class UiTextCatalog
         return text;
     }
 
+    // A lighting zone, switch or toggle label followed by one of these fixed endings.
+    private static readonly IReadOnlyDictionary<string, string> ZoneEndings = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["已开启并回读确认。"] = " turned on and verified.",
+        ["已关闭并回读确认。"] = " turned off and verified.",
+        ["电源写入后未得到目标状态回读。"] = ": power was sent, but the readback did not confirm it.",
+        ["未返回当前配置，无法建立可见的开启状态。"] = " did not report its settings, so it could not be turned on visibly.",
+        ["灯效已发送，但最终开启状态未得到回读确认。"] = ": effect sent, but the readback did not confirm that it is on.",
+        ["命令已发送；仅确认电源已开启，灯效与颜色未回报，请观察实体灯。"] = ": command sent; only power on was confirmed. Effect and color are not reported, so check the light itself.",
+        ["命令已发送；仅确认电源已关闭，灯效与颜色未回报，请观察实体灯。"] = ": command sent; only power off was confirmed. Effect and color are not reported, so check the light itself.",
+        ["灯效已应用并回读确认。"] = ": effect applied and verified.",
+        ["命令已发送，但回读未匹配目标状态，未确认生效。"] = ": command sent, but the readback did not match; not confirmed.",
+        ["已保留最新选择，等待应用。"] = ": keeping your latest choice until it applies.",
+        ["已保留最新选择，等待应用；上一条反馈不会覆盖编辑值。"] = ": keeping your latest choice until it applies; earlier feedback will not replace it."
+    };
+
+    private static readonly IReadOnlyDictionary<string, string> LabelEndings = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["已开启并回读确认。"] = " turned on and verified.",
+        ["已关闭并回读确认。"] = " turned off and verified.",
+        ["已启用并回读确认。"] = " enabled and verified.",
+        ["已禁用并回读确认。"] = " disabled and verified.",
+        ["写入后未得到目标状态回读。"] = " change was sent, but the readback did not confirm it.",
+        ["命令已发送，但设备状态接口未返回该项，无法确认实际状态。"] = ": command sent, but the device status did not include it; the actual state is unconfirmed.",
+        ["命令已发送，但 OEM 状态未返回该项，无法确认实际状态。"] = ": command sent, but the OEM status did not include it; the actual state is unconfirmed."
+    };
+
+    private const string Zone = "(键盘背光|海岸灯带|LOGO 灯|水冷灯)";
+
+    private static string Alternation(IEnumerable<string> endings) =>
+        string.Join("|", endings.OrderByDescending(ending => ending.Length).Select(Regex.Escape));
+
     private static readonly (Regex Pattern, Func<Match, string> Format)[] Templates =
     [
         Rule(@"^电源暂停后的恢复未确认；不会自动重启限充。([\s\S]*)$", m => "Restoration after the power pause is not confirmed; charge limiting will not restart automatically. " + TranslateKnown(m.Groups[1].Value)),
@@ -81,8 +113,52 @@ public static class UiTextCatalog
         Rule(@"^已应用并回读 Boost · (.+)；OEM 预设 PL 未改动$", m => $"Boost applied and verified · {m.Groups[1].Value}; OEM power limits unchanged"),
         Rule(@"^GPU 频率偏移已回读确认：核心 (.+) MHz，显存 (.+) MHz。$", m => $"GPU offsets verified: core {m.Groups[1].Value} MHz, memory {m.Groups[2].Value} MHz."),
         Rule(@"^可尝试范围：核心 (.+)～(.+) MHz；显存 (.+)～(.+) MHz。(.*)$", m => $"Available offsets: core {m.Groups[1].Value} to {m.Groups[2].Value} MHz; memory {m.Groups[3].Value} to {m.Groups[4].Value} MHz. {TranslateKnown(m.Groups[5].Value)}"),
-        Rule(@"^(.+) · 高级参数只读$", m => TranslateKnown(m.Groups[1].Value) + " · Advanced settings (read-only)")
+        Rule(@"^(.+) · 高级参数只读$", m => TranslateKnown(m.Groups[1].Value) + " · Advanced settings (read-only)"),
+        // V1.0.5: runtime status lines of the lighting, power, display and cooler pages.
+        Rule($@"^{Zone}({Alternation(ZoneEndings.Keys)})$", m => TranslateKnown(m.Groups[1].Value) + ZoneEndings[m.Groups[2].Value]),
+        Rule($@"^{Zone}当前已关闭；颜色 (#[0-9A-Fa-f]{{6}}) 与灯效参数已保存，打开后自动应用。$", m => $"{TranslateKnown(m.Groups[1].Value)} is off; color {m.Groups[2].Value} and effect settings are saved and apply when it turns on."),
+        Rule($@"^{Zone}已选择 (#[0-9A-Fa-f]{{6}})；等待自动应用。$", m => $"{TranslateKnown(m.Groups[1].Value)}: {m.Groups[2].Value} selected; applying automatically."),
+        Rule($@"^{Zone}已保存 (#[0-9A-Fa-f]{{6}})；打开后自动应用。$", m => $"{TranslateKnown(m.Groups[1].Value)}: {m.Groups[2].Value} saved; it applies when the zone turns on."),
+        Rule($@"^未从官方状态主题发现{Zone}，未发送命令。$", m => $"{TranslateKnown(m.Groups[1].Value)} was not found in the OEM status; no command was sent."),
+        Rule($@"^当前{Zone}不支持 (\w+) 灯效。$", m => $"{TranslateKnown(m.Groups[1].Value)} does not support the {m.Groups[2].Value} effect."),
+        Rule($@"^切换{Zone}失败：([\s\S]+)$", m => $"Switching {TranslateKnown(m.Groups[1].Value)} failed: {Translate(m.Groups[2].Value, "en-US")}"),
+        Rule(@"^(.+)键盘方案已应用并回读。$", m => $"{TranslateKnown(m.Groups[1].Value)} keyboard preset applied and verified."),
+        Rule(@"^(.+)没有可应用的已发现分区。$", m => $"{TranslateKnown(m.Groups[1].Value)}: no discovered zone can use it."),
+        Rule(@"^键盘与灯带自动熄灯档位 (.+) 已回读确认。$", m => $"Keyboard and light-bar sleep timer set to {Translate(m.Groups[1].Value, "en-US")} and verified."),
+        Rule(@"^休眠命令已发送，但官方状态仍为 (\d+)，未确认生效。$", m => $"Sleep timer sent, but the OEM status still reads {m.Groups[1].Value}; not confirmed."),
+        Rule(@"^电源与电池状态已读取 · 当前电量 (\d+)%$", m => $"Power and battery status read · Battery {m.Groups[1].Value}%"),
+        Rule(@"^深度睡眠已开启（(\d+) 分钟）并回读确认。$", m => $"Deep sleep on ({m.Groups[1].Value} min) and verified."),
+        Rule(@"^充电上限已设为 (\d+)% 并从 OEM 状态回读确认。$", m => $"Charge limit set to {m.Groups[1].Value}% and verified through OEM status."),
+        Rule(@"^充电上限写入后回读为 (\d+)%，未达到 (\d+)%。$", m => $"The charge limit reads {m.Groups[1].Value}% after writing, not {m.Groups[2].Value}%."),
+        Rule(@"^色彩管理已开启，(.+) 色域已回读确认。$", m => $"Color management on; {TranslateKnown(m.Groups[1].Value)} preset verified."),
+        Rule(@"^色彩管理与 (.+) 色域命令已提交，官方 ICC 校准流程仍在处理。$", m => $"Color management and {TranslateKnown(m.Groups[1].Value)} preset sent; the OEM ICC calibration is still running."),
+        Rule(@"^色彩管理应用失败：(.+)。$", m => $"Color management failed: {m.Groups[1].Value}."),
+        Rule(@"^(.+) 色域已应用并回读确认。$", m => $"{TranslateKnown(m.Groups[1].Value)} color preset applied and verified."),
+        Rule(@"^(.+) 色域命令已提交，官方 ICC 校准流程仍在处理。$", m => $"{TranslateKnown(m.Groups[1].Value)} color preset sent; the OEM ICC calibration is still running."),
+        Rule(@"^(.+) 色域应用失败：(.+)。$", m => $"{TranslateKnown(m.Groups[1].Value)} color preset failed: {m.Groups[2].Value}."),
+        Rule(@"^正在写入并回读：(.+)$", m => "Applying and verifying: " + TranslateKnown(m.Groups[1].Value)),
+        Rule(@"^当前已经是 (\d+) Hz。$", m => $"Already at {m.Groups[1].Value} Hz."),
+        Rule(@"^当前显示路径未提供 (\d+) Hz，未更改显示设置。$", m => $"This display path does not offer {m.Groups[1].Value} Hz; display settings were not changed."),
+        Rule(@"^当前机型未确认支持(.+)，没有写入硬件。$", m => $"{TranslateKnown(m.Groups[1].Value)} is not confirmed for this model; nothing was written."),
+        Rule(@"^当前已经是(.+)。$", m => $"{TranslateKnown(m.Groups[1].Value)} is already active."),
+        Rule(@"^已应用并回读：PL1 (.+) W / PL2 (.+) W。$", m => $"Applied and verified: PL1 {m.Groups[1].Value} W / PL2 {m.Groups[2].Value} W."),
+        Rule(@"^(设置定时关机失败|取消定时关机失败)（退出码 (-?\d+)）([\s\S]*)$", m => $"{TranslateKnown(m.Groups[1].Value)} (exit code {m.Groups[2].Value}){m.Groups[3].Value}"),
+        Rule(@"^([\s\S]+) 部分状态未读取：([\s\S]+)$", m => Translate(m.Groups[1].Value, "en-US") + " Some statuses were not read: " + TranslateStatusDetails(m.Groups[2].Value)),
+        Rule($@"^(.+)({Alternation(LabelEndings.Keys)})$", m => TranslateKnown(m.Groups[1].Value) + LabelEndings[m.Groups[2].Value]),
+        // Last: a known prefix before "：" or " · ", followed by a native detail that stays as reported.
+        Rule(@"^[\s\S]+$", m => TranslatePrefixed(m.Value))
     ];
+
+    private static string TranslatePrefixed(string text)
+    {
+        foreach (var separator in new[] { "：", " · " })
+        {
+            var index = text.IndexOf(separator, StringComparison.Ordinal);
+            if (index is < 2 or > 60 || !English.TryGetValue(text[..index], out var prefix)) continue;
+            return prefix + (separator == "：" ? ": " : " · ") + Translate(text[(index + separator.Length)..], "en-US");
+        }
+        return text;
+    }
 
     private static string TranslateKnown(string text) => English.TryGetValue(text, out var translated) ? translated : text;
     private static string TranslateStatusDetails(string text) =>
@@ -253,10 +329,10 @@ public static class UiTextCatalog
 检查状态	Check status
 键盘	Keyboard
 键盘背光总开关	Keyboard lighting power
-键盘彩虹 · 平滑流动	Keyboard rainbow · Smooth flow
+键盘彩虹 · 平滑流动	Rainbow · Smooth flow
 键盘灯光方案	Keyboard presets
-键盘低亮静态 · 深蓝	Dim static keyboard · Deep blue
-键盘青蓝呼吸 · 低干扰	Cyan keyboard breathing · Subtle
+键盘低亮静态 · 深蓝	Dim static · Deep blue
+键盘青蓝呼吸 · 低干扰	Cyan breathing · Subtle
 键盘与灯带自动熄灯	Keyboard and light-bar sleep timer
 默认背光	Default backlight
 默认方向	Default direction
@@ -274,7 +350,7 @@ public static class UiTextCatalog
 静夜微光	Quiet night
 均衡	Balanced
 均衡模式	Balanced
-开机后、输入密码前尝试连接上次水冷设备。	Try connecting the last cooling device before Windows sign-in.
+开机后、输入密码前尝试连接上次水冷设备。	Tries to connect the last cooler before you sign in to Windows.
 开启后可调整 TGP、Dynamic Boost 与频率偏移；关闭时统一锁定。	Unlocks TGP, Dynamic Boost and clock offsets. Turn off to lock all three.
 开始倒计时	Start countdown
 可能冲突服务检测	Other control software
@@ -294,7 +370,7 @@ public static class UiTextCatalog
 亮度	Brightness
 临时将笔记本风扇拉至最大转速	Temporarily run the laptop fans at full speed
 绿色 #24D66A	Green #24D66A
-没有可测画面时显示 FPS —，硬件信息仍会更新。	Shows FPS — when no frames can be measured. Hardware readings still update.
+没有可测画面时 FPS 显示为“—”，硬件信息仍会更新。	FPS shows “—” when no frames can be measured; hardware readings still update.
 每 0.5% 转速变化的延迟，范围 0–5000 ms，步长 100 ms。	Delay for each 0.5% fan-speed change: 0–5000 ms in 100 ms steps.
 面向长期连接电源的固定工作场景。	For a laptop usually connected to AC power.
 默认关闭 · 适用于所有性能档位	Off by default · Available in every profile
@@ -333,7 +409,7 @@ public static class UiTextCatalog
 水泵状态	Pump status
 水冷灯	Cooler light
 水冷箱风扇状态	Cooler fan status
-睡眠指定时间后进入深度睡眠	Enter deep sleep after the selected time
+按所选时长进入深度睡眠	Enter deep sleep after the selected time
 瞬时高负载功耗墙 (PL4)	Peak power limit (PL4)
 速度	Speed
 添加程序…	Add program…
@@ -374,7 +450,7 @@ public static class UiTextCatalog
 在续航能力和电池寿命之间取得平衡。	Balances battery runtime and battery lifespan.
 暂停并恢复原限制	Pause and restore limit
 长效模式	Battery life
-只改变键盘灯光	Changes keyboard lighting only
+只改变键盘灯光	Keyboard lighting only
 只移除这里的记录，不会删除程序文件。	Removes this record only, not the program file.
 智慧控制	Smart control
 重设	Reset
@@ -523,12 +599,12 @@ Windows 处理器策略或 OEM 功耗控制后端已确认可用。	Windows CPU 
 等待读取 GCU 控制通道状态。	Waiting for the GCU connection status.
 OEM 功耗档案暂未读取 · 当前仅保留本地草稿	OEM power profile not yet read · Showing the local draft
 监控已关闭。	Monitor is off.
-请先添加并选择一个程序；没有目标时显示 FPS —。	Add and select a program. No target is shown as FPS —.
+请先添加并选择一个程序；没有目标时 FPS 显示为“—”。	Add and select a program first. Without a target, FPS shows “—”.
 正在启动帧率采集…	Starting frame capture…
 显示程序提交的帧率；插帧后的帧数可能不同。	Shows application-presented frames; frame-generation results may differ.
 帧率暂不可用，硬件读数不受影响。	FPS is unavailable; hardware readings are unaffected.
 目标程序已退出，等待读取新的前台程序。	The target exited. Waiting for a new foreground program.
-等待有效帧数据；暂时无法测量时显示 FPS —。	Waiting for frames. Unavailable measurements are shown as FPS —.
+等待有效帧数据；暂时无法测量时 FPS 显示为“—”。	Waiting for frames. FPS shows “—” until it can be measured.
 动态节能尚未连接。	Dynamic power saving is not connected.
 动态节能未启用。	Dynamic power saving is off.
 当前临时上限：3 GHz（不提高已有更低限制）	Temporary limit: 3 GHz (does not raise an existing lower limit)
@@ -635,5 +711,288 @@ Windows 睿频策略已应用；保留用户已有的处理器上限。	Windows 
 暂未发现兼容水冷；请确认水冷已通电并靠近电脑，然后重新扫描。	No compatible cooler found. Check that it is powered on and nearby, then scan again.
 水冷已连接，已读取设备状态。	Cooler connected and device status read.
 GCU 已记住此设备，但扫描列表暂为空；可以点击连接重试。	GCU remembers this device but the scan list is empty. Try Connect again.
+正在识别设备	Identifying device
+正在识别处理器	Identifying processor
+程序退出，独立监护继续恢复原值。	The app is exiting; the independent guardian continues restoring the original values.
+遥测不可用，动态节能已暂停。	Telemetry is unavailable; dynamic power saving is paused.
+供电或睡眠状态发生变化，动态节能已暂停。	Power or sleep state changed; dynamic power saving is paused.
+暂未读取	Not read yet
+设备识别暂不可用	Device identification unavailable
+处理器识别暂不可用	Processor identification unavailable
+遥测处理积压，动态节能已暂停。	Telemetry is backed up; dynamic power saving is paused.
+遥测已中断，动态节能已暂停。	Telemetry stopped; dynamic power saving is paused.
+程序退出，恢复原始频率限制。	The app is exiting; restoring the original frequency limit.
+点击检查，读取登录前任务状态。	Select Check status to read the pre-sign-in task.
+性能设置已改变，动态节能保持开启并重新观察。	Performance settings changed; dynamic power saving stays on and starts observing again.
+颜色格式无效，请输入 #RRGGBB；尚未发送。	Invalid color. Enter #RRGGBB; nothing was sent.
+当前键盘仅确认支持背光开关，未发送灯效、颜色或亮度配置。	This keyboard only confirmed a backlight switch; no effect, color or brightness was sent.
+调整后自动应用并回读	Changes apply and verify automatically
+灯区已关闭：参数仅保存，打开后自动应用	Zone is off: settings are saved and apply when it turns on
+档位切换已取消，正在同步实际档位。	Profile switch cancelled; syncing the actual profile.
+基础狂暴档位未确认，未应用后续策略。	Basic Turbo was not confirmed; follow-up policies were not applied.
+已有更新的档位请求，跳过旧档位复查。	A newer profile request exists; skipping the check of the older one.
+正在核对并恢复上次控制状态，尚未发送档位指令…	Checking and restoring the previous control state; no profile command sent yet…
+正在准备切换整机档位…	Preparing to switch the profile…
+已启用水冷自动连接；登录与睡眠唤醒后会尝试连接上次设备。	Cooler auto-connect is on; the last device will be tried after sign-in and wake.
+已关闭水冷自动连接；仍可在本页手动连接。	Cooler auto-connect is off; you can still connect on this page.
+当前已启用	Currently on
+当前未启用	Currently off
+当前启动项状态无法确认	The startup state cannot be confirmed
+性能调整未执行：限充正在切换或恢复，请等待完成后再调整。	Performance change not applied: charge limiting is switching or restoring. Wait until it finishes.
+动态频率恢复未完成，请在更多方案中重试恢复后再调整。	Dynamic frequency restoration did not finish. Retry it in More profiles before changing settings.
+本机风扇写入控制器不可用。	Fan control is unavailable on this device.
+未取得完整风扇曲线与响应设置，请稍后重试。	The full fan curves and response settings were not read. Try again later.
+官方控制中心	Control Center
+官方 GCU 状态通道暂不可用 · 将自动重试	OEM GCU status is unavailable · Retrying automatically
+OEM 功耗档案暂不可用 · 性能调整保持安全锁定	OEM power profiles unavailable · Performance changes stay locked
+性能控制通道未接入	Performance control is not connected
+GCU 未返回 CPU 功耗状态	GCU did not report CPU power status
+已读取 Custom 的 GCU PL 配置、Boost 与频率策略	Read Custom GCU power limits, boost and frequency policy
+已读取 CPU 直连 PL1 / PL2、Boost 与频率策略	Read CPU PL1 / PL2, boost and frequency policy
+已读取 OEM 固件预设、Boost 与频率策略；预设 PL 不提供硬件回读	Read the OEM preset, boost and frequency policy; preset power limits have no hardware readback
+水冷自动连接已关闭。	Cooler auto-connect is off.
+官方水冷控制通道未接入。	OEM cooler control is not connected.
+水冷自动连接当前不可执行。	Cooler auto-connect cannot run now.
+断开水冷失败	Disconnecting the cooler failed
+启动注水模式失败	Starting priming failed
+重设水冷失败	Resetting the cooler failed
+电源与电池状态已读取。	Power and battery status read.
+已读取当前显示器、分辨率与可用刷新率。	Read the current display, resolution and available refresh rates.
+显示器、刷新率与 OEM 显示功能状态已读取。	Display, refresh rates and OEM display features read.
+显卡输出控制器未接入	GPU output control is not connected
+GCU 未返回可识别的显卡输出模式	GCU did not report a recognized GPU output mode
+PL1 / PL2 回读不可用	PL1 / PL2 readback unavailable
+OEM 预设 PL 未写入	OEM preset power limits not written
+服务状态尚未确认	Service status is not confirmed yet
+保存的程序路径过长，请减少记录后重试。	The saved program list is too long. Remove some entries and try again.
+请选择完整的 EXE 程序路径。	Choose a full path to an EXE program.
+最多可保存 64 个程序，请先移除不需要的记录。	Up to 64 programs can be saved. Remove entries you no longer need.
+定时关机仅支持 5、15、30、60 或 120 分钟。	Scheduled shutdown supports 5, 15, 30, 60 or 120 minutes.
+设置定时关机失败	Setting the scheduled shutdown failed
+取消定时关机失败	Cancelling the scheduled shutdown failed
+没有需要恢复的临时刷新率。	No temporary refresh rate to restore.
+显示设置已由其它操作更改，保留当前状态。	Display settings were changed elsewhere; keeping the current state.
+原刷新率在当前路径已不可用，未强制恢复。	The original refresh rate is no longer available on this display path; it was not forced back.
+内置显示器	Built-in display
+显示控制会话正在结束。	The display control session is ending.
+未找到内嵌的 FPS 采集组件。	The bundled FPS capture component was not found.
+FPS 采集组件未能启动。	The FPS capture component did not start.
+固定的程序已退出，请重新选择。	The selected program exited. Choose it again.
+当前自定义方案已切换或无法确认，已停止写入及跨方案恢复。	The custom preset changed or cannot be confirmed; writing and cross-preset restoring stopped.
+当前 CPU 功耗回读不完整或无效，已停止写入及恢复。	CPU power readback is incomplete or invalid; writing and restoring stopped.
+PL1 不能高于 PL2。	PL1 cannot be higher than PL2.
+当前测试版尚未开放 CPU 频率上限写入。	This build does not write CPU frequency limits yet.
+未取得完整 CPU 功耗回读或当前自定义方案身份，未写入。	CPU power readback or the custom preset was not fully read; nothing was written.
+本次未发送功耗写入。	No power limit was sent this time.
+已恢复原值。	Original values restored.
+检测到外部 CPU 功耗修改，已保留当前值；未确认恢复原值。	An external CPU power change was detected and kept; restoring the original value is not confirmed.
+CPU 功耗原值已恢复并回读确认。	Original CPU power limits restored and verified.
+当前自定义方案已变化或未确认；未写入草稿。	The custom preset changed or is not confirmed; the draft was not written.
+性能档位或自定义方案已切换，已停止本次参数写入；请重新读取状态。	The profile or custom preset changed; this write stopped. Read the status again.
+OEM 未返回该参数的实时状态；未写入。	OEM did not report this setting's live state; nothing was written.
+未读取到完整的 OEM GPU 功耗范围；未写入。	The OEM GPU power range was not fully read; nothing was written.
+TGP 超出当前 OEM 范围，或使能状态未知；未写入。	TGP is outside the OEM range or its enable state is unknown; nothing was written.
+请先开启 GPU 超性能开关，并等待读取频率偏移范围。	Turn on GPU boost first and wait for the offset range to be read.
+GPU 频率偏移超出当前 OEM 可调范围；未写入。	GPU offsets are outside the OEM range; nothing was written.
+开关值必须为 0 或 1；未写入。	Switch values must be 0 or 1; nothing was written.
+未确认当前为自定义模式；未写入高级参数。	Custom mode is not confirmed; advanced settings were not written.
+该参数已与 OEM 实时读数一致。	This setting already matches the live OEM reading.
+本次单项参数已发送并由 OEM 回读确认。	Setting sent and verified through OEM readback.
+驱动功率上限不可用，实际效果未确认。	The driver power limit is unavailable; the actual effect is not confirmed.
+本次单项参数已发送，但 OEM 回读未匹配；未确认生效。	Setting sent, but the OEM readback did not match; not confirmed.
+OEM 回读确认；NVIDIA 驱动功率上限暂不可读，实际效果未确认。	Verified by OEM readback; the NVIDIA driver power limit cannot be read, so the actual effect is not confirmed.
+仅在自定义模式且 GPU 超性能开关开启时允许调整频率偏移。	Offsets can be changed only in Custom mode with GPU boost on.
+GPU 频率偏移超出当前 OEM 可调范围，或未读取到范围；未写入。	GPU offsets are outside the OEM range, or the range was not read; nothing was written.
+GPU 频率偏移已发送，但 OEM 回读未匹配；未确认生效。	GPU offsets sent, but the OEM readback did not match; not confirmed.
+当前自定义方案已变化；未写入草稿。	The custom preset changed; the draft was not written.
+CPU 温度墙必须在 70–105°C 之间。	The CPU temperature limit must be 70–105 °C.
+CPU 瞬时功耗墙必须在 5–400 W 之间。	The CPU burst power limit must be 5–400 W.
+GPU TGP 必须在 25–250 W 之间。	GPU TGP must be 25–250 W.
+GPU 频率偏移超出安全输入范围。	GPU offsets are outside the safe input range.
+强冷已经开启。	Full-speed fans are already on.
+强冷已经关闭。	Full-speed fans are already off.
+强冷已开启并回读确认。	Full-speed fans on and verified.
+强冷已关闭并回读确认。	Full-speed fans off and verified.
+强冷状态未确认，已恢复操作前状态。	Full-speed fan state not confirmed; the previous state was restored.
+强冷状态未确认，恢复操作前状态也未取得一致回读。	Full-speed fan state not confirmed, and restoring the previous state was not verified either.
+风扇曲线必须包含 16 个点位。	A fan curve must have 16 points.
+GCU 未返回当前风扇方案名称，无法恢复原厂曲线。	GCU did not report the current fan profile, so the factory curve cannot be restored.
+未确认当前自定义方案；未发送恢复命令。	The custom preset is not confirmed; no reset was sent.
+当前风扇方案已变化；未恢复旧方案。	The fan profile changed; the older profile was not restored.
+已发送恢复命令，但当前曲线未确认；请重新读取。	Reset sent, but the current curve is not confirmed. Read it again.
+GCU 未返回当前风扇方案名称，不能安全写入。	GCU did not report the current fan profile, so it cannot be written safely.
+风扇转换延迟必须位于 0–5000 ms/0.5%。	The fan response delay must be 0–5000 ms/0.5%.
+未确认当前自定义方案；未写入风扇设置。	The custom preset is not confirmed; fan settings were not written.
+未取得完整原厂风扇回读，已阻止写入。	The factory fan readback is incomplete; writing was blocked.
+当前风扇方案已变化；未写入旧方案草稿。	The fan profile changed; the older draft was not written.
+GCU 风扇回读未与目标设置收敛。	GCU fan readback did not match the target settings.
+性能档位或自定义方案已切换，已停止写入；未向其它方案恢复旧曲线。	The profile or custom preset changed; writing stopped and no curve was restored to another profile.
+GCU 回读未收敛到目标模式	GCU readback did not reach the target mode
+狂暴子策略未收敛	Turbo strategy did not settle
+自定义方案编号必须位于 1–5。	The custom preset number must be 1–5.
+当前 GCU 尚未确认支持狂暴模式的高能/静音子策略。	GCU has not confirmed support for the Turbo performance/quiet strategies.
+水冷设备标识不能为空。	The cooler ID cannot be empty.
+机器初始默认背光只适用于键盘分区。	Factory default lighting applies only to the keyboard.
+水冷灯不支持所选灯效。	The cooler light does not support this effect.
+深度睡眠等待时间必须在 5–120 分钟之间。	The deep-sleep delay must be 5–120 minutes.
+深度睡眠已关闭并回读确认。	Deep sleep off and verified.
+深度睡眠写入后未得到目标状态回读。	The deep-sleep change was sent, but the readback did not confirm it.
+充电上限必须在 50%–100% 之间。	The charge limit must be 50%–100%.
+键盘背光已开启并回读确认。	Keyboard backlight on and verified.
+键盘背光已关闭并回读确认。	Keyboard backlight off and verified.
+键盘背光写入后未得到目标状态回读。	The keyboard backlight change was sent, but the readback did not confirm it.
+水冷灯未返回当前配置，无法安全切换总开关。	The cooler light did not report its settings, so it cannot be switched safely.
+灯光亮度必须为 0–4，速度必须为 1–4。	Brightness must be 0–4 and speed 1–4.
+LOGO 关闭未得到回读确认。	Logo off was not confirmed by readback.
+LOGO 关闭已请求，但海岸灯补偿未得到回读确认。	Logo off was requested, but turning the light bar back on was not confirmed.
+LOGO 已关闭，已补发海岸灯开启命令；请以实体灯为准。	Logo is off and the light bar was turned back on; check the light itself.
+LOGO 已关闭，未改动海岸灯开关。	Logo is off; the light bar switch was not changed.
+灯效休眠时间不是官方支持的档位，未发送命令。	This sleep time is not an official option; nothing was sent.
+键盘与灯带自动休眠已关闭并回读确认。	Keyboard and light-bar sleep timer off and verified.
+休眠命令已发送，但官方状态未返回 CloseTimer，无法确认。	Sleep timer sent, but the OEM status did not report CloseTimer; not confirmed.
+电池保护模式已应用并回读确认。	Battery protection applied and verified.
+电池保护模式写入后未得到目标状态回读。	The battery protection change was sent, but the readback did not confirm it.
+色彩管理已关闭并回读确认。	Color management off and verified.
+关闭色彩管理命令已提交，官方状态仍在更新。	Color management off was sent; the OEM status is still updating.
+未检测到已连接的官方水冷设备，未发送控制命令。	No connected OEM cooler detected; no command was sent.
+水冷风扇策略已应用并回读确认。	Cooler fan mode applied and verified.
+水冷风扇策略写入后未得到目标状态回读。	The cooler fan change was sent, but the readback did not confirm it.
+水冷泵策略已应用并回读确认。	Pump mode applied and verified.
+水冷泵策略写入后未得到目标状态回读。	The pump change was sent, but the readback did not confirm it.
+请先选择扫描到的水冷设备。	Select a scanned cooler first.
+使用 GCU 已记住的水冷设备，未改写设备记录。	Using the cooler GCU remembers; the device record was not changed.
+所选设备不在本次 GCU 扫描结果中，未发送命令。	The selected device is not in this GCU scan; no command was sent.
+水冷设备已选择并回读确认。	Cooler selected and verified.
+设备选择写入后未得到目标状态回读。	The device selection was sent, but the readback did not confirm it.
+水冷设备尚未连接，未启动注水模式。	The cooler is not connected; priming was not started.
+当前水冷状态不允许控制，未启动注水模式。	The cooler cannot be controlled now; priming was not started.
+当前已经处于注水模式，请等待流程自动结束。	Priming is already running. Wait for it to finish.
+当前状态为注水模式，请等待流程自动结束。	Priming is running. Wait for it to finish.
+注水模式命令已发送，请等待水冷设备完成固定流程。	Priming sent. Wait for the cooler to finish its routine.
+当前水冷状态不允许重设，未发送命令。	The cooler cannot be reset now; no command was sent.
+水冷设备记录已清除并回读确认。	Cooler record cleared and verified.
+重设命令发送后，设备记录尚未清除。	Reset sent, but the device record is not cleared yet.
+GCU 未返回水冷状态，未发送连接命令。	GCU did not report cooler status; no connect command was sent.
+水冷设备已经连接。	The cooler is already connected.
+水冷设备已经断开。	The cooler is already disconnected.
+水冷正在注水，未发送连接操作命令。	The cooler is priming; no connection command was sent.
+当前水冷状态不允许连接操作，未发送命令。	The cooler cannot be connected or disconnected now; no command was sent.
+水冷设备已连接并回读确认。	Cooler connected and verified.
+水冷设备已断开并回读确认。	Cooler disconnected and verified.
+连接命令发送后未得到已连接状态。	Connect was sent, but the cooler did not report connected.
+断开命令发送后未得到已断开状态。	Disconnect was sent, but the cooler did not report disconnected.
+OSD 提示	OSD prompts
+Fn 键	Fn key
+蓝牙	Bluetooth
+触摸板	Touchpad
+网络摄像头	Webcam
+关机 USB 供电	USB charging while off
+未读取到完整的 OEM TGP 范围或使能状态；未写入。	The OEM TGP range or enable state was not fully read; nothing was written.
+TGP 设置超出当前机型可尝试范围；未写入。	TGP is outside this model's range; nothing was written.
+本次参数在写入前已被其它操作修改，未覆盖新的设置。	The setting changed elsewhere before writing; the newer value was kept.
+原设置未改变。	The original settings did not change.
+未确认恢复原值；已保留后续参数变化或停止向其它方案写入，请重新读取状态。	Restoring the original value is not confirmed; later changes were kept or writing stopped. Read the status again.
+已恢复操作前本次修改的 OEM 设置。	The OEM settings changed by this operation were restored.
+原有参数未改变。	The previous settings did not change.
+驱动当前功率上限不可读，实际效果未确认。	The driver's current power limit cannot be read; the actual effect is not confirmed.
+当前性能档位已变化，已停止写入。	The profile changed; writing stopped.
+自定义方案已切换，已停止写入原方案参数。	The custom preset changed; writing to the previous preset stopped.
+自定义方案已切换；未写入原方案参数。	The custom preset changed; the previous preset was not written.
+请在自定义模式调整 GPU 参数。	Change GPU settings in Custom mode.
+请在自定义模式开启 GPU 超性能，并等待读取实时状态。	Turn on GPU boost in Custom mode and wait for the live status.
+GPU 参数或开关值无效；未写入。	Invalid GPU setting or switch value; nothing was written.
+OEM 未返回本次参数的实时状态；未写入。	OEM did not report the live state of this setting; nothing was written.
+GCU 性能状态回读超时，正在重连；本次操作未确认，未自动重发。	GCU performance readback timed out and is reconnecting; this operation is not confirmed and was not resent.
+GCU 控制通道尚未连接，请稍后重试。	The GCU control channel is not connected yet. Try again later.
+GCU 通道响应超时，正在重新连接；本次操作未确认，未自动重发。	GCU timed out and is reconnecting; this operation is not confirmed and was not resent.
+睿频策略索引必须位于 0–6。	The boost policy index must be 0–6.
+写入后回读不一致。	The readback after writing did not match.
+恢复后回读不一致。	The readback after restoring did not match.
+没有待恢复的处理器频率限制。	No processor frequency limit to restore.
+已恢复 RevoHelper 会话前的处理器频率设置。	Processor frequency settings from before this RevoHelper session were restored.
+解除频率上限后回读不一致，已保留恢复记录。	The readback after removing the frequency limit did not match; the recovery record was kept.
+已保留损坏记录副本，并解除当前电源方案的频率上限。	A copy of the damaged record was kept and the frequency limit of the current power plan was removed.
+最大处理器频率必须为 0（不限制）或 100–64000 MHz。	The maximum processor frequency must be 0 (no limit) or 100–64000 MHz.
+RAPL 回读值与目标功耗不一致	RAPL readback does not match the target power
+RAPL 写入后寄存器未收敛	RAPL registers did not settle after writing
+PL1/PL2 必须为正数且 PL1 不高于 PL2。	PL1/PL2 must be positive, and PL1 cannot exceed PL2.
+目标功耗超出当前处理器 RAPL 编码范围。	The target power is outside this processor's RAPL range.
+读取灯光能力失败	Reading lighting capabilities failed
+应用灯效失败	Applying the effect failed
+灯光写入异常	Lighting write error
+应用灯效休眠失败	Applying the sleep timer failed
+灯效休眠	Sleep timer
+应用灯光方案失败	Applying the lighting preset failed
+保存灯光方案失败	Saving the lighting preset failed
+导入灯光方案失败	Importing the lighting preset failed
+导出灯光方案失败	Exporting the lighting preset failed
+已保存的灯光方案无效	The saved lighting preset is invalid
+恢复已保存灯光方案失败	Restoring the saved lighting preset failed
+LOGO 关闭回读失败	Logo off readback failed
+海岸灯补偿失败	Turning the light bar back on failed
+我的灯光方案	My lighting preset
+服务检测失败	Service check failed
+服务恢复失败	Restoring services failed
+服务停止失败	Stopping services failed
+强冷切换失败	Switching full-speed fans failed
+强冷状态读取失败	Reading full-speed fan status failed
+读取风扇设置失败	Reading fan settings failed
+风扇设置失败	Applying fan settings failed
+恢复原厂风扇曲线失败	Restoring the factory fan curve failed
+实时性能策略读取失败	Reading the live performance policy failed
+性能策略应用异常	Performance policy error
+高级参数读取失败	Reading advanced settings failed
+单项参数写入失败	Applying the setting failed
+高级参数写入失败	Applying advanced settings failed
+GPU 频率偏移写入失败	Applying GPU offsets failed
+读取水冷状态失败	Reading cooler status failed
+水冷状态刷新失败	Refreshing cooler status failed
+自动连接	Auto-connect
+水冷自动连接失败	Cooler auto-connect failed
+扫描水冷设备失败	Scanning for coolers failed
+连接水冷失败	Connecting the cooler failed
+读取 Windows 显示设置失败	Reading Windows display settings failed
+刷新率已读取；OEM 显示功能状态读取失败	Refresh rates read; reading OEM display features failed
+刷新显示模式失败	Refreshing display modes failed
+系统开关切换失败	Switching the system toggle failed
+电池保护切换失败	Switching battery protection failed
+电源开关切换失败	Switching the power option failed
+深度睡眠切换失败	Switching deep sleep failed
+充电上限设置失败	Setting the charge limit failed
+屏幕色彩切换失败	Switching the color preset failed
+色彩管理切换失败	Switching color management failed
+Mini LED 局部调光切换失败	Switching Mini LED local dimming failed
+刷新率切换失败	Switching the refresh rate failed
+自动刷新率已关闭，但临时状态恢复失败	Automatic refresh rate is off, but restoring the temporary state failed
+自动刷新率应用失败	Applying automatic refresh rate failed
+水冷风扇切换失败	Switching the cooler fan failed
+水冷泵切换失败	Switching the pump failed
+按键开关切换失败	Switching the key option failed
+读取失败	Read failed
+切换失败	Switch failed
+整机档位读取失败	Reading the profile failed
+已保留当前整机档位，后续策略未完全应用	Kept the current profile; follow-up policies were not fully applied
+整机档位切换异常	Profile switch error
+频率策略同步失败	Syncing the frequency policy failed
+已同步 OEM 档位，但频率策略恢复失败	OEM profile synced, but restoring the frequency policy failed
+已同步 OEM 档位，但核对频率策略时发生异常	OEM profile synced, but checking the frequency policy failed
+控制会话恢复同步失败	Restoring the control session failed
+检测到 OEM 延迟覆盖，但恢复失败	A delayed OEM override was detected, but restoring failed
+恢复原值未确认	Restoring the original value is not confirmed
+GPU 参数未完成	GPU settings did not complete
+GPU 实时状态未获确认；未继续写入	GPU live status not confirmed; writing stopped
+动态节能未完成	Dynamic power saving did not complete
+恢复未完成	Restoration did not complete
+频率恢复未完成	Frequency restoration did not complete
+遥测处理异常	Telemetry error
+水冷任务操作失败	Cooler task operation failed
+FPS 采集暂不可用	FPS capture unavailable
+监控暂不可用	Monitor unavailable
+设置暂未保存	Settings not saved yet
+程序记录暂未保存	Program list not saved yet
+未能添加程序	Could not add the program
+未能移除记录	Could not remove the entry
+未选择程序	No program selected
+Windows 显示控制器未接入。	Windows display control is not connected.
 """;
 }

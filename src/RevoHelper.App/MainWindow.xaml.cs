@@ -227,10 +227,14 @@ public partial class MainWindow : Window
 
     private void CheckForUpdates_Click(object sender, RoutedEventArgs e) => _ = ViewModel.CheckForUpdatesNowAsync();
 
+    // Both notices open the About page, where GitHub and the mirror downloads sit side by side:
+    // users who cannot reach GitHub would otherwise land on a page that never loads.
+    private void UpdateBadge_Click(object sender, RoutedEventArgs e) => Announcements_Click(sender, e);
+
     private void PossibleUpdateBadge_Click(object sender, RoutedEventArgs e)
     {
         ViewModel.DismissPossibleUpdateNotice();
-        AnnouncementLink_Click(sender, e);
+        Announcements_Click(sender, e);
     }
 
     private void MonitorPosition_Click(object sender, RoutedEventArgs e)
