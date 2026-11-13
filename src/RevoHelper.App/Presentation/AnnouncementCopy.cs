@@ -19,16 +19,13 @@ public sealed record AnnouncementCopy(
     public const string DownloadsUrl = ProjectUrl + "/releases";
     public const string FeedbackUrl = ProjectUrl + "/issues";
 
-    // Every release also carries a copy named RevoHelper.zip, so this link always means
-    // "the newest release" without the app having to reach GitHub first.
-    public const string LatestPackageUrl = DownloadsUrl + "/latest/download/RevoHelper.zip";
-
     // Public relays for users who cannot reach GitHub, opened only when the user clicks; update
-    // checks never use them. Given a repository address, gh-proxy.com lists its releases and files
-    // so users choose for themselves; ghfast.top downloads the newest package directly.
-    // On 2026-11-08 both returned the v1.0.4 package byte for byte (SHA256 dda31d37…).
+    // checks never use them. Given a repository address, both list its releases and files so users
+    // choose for themselves, which needs no fixed file name in a release. Which one opens depends
+    // on the user's network, so both are offered. Of 17 relays tried on 2026-11-13 only this
+    // service lists releases; the .org address is its second domain.
     public const string MirrorUrl = "https://gh-proxy.com/" + ProjectUrl;
-    public const string MirrorBackupUrl = "https://ghfast.top/" + LatestPackageUrl;
+    public const string MirrorBackupUrl = "https://gh-proxy.org/" + ProjectUrl;
 
     // 【禁止修改】开发者公告的内容由产品负责人指定，永久固定。
     // 无论发布什么版本，AI 或开发者都不得改写、替换这两段文字，也不得加入版本号或更新内容。
@@ -66,8 +63,8 @@ public sealed record AnnouncementCopy(
                 "Feedback",
                 "Please include your laptop model, CPU/GPU, Windows version, the affected feature, steps and screenshots. Confirmation that a feature works is useful too. Do not upload full system reports containing personal information.",
                 "This page is bundled and never fetches announcements. Update checks only read the latest version number from GitHub and can be turned off in Settings. Instructions and licenses come with the release package.",
-                "Mirror download", "Backup mirror",
-                "Third-party relays of the GitHub files, opened only on click; ads on their pages are not ours. Check the SHA256 in the release notes.")
+                "Mirror 1", "Mirror 2",
+                "Third-party relays of the GitHub release list; if one does not open, try the other. Ads there are not ours. Check the SHA256.")
             : new("关于与公告", "版本、更新和使用提醒", "当前版本", version,
                 "更新日期", UpdateDate, "产品介绍",
                 DeveloperNoticeChinese,
@@ -83,6 +80,6 @@ public sealed record AnnouncementCopy(
                 "反馈说明",
                 "欢迎提供机型、CPU/GPU、Windows 版本、所用功能、复现步骤和截图；确认某项功能正常也很有帮助。请勿上传包含个人信息的完整系统报告。",
                 "本页内容随版本提供，不会联网获取公告。检查更新只读取 GitHub 上的最新版本号，不下载任何内容，可在设置中关闭自动检查。使用说明与第三方许可随发布包提供。",
-                "国内加速下载", "备用加速线路",
-                "加速线路由第三方服务转发 GitHub 上的文件，只在点击时打开，其页面上的广告与本项目无关。下载后可对照更新日志核对 SHA256。");
+                "加速线路 1", "加速线路 2",
+                "两条线路都打开第三方加速站的版本列表，转发 GitHub 上的文件，可自己选择版本。不同网络下不一定都能打开，可逐个尝试；页面广告与本项目无关。下载后可核对 SHA256。");
 }

@@ -40,8 +40,6 @@ $userReadme = 'docs\release\V1.0.5_USER_README.txt'
 $sourceReadme = 'docs\release\V1.0.5_SOURCE_README.md'
 $changelog = 'docs\release\V1.0.5.md'
 $runtimeName = 'RevoHelper v1.0.5.zip'
-# The mirror buttons link to releases/latest/download/RevoHelper.zip, so every release carries this copy.
-$fixedRuntimeName = 'RevoHelper.zip'
 $sourceName = 'RevoHelper v1.0.5 Source Code.zip'
 $sourcePrefix = 'RevoHelper v1.0.5 Source Code/'
 
@@ -289,7 +287,5 @@ Write-NewZip $runtimeZip $runtimeEntries
 Write-NewZip $sourceZip $sourceEntries $sourcePrefix
 Assert-ZipManifest $runtimeZip $runtimeEntries
 Assert-ZipManifest $sourceZip $sourceEntries $sourcePrefix -PublicSource
-$fixedRuntimeZip = Join-Path $releaseRoot $fixedRuntimeName
-Copy-NewFile $runtimeZip $fixedRuntimeZip
-[pscustomobject]@{ RuntimeDirectory = $runtimeRoot; RuntimeZip = $runtimeZip; FixedRuntimeZip = $fixedRuntimeZip; SourceZip = $sourceZip;
+[pscustomobject]@{ RuntimeDirectory = $runtimeRoot; RuntimeZip = $runtimeZip; SourceZip = $sourceZip;
     SourceFileCount = $sourceEntries.Count; Version = $version.ProductVersion; FileVersion = $version.FileVersion; PublishedToGitHub = $false }

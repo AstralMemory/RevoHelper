@@ -1401,7 +1401,7 @@
                                         <Button Content="{Binding Announcements.DownloadsButton}" Tag="downloads" Click="AnnouncementLink_Click" Style="{StaticResource IconButtonStyle}" FontSize="{presentation:UiFont 9}" Height="29" Margin="2,0" />
                                         <Button Content="{Binding Announcements.FeedbackButton}" Tag="feedback" Click="AnnouncementLink_Click" Style="{StaticResource IconButtonStyle}" FontSize="{presentation:UiFont 9}" Height="29" Margin="2,0" />
                                     </UniformGrid>
-                                    <!-- 给打不开 GitHub 的用户：第三方加速线路转发 GitHub 上同一个 RevoHelper.zip，只在点击时打开。 -->
+                                    <!-- 给打不开 GitHub 的用户：两条第三方加速线路都打开版本列表，只在点击时打开。 -->
                                     <UniformGrid x:Name="MirrorDownloadButtons" Columns="2" Margin="-2,4,-2,0">
                                         <Button x:Name="MirrorDownloadButton" Content="{Binding Announcements.MirrorButton}" Tag="mirror" Click="AnnouncementLink_Click"
                                                 Background="#EAF4FF" BorderBrush="#B9D5F2" Foreground="#2676B8" presentation:ThemeScope.AccentSurface="True"

@@ -74,17 +74,17 @@ public sealed class Snapshot4AnnouncementTests
         Assert.Equal("https://github.com/AstralMemory/RevoHelper", AnnouncementCopy.LinkFor("project"));
         Assert.Equal("https://github.com/AstralMemory/RevoHelper/releases", AnnouncementCopy.LinkFor("downloads"));
         Assert.Equal("https://github.com/AstralMemory/RevoHelper/issues", AnnouncementCopy.LinkFor("feedback"));
-        // One mirror lists this repository's releases; the other relays the newest fixed-name package.
-        const string package = "https://github.com/AstralMemory/RevoHelper/releases/latest/download/RevoHelper.zip";
+        // Both mirrors list this repository's releases, so no release needs a fixed-name package.
         Assert.Equal("https://gh-proxy.com/https://github.com/AstralMemory/RevoHelper", AnnouncementCopy.LinkFor("mirror"));
-        Assert.Equal("https://ghfast.top/" + package, AnnouncementCopy.LinkFor("mirror-backup"));
+        Assert.Equal("https://gh-proxy.org/https://github.com/AstralMemory/RevoHelper", AnnouncementCopy.LinkFor("mirror-backup"));
+        Assert.DoesNotContain("RevoHelper.zip", AnnouncementCopy.LinkFor("mirror-backup"));
         foreach (var unknown in new string?[] { null, "", "other", "PROJECT", "MIRROR", "https://example.com", "../settings", "javascript:alert(1)" })
             Assert.Null(AnnouncementCopy.LinkFor(unknown));
     }
 
     [Theory]
-    [InlineData("zh-CN", "国内加速下载", "备用加速线路", "SHA256")]
-    [InlineData("en-US", "Mirror download", "Backup mirror", "SHA256")]
+    [InlineData("zh-CN", "加速线路 1", "加速线路 2", "SHA256")]
+    [InlineData("en-US", "Mirror 1", "Mirror 2", "SHA256")]
     public void MirrorCopy_NamesBothLinesAndExplainsTheThirdPartyRelay(string language, string mirror, string backup, string hash)
     {
         var copy = AnnouncementCopy.For(language, "V1.0.5");
