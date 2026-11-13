@@ -19,11 +19,8 @@ public sealed class GcuQuickControlsCommandTests
     {
         var configuration = new LightingZoneConfiguration(zone, true, LightingEffect.Breathing,
             new(255, 0, 0), 3, speed, LightingDirection.None, 120);
-        foreach (var type in new[] { "MEZone_Lighbar4", "MEZone_Lightbar4", "MEZone_Lightbar4_Logo" })
-        {
-            using var json = JsonDocument.Parse(GcuQuickControlsCommand.LightingEffect(configuration, type));
-            Assert.Equal(speed.ToString(), json.RootElement.GetProperty("speed").GetString());
-        }
+        using var json = JsonDocument.Parse(GcuQuickControlsCommand.LightingEffect(configuration));
+        Assert.Equal(speed.ToString(), json.RootElement.GetProperty("speed").GetString());
     }
 
     [Theory]
@@ -114,16 +111,15 @@ public sealed class GcuQuickControlsCommandTests
     }
 
     [Theory]
-    [InlineData(1, "7")]
-    [InlineData(2, "5")]
+    [InlineData(1, "1")]
+    [InlineData(2, "2")]
     [InlineData(3, "3")]
-    [InlineData(4, "1")]
-    public void IteKeyboardEffect_TranslatesUiSpeedToOfficialRawValue(int uiSpeed, string expectedRawSpeed)
+    [InlineData(4, "4")]
+    public void KeyboardEffect_SendsTheSliderValueLikeTheOfficialApp(int uiSpeed, string expectedRawSpeed)
     {
         var payload = GcuQuickControlsCommand.LightingEffect(new(
             LightingZone.Keyboard, true, RevoHelper.Core.Control.LightingEffect.Breathing,
-            new(0, 180, 255), 3, uiSpeed, LightingDirection.None, 120),
-            "MEZone_3p1nd_101");
+            new(0, 180, 255), 3, uiSpeed, LightingDirection.None, 120));
 
         using var json = JsonDocument.Parse(payload);
 

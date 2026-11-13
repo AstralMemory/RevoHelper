@@ -54,6 +54,7 @@ public partial class App : Application
     private ExperimentalControlsViewModel? experiments;
     private ExperimentalChargeClient? experimentalCharge;
     private SessionChargeController? sessionCharge;
+    private volatile bool chargeResumeWaitingForPower;
     private WindowsProcessorFrequencyLimitController? processorFrequencyLimitController;
     private WindowsProcessorBoostController? processorBoostController;
     private PerformanceMonitorController? performanceMonitor;
@@ -144,7 +145,8 @@ public partial class App : Application
         oemStatusSource = gcuStatusSource;
         var gpuOutputController = new GcuGpuOutputModeController(
             gcuStatusSource,
-            new WindowsGpuOutputModeCapabilitySource());
+            new WindowsGpuOutputModeCapabilitySource(),
+            Win32DisplayModeApi.ReadInternalPanelOnDiscreteGpu);
         var platformModeController = new GcuPlatformModeController(gcuStatusSource, RuntimeDiagnosticLog.Write);
         directCpuPolicyController = new SwitchableCpuPolicyController();
         platformAwareCpuPolicyController = new PlatformAwareCpuPolicyController(
@@ -277,6 +279,49 @@ public partial class App : Application
         _ = InitializePerformancePolicyWhenReadyAsync(viewModel);
         _ = SynchronizeScheduleWhenReadyAsync(viewModel);
         _ = viewModel.RunAutomaticUpdateChecksAsync(applicationLifetime.Token);
+        viewModel.Experiments.Charge.RememberLimit = limit =>
+            Dispatcher.BeginInvoke(() => viewModel.RememberChargeLimit(limit));
+        _ = ResumeChargeLimitAsync(viewModel, TimeSpan.FromSeconds(3));
+    }
+
+    // The charge limit is a setting the user leaves on. A shutdown or a crash leaves the last
+    // session unrestored, so every start first restores it and then, if the user never switched
+    // the limit off, enables the same limit again. Nothing here runs without that saved intent.
+    private async Task ResumeChargeLimitAsync(MainWindowViewModel viewModel, TimeSpan delay)
+    {
+        try
+        {
+            await Task.Delay(delay, applicationLifetime.Token);
+            if (isExiting) return;
+            var charge = viewModel.Experiments.Charge;
+            var limit = viewModel.RememberedChargeLimit;
+            var hadPending = charge.RecoveryPending;
+            var online = System.Windows.Forms.SystemInformation.PowerStatus.PowerLineStatus
+                == System.Windows.Forms.PowerLineStatus.Online;
+            chargeResumeWaitingForPower = limit is 60 or 80 or 100 && !online;
+            // On battery only the restoration runs; the limit itself waits for mains power.
+            await charge.ResumeAsync(online ? limit : 0, applicationLifetime.Token);
+            if (hadPending || limit != 0)
+                RuntimeDiagnosticLog.Write("charge-resume",
+                    $"limit={limit} hadPending={hadPending} online={online} enabled={charge.IsEnabled} recoveryPending={charge.RecoveryPending}");
+        }
+        catch (OperationCanceledException) when (applicationLifetime.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            RuntimeDiagnosticLog.Write("charge-resume", $"{exception.GetType().Name}: {exception.Message}");
+        }
+    }
+
+    // Windows is shutting down or signing out. An active 60/80 limit is left applied so the
+    // laptop does not charge to full while it is off and plugged in; the next start carries on.
+    protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
+    {
+        base.OnSessionEnding(e);
+        if (previewOnly || e.Cancel || experimentalCharge?.HoldForShutdown() != true) return;
+        RuntimeDiagnosticLog.Write("charge-hold", $"held for {e.ReasonSessionEnding}");
+        // If the shutdown is cancelled and the app keeps running, do not stay unsupervised.
+        if (mainViewModel is { } viewModel)
+            _ = ResumeChargeLimitAsync(viewModel, TimeSpan.FromSeconds(90));
     }
 
     private void StartConflictServiceDetection(MainWindowViewModel viewModel)
@@ -696,6 +741,15 @@ public partial class App : Application
                 _ = mainViewModel.SynchronizeControlSessionAsync(CancellationToken.None));
             Dispatcher.BeginInvoke(() =>
                 _ = mainViewModel.TryAutoConnectLiquidCoolingAsync(CancellationToken.None));
+        }
+        if (e.Mode is PowerModes.StatusChange && sourceChanged
+            && powerLineStatus == System.Windows.Forms.PowerLineStatus.Online)
+        {
+            // Mains power is back: the cooler is usually powered from the same socket.
+            Dispatcher.BeginInvoke(() =>
+                _ = mainViewModel.TryAutoConnectLiquidCoolingAsync(CancellationToken.None));
+            if (chargeResumeWaitingForPower)
+                _ = ResumeChargeLimitAsync(mainViewModel, TimeSpan.FromSeconds(3));
         }
         if (e.Mode is PowerModes.Resume || (e.Mode is PowerModes.StatusChange && sourceChanged))
         {

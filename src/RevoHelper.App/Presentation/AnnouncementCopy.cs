@@ -14,7 +14,7 @@ public sealed record AnnouncementCopy(
     string FeedbackTitle, string Feedback, string OfflineNote,
     string MirrorButton, string MirrorBackupButton, string MirrorNote)
 {
-    public const string UpdateDate = "2026-11-08";
+    public const string UpdateDate = "2026-11-13";
     public const string ProjectUrl = "https://github.com/AstralMemory/RevoHelper";
     public const string DownloadsUrl = ProjectUrl + "/releases";
     public const string FeedbackUrl = ProjectUrl + "/issues";
@@ -60,7 +60,7 @@ public sealed record AnnouncementCopy(
                 "Compatibility",
                 "Requires 64-bit Windows 11 and .NET 10 Desktop Runtime. Some models have been verified through developer testing or user feedback; available functions depend on each model. Not every feature on every Intel or AMD laptop has been tested.",
                 "Before you use it",
-                "RevoHelper can coexist with the official control center without disabling it. OEM fan presets are usually read-only; use Custom to edit curves. Power and clock changes can cause instability. Save your work before changing GPU output and restart manually afterwards. Experimental limiting may cause firmware to save a threshold automatically. Minimizing or hiding to the tray keeps limiting active. Actual exit attempts restoration. Unplugging or sleeping pauses and restores; reconnecting or waking resumes after safety checks in this process only. Manual off or health faults block auto-resume; not all side effects are guaranteed reversible.",
+                "RevoHelper can coexist with the official control center without disabling it. OEM fan presets are usually read-only; use Custom to edit curves. Power and clock changes can cause instability. Save your work before changing GPU output and restart manually afterwards. Experimental limiting may cause firmware to save a threshold automatically. Minimizing or hiding to the tray keeps limiting active. Actual exit attempts restoration. Once enabled it is remembered and resumes when RevoHelper starts; it does not limit after mains power was lost or while RevoHelper is not running. Switching it off stops auto-resume; not all side effects are guaranteed reversible.",
                 "How it is developed",
                 "RevoHelper is a Vibe Coding project, with code mainly written with AI assistance. The developer is responsible for product logic, approving designs and changes, UI design, real-device testing and iteration.",
                 "Feedback",
@@ -77,7 +77,7 @@ public sealed record AnnouncementCopy(
                 "适用范围",
                 "需要 Windows 11 64 位及 .NET 10 Desktop Runtime。部分机型已通过开发者实测或用户反馈验证，具体功能以机型实际支持为准；并非所有 Intel、AMD 机型的全部功能都已验证。",
                 "使用提醒",
-                "可以与官方控制台共存，不会停用或禁用它。官方预设风扇曲线通常只供参考，自定义模式可以调整。调整功耗与频率可能导致不稳定；切换显卡输出前请保存工作，切换后需手动重启。实验性限充可能使固件自动保存阈值；最小化或隐藏到托盘继续限充，真正退出时尝试恢复。拔电或睡眠先恢复原值，接电或唤醒经安全确认后仅同一进程继续；手动关闭或健康异常不自动重新启用，不能保证全部副作用都能恢复。",
+                "可以与官方控制台共存，不会停用或禁用它。官方预设风扇曲线通常只供参考，自定义模式可以调整。调整功耗与频率可能导致不稳定；切换显卡输出前请保存工作，切换后需手动重启。实验性限充可能使固件自动保存阈值；最小化或隐藏到托盘继续限充，真正退出时尝试恢复。开启后会记住，下次打开 RevoHelper 自动接续；断电后再来电或 RevoHelper 未运行时不限充。手动关闭后不再自动开启，不能保证全部副作用都能恢复。",
                 "开发方式声明",
                 "本产品属于 Vibe Coding 产物，代码主要由 AI 辅助编写。开发者负责产品逻辑、方案与改动审批、UI 设计、真机测试和迭代改进等工作。",
                 "反馈说明",

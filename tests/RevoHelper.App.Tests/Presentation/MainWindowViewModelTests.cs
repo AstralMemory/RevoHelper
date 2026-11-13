@@ -763,13 +763,13 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public void AppVersionText_UsesV1041Identity()
+    public void AppVersionText_UsesV105Identity()
     {
         var viewModel = new MainWindowViewModel(CreateDashboard());
 
-        Assert.Equal("V1.0.4.1", viewModel.ReleaseVersionText);
-        Assert.Equal("V1.0.4.1", viewModel.ReleaseBadgeText);
-        Assert.Equal("RevoHelper V1.0.4.1 · 免费使用", viewModel.AppVersionText);
+        Assert.Equal("V1.0.5", viewModel.ReleaseVersionText);
+        Assert.Equal("V1.0.5", viewModel.ReleaseBadgeText);
+        Assert.Equal("RevoHelper V1.0.5 · 免费使用", viewModel.AppVersionText);
     }
 
     [Fact]
@@ -786,7 +786,7 @@ public sealed class MainWindowViewModelTests
         Assert.Equal("en-US", store.LastSaved?.UiLanguageCode);
         Assert.Equal("Laptop performance profiles", viewModel.UiCopy.HomeTitle);
         Assert.Equal("Performance", viewModel.DrawerTitle);
-        Assert.Equal("RevoHelper V1.0.4.1 · Free to use", viewModel.AppVersionText);
+        Assert.Equal("RevoHelper V1.0.5 · Free to use", viewModel.AppVersionText);
     }
 
     [Fact]
@@ -2108,6 +2108,25 @@ public sealed class MainWindowViewModelTests
 
         Assert.False(viewModel.IsDrawerOpen);
         Assert.Equal(HomeDrawer.None, viewModel.ActiveDrawer);
+    }
+
+    [Theory]
+    [InlineData(GpuOutputMode.Discrete, false, true)]   // set to dGPU, panel still on the iGPU
+    [InlineData(GpuOutputMode.Hybrid, true, true)]      // set to hybrid, panel still on the dGPU
+    [InlineData(GpuOutputMode.Discrete, true, false)]
+    [InlineData(GpuOutputMode.Hybrid, false, false)]
+    [InlineData(GpuOutputMode.Discrete, null, false)]   // unknown panel: make no claim
+    public async Task GpuOutput_SavedSettingThatIsNotLiveYetIsNotCalledCurrent(GpuOutputMode saved, bool? panelOnDiscrete, bool pending)
+    {
+        var gpu = new RecordingGpuOutputModeController(new(saved, new(true, true, true), panelOnDiscrete));
+        var viewModel = CreateViewModel(gpuOutputModeController: gpu);
+
+        await viewModel.OpenGpuOutputAsync(CancellationToken.None);
+
+        Assert.Equal(saved, viewModel.SelectedGpuOutputMode);
+        Assert.Equal(pending, viewModel.GpuOutputStatusText.Contains("尚未生效", StringComparison.Ordinal));
+        Assert.Equal(!pending, viewModel.GpuOutputStatusText.StartsWith("当前：", StringComparison.Ordinal));
+        Assert.DoesNotContain(UiTextCatalog.Translate(viewModel.GpuOutputStatusText, "en-US"), c => c is >= '\u4e00' and <= '\u9fff');
     }
 
     [Fact]

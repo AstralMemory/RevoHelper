@@ -52,7 +52,7 @@ public sealed class Snapshot4AnnouncementTests
     {
         var copy = AnnouncementCopy.For(language, "V1.0.2");
         Assert.Equal("V1.0.2", copy.Version);
-        Assert.Equal("2026-11-08", copy.UpdatedDate);
+        Assert.Equal("2026-11-13", copy.UpdatedDate);
         Assert.Contains("MIT", copy.Release);
         Assert.Contains("GitHub Releases", copy.Release);
         Assert.DoesNotContain(language == "en-US" ? "has been publicly released" : "已正式发布", copy.Release);

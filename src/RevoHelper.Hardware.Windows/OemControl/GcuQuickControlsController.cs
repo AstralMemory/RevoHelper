@@ -282,6 +282,18 @@ public sealed class GcuQuickControlsController : IQuickControlsController
             return ControlResult.Rejected($"未从官方状态主题发现{LightingZoneLabel(configuration.Zone)}，未发送命令。");
         if (configuration.Zone == LightingZone.Logo && !configuration.Enabled)
             return await TurnOffLogoPreservingCoastAsync(cancellationToken).ConfigureAwait(false);
+        // SetPower alone leaves a running effect untouched, so a default that can be expressed as an
+        // effect is written as one. Keyboards without RGB effects keep the power command below.
+        if (configuration.Enabled && configuration.Zone == LightingZone.Keyboard &&
+            configuration.Effect == RevoHelper.Core.Control.LightingEffect.OemDefault &&
+            baseline.SupportedEffects.Contains(RevoHelper.Core.Control.LightingEffect.Rainbow))
+            configuration = configuration with
+            {
+                Effect = RevoHelper.Core.Control.LightingEffect.Rainbow,
+                Brightness = OemDefaultKeyboardBrightness,
+                Speed = OemDefaultKeyboardSpeed,
+                Direction = LightingDirection.None
+            };
         if (configuration.Effect != RevoHelper.Core.Control.LightingEffect.OemDefault &&
             !baseline.SupportedEffects.Contains(configuration.Effect))
             return ControlResult.Rejected($"当前{LightingZoneLabel(configuration.Zone)}不支持 {configuration.Effect} 灯效。");
@@ -327,7 +339,7 @@ public sealed class GcuQuickControlsController : IQuickControlsController
             await channel.WriteLightingAsync(LightingZone.Keyboard,
                 GcuQuickControlsCommand.KeyboardBacklight(true), cancellationToken).ConfigureAwait(false);
 
-        var effectPayload = GcuQuickControlsCommand.LightingEffect(configuration, baseline.HardwareType);
+        var effectPayload = GcuQuickControlsCommand.LightingEffect(configuration);
         string readbackPayload;
         if (configuration.Enabled &&
             configuration.Zone is LightingZone.CoastLightbar or LightingZone.Logo)
@@ -386,14 +398,15 @@ public sealed class GcuQuickControlsController : IQuickControlsController
         // The first status can be the echo of the power command sent just before this
         // write, which still shows the previous effect. Ask once more before judging.
         await verificationDelay(TimeSpan.FromMilliseconds(350), cancellationToken).ConfigureAwait(false);
-        var settled = (await ReadLightingZoneAsync(configuration.Zone, cancellationToken).ConfigureAwait(false))?.Configuration;
+        var settledState = await ReadLightingZoneAsync(configuration.Zone, cancellationToken).ConfigureAwait(false);
+        var settled = settledState?.Configuration;
         if (LightingMatches(settled, configuration))
             return new(true, $"{LightingZoneLabel(configuration.Zone)}灯效已应用并回读确认。");
 
         var parameters = settled is null ? [] : UnconfirmedLightingParameters(settled, configuration);
         var detail = settled is null
             ? "no readback"
-            : $"expected {configuration.Effect} enabled={configuration.Enabled}, read {settled.Effect} enabled={settled.Enabled}; " +
+            : $"expected {configuration.Effect} enabled={configuration.Enabled}, read {settled.Effect} enabled={settled.Enabled} rawSpeed={settledState?.RawSpeed?.ToString() ?? "none"}; " +
               string.Join(", ", parameters.Select(parameter => $"{parameter.Name} expected {parameter.Expected} read {parameter.Actual}"));
         // Power and effect are what the user chose and can see; a parameter that does not
         // read back is reported as unconfirmed rather than as a failed write.
@@ -777,6 +790,10 @@ public sealed class GcuQuickControlsController : IQuickControlsController
     private static LightingZoneState? MergeLightingState(
         LightingZoneState? previous,
         LightingZoneState? current) => LightingStateAccumulator.Merge(previous, current);
+
+    // CCU's appsettings.json: mezone_Keyboard=Rainbow, Light=3, Speed=2.
+    private const int OemDefaultKeyboardBrightness = 3;
+    private const int OemDefaultKeyboardSpeed = 2;
 
     private const int LightingPowerSettleReads = 3;
     private static readonly TimeSpan LightingPowerSettleDelay = TimeSpan.FromMilliseconds(300);

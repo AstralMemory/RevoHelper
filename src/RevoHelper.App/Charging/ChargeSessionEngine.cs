@@ -13,13 +13,25 @@ public sealed class ChargeSessionEngine(Func<IReviewedChargeTransport> createTra
 {
     public static void ValidateInitial(ChargeEcSnapshot s)
     {
-        foreach (var pair in new (ushort Address, byte Value)[] { (0x07C3, 7), (0x0770, 255), (0x07B9, 0), (0x07D0, 0), (0x9164, 0) })
-            if (s.Byte(pair.Address) != pair.Value) throw new InvalidOperationException($"原始状态0x{pair.Address:X4}已改变；不接管已有设置。");
+        foreach (var pair in new (ushort Address, byte Value)[] { (0x07C3, 7), (0x0770, 255), (0x07D0, 0) })
+            if (s.Byte(pair.Address) != pair.Value) throw Changed(s, pair.Address);
+        // A threshold left behind by another tool (or an earlier firmware setting) is kept as the
+        // original and put back afterwards; it is not a reason to refuse. Anything that is not a
+        // percentage is not a threshold we understand.
+        var threshold = OriginalThreshold(s);
+        if (s.Registers[0x07B9] <= 255 && threshold > 100) throw Changed(s, 0x07B9);
+        if (s.Byte(0x9164) is var saved && saved != 0 && saved != threshold) throw Changed(s, 0x9164);
         if (s.Registers[0x07B9] > 255 || (s.Byte(0x07A6) & 0x30) != 0x20 || (s.Byte(0x0742) & 4) != 0)
             throw new InvalidOperationException("请先恢复原生工作站养护档及原始阈值；不强制接管。");
         if (!s.PowerOnline || (s.Byte(0x0490) & 5) != 5)
             throw new InvalidOperationException("请连接电源并确认电池状态有效后，再手动启用。");
     }
+
+    /// <summary>The threshold bits found before the session; bit 7 belongs to the firmware.</summary>
+    public static byte OriginalThreshold(ChargeEcSnapshot original) => (byte)(original.Byte(0x07B9) & 0x7F);
+
+    private static InvalidOperationException Changed(ChargeEcSnapshot s, ushort address) =>
+        new($"原始状态0x{address:X4}已改变（当前0x{s.Byte(address):X2}）；不接管已有设置。");
 
     public static void ValidateActive(ChargeEcSnapshot s, ChargeEcSnapshot original, int limit)
     {
@@ -27,7 +39,7 @@ public sealed class ChargeSessionEngine(Func<IReviewedChargeTransport> createTra
             || s.Byte(0x07C3) != 4 || s.Byte(0x0770) != 255
             || s.Byte(0x07D0) != 0 || (s.Byte(0x07A6) & 0x30) != 0x20
             || (s.Byte(0x0742) & 0xFB) != (original.Byte(0x0742) & 0xFB)
-            || (s.Byte(0x07B9) & 0x7F) != limit || s.Byte(0x9164) is var cache && cache != 0 && cache != limit)
+            || (s.Byte(0x07B9) & 0x7F) != limit || s.Byte(0x9164) is var cache && cache != 0 && cache != limit && cache != original.Byte(0x9164))
             throw new InvalidOperationException("平台或阈值被外部改变；停止实验，不反复覆盖。");
         if (!s.PowerOnline || (s.Byte(0x0490) & 5) != 5)
             throw new InvalidOperationException("已断开电源或电池状态无效，尝试恢复原值。");
@@ -36,7 +48,7 @@ public sealed class ChargeSessionEngine(Func<IReviewedChargeTransport> createTra
     public ChargeRecoveryResult Run(ChargeEcSnapshot original, int limit,
         Func<bool> shouldStop, Action checkOwners, Action wait,
         Action<string, ushort?, int?, int?> journal, Action<ChargeEcSnapshot> publish,
-        Action? recoveryWait = null)
+        Action? recoveryWait = null, Func<bool>? leaveApplied = null)
     {
         if (limit is not (60 or 80)) throw new ArgumentOutOfRangeException(nameof(limit));
         bool thresholdAttempted = false, platformAttempted = false;
@@ -51,9 +63,15 @@ public sealed class ChargeSessionEngine(Func<IReviewedChargeTransport> createTra
                 throw new InvalidOperationException("相关状态在启用前改变；不写入。");
             checkOwners();
             if (shouldStop()) return new(true, true, true, []);
-            journal("ThresholdApplyIntent", 0x07B9, 0, limit);
-            thresholdAttempted = true;
-            SetThreshold(transport, 0, (byte)limit);
+            var originalThreshold = OriginalThreshold(original);
+            if (OriginalThreshold(fresh) != originalThreshold)
+                throw new InvalidOperationException("相关状态在启用前改变；不写入。");
+            if (originalThreshold != limit)
+            {
+                journal("ThresholdApplyIntent", 0x07B9, originalThreshold, limit);
+                thresholdAttempted = true;
+                SetThreshold(transport, originalThreshold, (byte)limit);
+            }
             checkOwners();
             if (shouldStop()) throw new OperationCanceledException("启用期间收到停止请求。");
             journal("PlatformApplyIntent", 0x07C3, 7, 4);
@@ -82,7 +100,8 @@ public sealed class ChargeSessionEngine(Func<IReviewedChargeTransport> createTra
         }
         finally
         {
-            if (thresholdAttempted || platformAttempted)
+            // Shutdown hold: the applied values are left for the next start to restore.
+            if ((thresholdAttempted || platformAttempted) && leaveApplied?.Invoke() != true)
                 recovery = Recover(original, limit, thresholdAttempted, platformAttempted, false, journal, recoveryWait ?? wait);
         }
         return recovery ?? new(true, true, true, []);
@@ -92,6 +111,7 @@ public sealed class ChargeSessionEngine(Func<IReviewedChargeTransport> createTra
         bool platformAttempted, bool emergency, Action<string, ushort?, int?, int?> journal, Action wait)
     {
         var errors = new List<string>();
+        var originalThreshold = OriginalThreshold(original);
         if (emergency) RestorePlatform();
         try
         {
@@ -100,24 +120,25 @@ public sealed class ChargeSessionEngine(Func<IReviewedChargeTransport> createTra
             var raw = transport.ReadByte(0x07B9);
             if (raw > 255) throw new InvalidOperationException("阈值读取失败或格式改变。");
             var value = (byte)(raw & 0x7F);
-            if (thresholdAttempted && value == limit)
+            if (value == originalThreshold) { /* Nothing of ours is left in the threshold. */ }
+            else if (thresholdAttempted && value == limit)
             {
-                TryJournal("ThresholdRestoreIntent", 0x07B9, limit, 0);
-                SetThreshold(transport, (byte)limit, 0);
+                TryJournal("ThresholdRestoreIntent", 0x07B9, limit, originalThreshold);
+                SetThreshold(transport, (byte)limit, originalThreshold);
             }
-            else if (value != 0) throw new InvalidOperationException("阈值由其他程序改变，不覆盖。");
+            else throw new InvalidOperationException("阈值由其他程序改变，不覆盖。");
             if (!emergency && platformAttempted)
                 for (var i = 0; i < 2; i++)
                 {
                     wait();
                     using var cache = OpenRecoveryTransport();
-                    if (ReviewedChargeProtocol.DecodeByte(cache.ReadByte(0x9164)) == 0) break;
+                    if (ReviewedChargeProtocol.DecodeByte(cache.ReadByte(0x9164)) == original.Byte(0x9164)) break;
                 }
         }
         catch (Exception ex) { errors.Add("阈值恢复：" + ex.Message); }
         finally { if (!emergency) RestorePlatform(); }
         var platform = Verify(0x07C3, value => value == 7);
-        var threshold = Verify(0x07B9, value => (value & 0x7F) == 0);
+        var threshold = Verify(0x07B9, value => (value & 0x7F) == originalThreshold);
         var cacheMatches = Verify(0x9164, value => value == original.Byte(0x9164));
         return new(platform, threshold, cacheMatches, [.. errors]);
 

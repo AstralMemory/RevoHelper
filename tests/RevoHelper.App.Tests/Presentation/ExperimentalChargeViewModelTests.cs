@@ -11,6 +11,64 @@ namespace RevoHelper.App.Tests.Presentation;
 
 public sealed class ExperimentalChargeViewModelTests
 {
+    // The limit is something users leave on. Shutting down with it on used to leave the next
+    // start stuck behind a manual "restore" click, with the switch greyed out.
+    [Fact]
+    public async Task Resume_RestoresWhatTheLastRunLeftAndEnablesTheRememberedLimit()
+    {
+        var backend = new FakeController();
+        backend.Set(new(RecoveryPending: true, Message: "待恢复"));
+        using var vm = new ExperimentalChargeViewModel(backend);
+        Assert.False(vm.CanToggle);
+
+        await vm.ResumeAsync(60);
+
+        Assert.Equal(1, backend.Recoveries);
+        Assert.Equal(["enable:60"], backend.Calls);
+        Assert.True(vm.IsEnabled);
+        Assert.Equal(60, vm.SelectedLimitPercent);
+    }
+
+    [Fact]
+    public async Task Resume_DoesNotEnableWhenRestorationIsNotConfirmedOrNothingWasRemembered()
+    {
+        var failing = new FakeController { RecoveryError = new InvalidOperationException("原值未确认") };
+        failing.Set(new(RecoveryPending: true));
+        using var stuck = new ExperimentalChargeViewModel(failing);
+        await stuck.ResumeAsync(80);
+        Assert.Equal(0, failing.Enables);
+        Assert.True(stuck.RecoveryPending);
+
+        var idle = new FakeController();
+        idle.Set(new(RecoveryPending: true));
+        using var off = new ExperimentalChargeViewModel(idle);
+        await off.ResumeAsync(0);   // the user had switched it off: only clean up
+        Assert.Equal(1, idle.Recoveries);
+        Assert.Equal(0, idle.Enables);
+        Assert.False(off.IsEnabled);
+    }
+
+    [Fact]
+    public async Task OnlyTheUsersOwnSwitchChangesWhatIsRemembered()
+    {
+        var backend = new FakeController();
+        using var vm = new ExperimentalChargeViewModel(backend);
+        var remembered = new List<int>();
+        vm.RememberLimit = remembered.Add;
+
+        await vm.SetEnabledAsync(true);
+        Assert.Equal([80], remembered);
+
+        // Exit, power loss and other program-made stops must not forget the user's choice.
+        vm.RequestStop("程序退出。");
+        await vm.StopAsync("电源断开。");
+        Assert.Equal([80], remembered);
+
+        backend.Set(new(Enabled: true, LimitPercent: 80));
+        await vm.SetEnabledAsync(false);
+        Assert.Equal([80, 0], remembered);
+    }
+
     [Fact]
     public void ConstructingOrChoosingOnlyChangesTheLocalDraft()
     {

@@ -4,14 +4,22 @@ namespace RevoHelper.Hardware.Windows.OemControl;
 
 public sealed class GcuGpuOutputModeController(
     IGcuGpuOutputModeChannel channel,
-    IGpuOutputModeCapabilitySource capabilitySource) : IGpuOutputModeController
+    IGpuOutputModeCapabilitySource capabilitySource,
+    Func<bool?>? readPanelOnDiscreteGpu = null) : IGpuOutputModeController
 {
     private readonly SemaphoreSlim operationLock = new(1, 1);
 
     public async ValueTask<GpuOutputModeState?> ReadStateAsync(CancellationToken cancellationToken)
     {
         var status = await channel.ReadStatusAsync(cancellationToken).ConfigureAwait(false);
-        return new(status.Mode, Combine(status, capabilitySource.Read()));
+        return new(status.Mode, Combine(status, capabilitySource.Read()), ReadPanel());
+    }
+
+    // GCU only reports the saved setting. Never let a display query break the mode page.
+    private bool? ReadPanel()
+    {
+        try { return readPanelOnDiscreteGpu?.Invoke(); }
+        catch (Exception) { return null; }
     }
 
     public async ValueTask<ControlResult> SetModeAsync(GpuOutputMode mode, CancellationToken cancellationToken)
@@ -29,7 +37,7 @@ public sealed class GcuGpuOutputModeController(
                 return new(true, $"当前已经是{Label(mode)}。");
 
             await ApplyAndVerifyAsync(mode, cancellationToken).ConfigureAwait(false);
-            return new(true, $"已写入并回读验证：{Label(mode)}；重启 Windows 后生效。");
+            return new(true, $"已写入并回读验证：{Label(mode)}；请点“重启”生效，关机再开机可能不生效。");
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {

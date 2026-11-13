@@ -45,7 +45,7 @@ public static class GcuQuickControlsCommand
     public static string KeyboardBacklight(bool enabled) =>
         JsonSerializer.Serialize(new KeyboardPowerCommand("SetPower", enabled ? 1 : 0));
 
-    public static string LightingEffect(LightingZoneConfiguration configuration, string? hardwareType = null)
+    public static string LightingEffect(LightingZoneConfiguration configuration)
     {
         if (!configuration.Enabled)
         {
@@ -88,7 +88,9 @@ public static class GcuQuickControlsCommand
         return JsonSerializer.Serialize(new KeyboardEffectCommand(
             "SetEffectALL", "Lighting", EffectName(configuration.Effect),
             configuration.Brightness.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            SerializeSpeed(configuration.Zone, configuration.Speed, hardwareType),
+            // Every OEM lighting page sends its slider's 1–4 value as it is, keyboard included.
+            // The 7/5/3/1 seen on the keyboard is what GCU reports back, never what it accepts.
+            configuration.Speed.ToString(System.Globalization.CultureInfo.InvariantCulture),
             DirectionName(configuration), configuration.Zone == LightingZone.Keyboard ? "1" : "0", color, string.Empty));
     }
 
@@ -174,24 +176,6 @@ public static class GcuQuickControlsCommand
             LightingDirection.Down => "UpDown",
             _ => "None"
         };
-    }
-
-    private static string SerializeSpeed(LightingZone zone, int uiSpeed, string? hardwareType)
-    {
-        // OEM Lightbar/Logo pages send their slider's 1–4 value directly. Only the
-        // ITE keyboard protocol uses 7/5/3/1, despite all three reporting MEZone_*.
-        var value = zone == LightingZone.Keyboard &&
-                    hardwareType?.StartsWith("MEZone_", StringComparison.OrdinalIgnoreCase) == true
-            ? uiSpeed switch
-            {
-                1 => 7,
-                2 => 5,
-                3 => 3,
-                4 => 1,
-                _ => uiSpeed
-            }
-            : uiSpeed;
-        return value.ToString(System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private static IReadOnlyList<LightingRgb> KeyboardPalette(LightingZoneConfiguration configuration)

@@ -1,10 +1,10 @@
 # RevoHelper
 
-轻量、免费的第三方机械革命笔记本控制台。V1.0.4.1，开发与维护：Astral Memory。
+轻量、免费的第三方机械革命笔记本控制台。V1.0.5，开发与维护：Astral Memory。
 
-本仓库当前源码对应 RevoHelper V1.0.4.1（产品版本 `1.0.4.1+20261108`，文件版本 `1.0.4.10`）。RevoHelper 自有代码采用 MIT，版权声明为 `Copyright (c) 2026 Astral Memory`，详见 `LICENSE`。第三方组件、嵌入二进制及其对应源码保留各自许可；项目 MIT 不替代它们的许可条件。下载、源码获取与更新以 [项目仓库](https://github.com/AstralMemory/RevoHelper) 为准。
+本仓库当前源码对应 RevoHelper V1.0.5（产品版本 `1.0.5+20261113`，文件版本 `1.0.5.9`）。RevoHelper 自有代码采用 MIT，版权声明为 `Copyright (c) 2026 Astral Memory`，详见 `LICENSE`。第三方组件、嵌入二进制及其对应源码保留各自许可；项目 MIT 不替代它们的许可条件。下载、源码获取与更新以 [项目仓库](https://github.com/AstralMemory/RevoHelper) 为准。
 
-本版的源码分发边界见 [V1.0.4.1 源码说明](./docs/release/V1.0.4.1_SOURCE_README.md)，用户说明见 [V1.0.4.1 使用说明](./docs/release/V1.0.4.1_USER_README.txt)。构建与离线测试不会启用限充，不要为了构建而运行硬件实验。
+本版的源码分发边界见 [V1.0.5 源码说明](./docs/release/V1.0.5_SOURCE_README.md)，用户说明见 [V1.0.5 使用说明](./docs/release/V1.0.5_USER_README.txt)。构建与离线测试不会启用限充，不要为了构建而运行硬件实验。
 
 实验性限充不按型号、BIOS/EC 版本或固定 EC 项目号预先拒绝，可手动尝试；不保证每台实际生效。仍保留必要协议、唯一接口路线、控制值所有权、回读及恢复检查；构建或模拟测试通过不等于具体机器已验证有效。
 
@@ -66,10 +66,10 @@ dotnet test tests/RevoHelper.App.Tests/RevoHelper.App.Tests.csproj
 打包脚本可以用 Windows 自带的 PowerShell 5.1 或 PowerShell 7 运行。
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File packaging/Prepare-V1041Release.ps1 -PublishExe artifacts/publish/RevoHelper.exe -OutputDirectory artifacts/release-v1.0.4.1
+powershell -NoProfile -ExecutionPolicy Bypass -File packaging/Prepare-V105Release.ps1 -PublishExe artifacts/publish/RevoHelper.exe -OutputDirectory artifacts/release-v1.0.5
 ```
 
-输出目录必须为新目录或空目录，包含运行目录、`RevoHelper v1.0.4.1.zip`、固定名称的 `RevoHelper.zip`（内容相同，供加速下载链接使用）、`RevoHelper v1.0.4.1 Source Code.zip` 与更新日志。再次打包时使用新的输出路径；脚本不会覆盖已有资源。该步骤只生成本地文件，不操作 GitHub，也不生成哈希。源包需要联网还原 NuGet 依赖，不是全部工具链的离线镜像。历史打包脚本与固定输入仅为兼容既有离线测试而保留，请以本版脚本和说明为准。
+输出目录必须为新目录或空目录，包含运行目录、`RevoHelper v1.0.5.zip`、固定名称的 `RevoHelper.zip`（内容相同，供加速下载链接使用）、`RevoHelper v1.0.5 Source Code.zip` 与更新日志。再次打包时使用新的输出路径；脚本不会覆盖已有资源。该步骤只生成本地文件，不操作 GitHub，也不生成哈希。源包需要联网还原 NuGet 依赖，不是全部工具链的离线镜像。历史打包脚本与固定输入仅为兼容既有离线测试而保留，请以本版脚本和说明为准。
 
 ## 功能边界
 

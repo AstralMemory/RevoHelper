@@ -41,6 +41,15 @@ public sealed partial class MainWindowViewModel
         }
     }
 
+    /// <summary>The limit the user last switched on and has not switched off; 0 when none.</summary>
+    public int RememberedChargeLimit => applicationSettings.ChargeLimitResumePercent;
+
+    public void RememberChargeLimit(int limitPercent)
+    {
+        if (limitPercent is not (0 or 60 or 80 or 100) || limitPercent == applicationSettings.ChargeLimitResumePercent) return;
+        TrySaveSettings(applicationSettings with { ChargeLimitResumePercent = limitPercent });
+    }
+
     private ReleaseVersion? LatestKnownRelease => ReleaseVersion.TryParse(applicationSettings.LatestReleaseTag);
 
     private ReleaseVersion? NewerRelease =>

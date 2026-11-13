@@ -40,14 +40,18 @@ public static class ReviewedChargeProtocol
         var valid = address switch
         {
             0x07C3 => expected is 4 or 7 && target is 4 or 7,
-            0x07B9 => IsThreshold(expected) && IsThreshold(target) && (expected & 0x80) == (target & 0x80),
+            0x07B9 => IsThreshold(expected) && IsThreshold(target) && (IsOurs(expected) || IsOurs(target))
+                && (expected & 0x80) == (target & 0x80),
             _ => false
         };
         if (!valid) throw new ArgumentOutOfRangeException(nameof(target), "Write is outside the reviewed owned-byte transitions.");
         // data_high, operation and reserved bytes deliberately remain zero.
         return address | ((ulong)target << 16);
 
-        static bool IsThreshold(byte value) => (value & 0x7F) is 0 or 60 or 80;
+        // RevoHelper only ever sets 60 or 80. The other side of a transition may be any
+        // percentage: the value that was there before, being replaced or put back.
+        static bool IsThreshold(byte value) => (value & 0x7F) <= 100;
+        static bool IsOurs(byte value) => (value & 0x7F) is 60 or 80;
     }
 
     public static bool WmiSignatureMatches(ChargeWmiSignature signature) =>

@@ -77,7 +77,7 @@ public static class HomeDashboardFactory
         if (name.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase) ||
             name.Contains("GeForce", StringComparison.OrdinalIgnoreCase) ||
             name.Contains("Radeon RX", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("Intel Arc", StringComparison.OrdinalIgnoreCase))
+            GpuNames.IsDiscreteIntelArc(name))
         {
             return DeviceKind.DiscreteGpu;
         }

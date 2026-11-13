@@ -73,14 +73,15 @@ public sealed class ChargeWindowLifecycleTests
         Assert.Contains("Minimizing or hiding to the tray keeps limiting active", AnnouncementCopy.For("en-US", "V1.0.2").Usage);
         foreach (var text in new[] { LocalizedUiCopy.Chinese.ExperimentalChargeRisk, AnnouncementCopy.For("zh-CN", "V1.0.2").Usage })
         {
-            Assert.Contains("接电或唤醒经安全确认后仅同一进程", text);
-            Assert.Contains("手动关闭或健康异常不自动重新启用", text);
+            Assert.Contains("开启后会记住", text);
+            Assert.Contains("手动关闭后不再自动开启", text);
+            Assert.Contains("未运行时不限充", text.Replace("没有运行时不限充", "未运行时不限充"));
         }
         foreach (var text in new[] { LocalizedUiCopy.English.ExperimentalChargeRisk, AnnouncementCopy.For("en-US", "V1.0.2").Usage })
         {
-            Assert.Contains("safety checks in this process only", text);
-            Assert.Contains("Manual off or health faults block auto-resume", text);
-            Assert.DoesNotContain("after restart", text);
+            Assert.Contains("Once enabled it is remembered", text);
+            Assert.Contains("Switching it off stops auto-resume", text);
+            Assert.Contains("while RevoHelper is not running", text);
         }
     }
 

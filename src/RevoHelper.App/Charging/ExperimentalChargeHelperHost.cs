@@ -38,6 +38,7 @@ public static class ExperimentalChargeHelperHost
         using var session = Acquire(@"Global\RevoHelperTemporaryBatteryPlatformTrial");
         using var legacy = Acquire(@"Global\RevoHelperNativeBatteryThresholdTrial");
         using var stop = new EventWaitHandle(false, EventResetMode.ManualReset, files.StopName);
+        using var hold = new EventWaitHandle(false, EventResetMode.ManualReset, files.HoldName);
         using var start = new EventWaitHandle(false, EventResetMode.ManualReset, files.StartName);
         files.SaveStatus(new("Starting", "正在检查控制接口与原值；尚未确认生效。", limit));
         if (!ChargeSessionFiles.IsProcess(owner, ownerTicks) || stop.WaitOne(0))
@@ -52,6 +53,7 @@ public static class ExperimentalChargeHelperHost
         files.SaveLease(lease); files.Journal("GuardianPrepared");
         Process? child = null;
         string? cause = null;
+        var held = false;
         try
         {
             child = ChargeSessionFiles.Launch(WorkerMode, files.SessionId, limit, owner, ownerTicks);
@@ -60,6 +62,14 @@ public static class ExperimentalChargeHelperHost
             var lastProgress = DateTime.UtcNow;
             while (!child.WaitForExit(1000))
             {
+                if (hold.WaitOne(0))
+                {
+                    held = true;
+                    files.Journal(ChargeSessionFiles.HeldPhase);
+                    files.SaveStatus(new("Held", "关机期间保持限充；下次打开 RevoHelper 时自动接续。", limit, RecoveryPending: true));
+                    child.WaitForExit(5000);
+                    break;
+                }
                 var online = System.Windows.Forms.SystemInformation.PowerStatus.PowerLineStatus == System.Windows.Forms.PowerLineStatus.Online;
                 try
                 {
@@ -85,7 +95,7 @@ public static class ExperimentalChargeHelperHost
         }
         finally
         {
-            if (child is not null && child.HasExited)
+            if (!held && !hold.WaitOne(0) && child is not null && child.HasExited)
             {
                 using var writer = Acquire(@"Global\RevoHelperTemporaryBatteryPlatformWriter");
                 FinishRecovery(files, lease, cause);
@@ -99,6 +109,7 @@ public static class ExperimentalChargeHelperHost
     {
         using var start = EventWaitHandle.OpenExisting(files.StartName);
         using var stop = EventWaitHandle.OpenExisting(files.StopName);
+        using var hold = new EventWaitHandle(false, EventResetMode.ManualReset, files.HoldName);
         if (!start.WaitOne(10000)) throw new InvalidOperationException("Independent monitor was not ready.");
         var lease = files.ReadLease();
         using var self = Process.GetCurrentProcess();
@@ -108,20 +119,23 @@ public static class ExperimentalChargeHelperHost
         var engine = new ChargeSessionEngine(() => new ReviewedChargeTransport());
         try
         {
-            var result = engine.Run(lease.Original, lease.LimitPercent, () => stop.WaitOne(0), CheckOwners,
-                () => stop.WaitOne(2000), files.Journal, snapshot =>
+            var result = engine.Run(lease.Original, lease.LimitPercent, () => stop.WaitOne(0) || hold.WaitOne(0), CheckOwners,
+                () => WaitHandle.WaitAny([stop, hold], 2000), files.Journal, snapshot =>
                 {
                     var reached = (snapshot.Byte(0x07B9) & 0x80) != 0;
                     var message = reached && !snapshot.Charging && snapshot.ChargeRateMw == 0
                         ? "实验性限充运行中：已达上限，当前未充电。"
                         : snapshot.Charging ? "实验性限充运行中：低于上限，正在充电。" : "实验性限充运行中：等待充电状态确认。";
                     files.SaveStatus(new("Active", message, lease.LimitPercent, Enabled: true, Snapshot: snapshot));
-                }, recoveryWait: () => Thread.Sleep(1000)); // A signalled stop must not skip firmware cache settling.
+                }, recoveryWait: () => Thread.Sleep(1000), // A signalled stop must not skip firmware cache settling.
+                leaveApplied: () => hold.WaitOne(0));
+            if (hold.WaitOne(0)) return 0; // Left applied on purpose; the guardian records it.
             files.SaveStatus(new("WorkerFinished", "工作进程已尝试恢复，监护正在复核。", lease.LimitPercent,
                 RecoveryPending: !result.CriticalRestored, Recovery: result));
         }
         catch (Exception ex)
         {
+            if (hold.WaitOne(0)) return 0;
             // Engine finally already attempted independent owned recovery.
             try { files.Journal("WorkerError:" + ex.Message); } catch (Exception) { }
             files.SaveStatus(new("WorkerFinished", "实验已停止，监护正在复核恢复：" + ex.Message, lease.LimitPercent, RecoveryPending: true));

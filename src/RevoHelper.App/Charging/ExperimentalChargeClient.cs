@@ -19,6 +19,27 @@ public sealed class ExperimentalChargeClient : IExperimentalChargeController, ID
     private int enableGeneration;
     private volatile bool stopRequested;
     private volatile bool disposed;
+    private volatile bool heldForShutdown;
+    private EventWaitHandle? holdEvent;
+
+    /// <summary>The pending session found at startup was left applied on purpose at the last shutdown.</summary>
+    public ChargeSessionFiles? PendingHeldSession { get; private set; }
+
+    /// <summary>
+    /// Windows is shutting down: tell the helpers to exit without restoring, so the limit stays
+    /// applied while the laptop is off and plugged in. The next start restores and resumes it.
+    /// Returns false when no 60/80 session is active.
+    /// </summary>
+    public bool HoldForShutdown()
+    {
+        var current = files;
+        if (disposed || current is null || stopRequested || Status is not { Enabled: true, LimitPercent: 60 or 80 }) return false;
+        heldForShutdown = true;
+        holdEvent ??= new(false, EventResetMode.ManualReset, current.HoldName);
+        holdEvent.Set();
+        SetStatus(Status with { Enabled = false, RecoveryPending = true, Message = "关机期间保持限充；下次打开 RevoHelper 时自动接续。" });
+        return true;
+    }
 
     // Injection is for memory-only policy tests. Construction never inspects
     // sessions, creates events, starts helpers or calls hardware.
@@ -34,6 +55,8 @@ public sealed class ExperimentalChargeClient : IExperimentalChargeController, ID
         if (pending is not null)
         {
             files = pending;
+            try { PendingHeldSession = pending.HasIntent(ChargeSessionFiles.HeldPhase) ? pending : null; }
+            catch (Exception) { PendingHeldSession = null; }
             SetStatus(new(RecoveryPending: true, Message: "发现未确认恢复的实验会话。请先使用恢复按钮，不自动启用。", SessionId: pending.SessionId));
         }
     }
@@ -125,6 +148,7 @@ public sealed class ExperimentalChargeClient : IExperimentalChargeController, ID
 
     private void SignalStop(string reason)
     {
+        if (heldForShutdown) return; // Exit paths must not undo a deliberate shutdown hold.
         stopRequested = true;
         if (Status is { Enabled: true, LimitPercent: 100, RecoveryPending: false } && files is null)
         {
@@ -160,6 +184,7 @@ public sealed class ExperimentalChargeClient : IExperimentalChargeController, ID
     }
     public async Task RecoverAsync(CancellationToken cancellationToken = default)
     {
+        heldForShutdown = false;
         RequestStop("手动恢复请求。");
         await operations.WaitAsync(cancellationToken).ConfigureAwait(false);
         try

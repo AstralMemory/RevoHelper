@@ -19,6 +19,10 @@ public sealed class ChargeSessionFiles
     public string SessionId { get; }
     public string DirectoryPath { get; }
     public string StopName => @"Local\RevoHelper.ExperimentalCharge.Stop." + SessionId;
+    // Set at Windows shutdown when the user chose to keep the limit while off: helpers then
+    // exit WITHOUT restoring. The next RevoHelper start finds the lease and restores.
+    public string HoldName => @"Local\RevoHelper.ExperimentalCharge.Hold." + SessionId;
+    public const string HeldPhase = "HeldForShutdown";
     public string StartName => @"Local\RevoHelper.ExperimentalCharge.Start." + SessionId;
     public string LeasePath => Path.Combine(DirectoryPath, "lease.json");
     public string StatusPath => Path.Combine(DirectoryPath, "status.json");

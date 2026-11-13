@@ -483,6 +483,26 @@ public sealed class GcuQuickControlsControllerTests
         Assert.Equal(1, channel.AtomicLightingWrites);
     }
 
+    [Fact]
+    public async Task ApplyLightingZone_OemDefaultOnAnRgbKeyboard_WritesTheOfficialDefaultEffect()
+    {
+        var channel = new FakeChannel
+        {
+            KeyboardStatus = """{"powerStatus":"On","type":"MEZone_3p1nd_101","effect":"Raindrop","light":"1","speed":"1"}"""
+        };
+        var controller = new GcuQuickControlsController(channel, (_, _) => Task.CompletedTask);
+        await controller.ReadLightingZoneAsync(LightingZone.Keyboard, CancellationToken.None);
+
+        await controller.ApplyLightingZoneAsync(new(LightingZone.Keyboard, true, LightingEffect.OemDefault,
+            new(128, 0, 255), 4, 4, LightingDirection.Left, 120), CancellationToken.None);
+
+        using var json = System.Text.Json.JsonDocument.Parse(channel.LightingWrites[^1].Payload);
+        Assert.Equal("SetEffectALL", json.RootElement.GetProperty("function").GetString());
+        Assert.Equal("Rainbow", json.RootElement.GetProperty("effect").GetString());
+        Assert.Equal("3", json.RootElement.GetProperty("light").GetString());
+        Assert.Equal("2", json.RootElement.GetProperty("speed").GetString());
+    }
+
     // runtime.log 2026-11-08: each coast power write read back the state from before that write.
     private const string CoastOn =
         "{\"powerStatus\":\"On\",\"type\":\"MEZone_Lighbar4\",\"effect\":\"Single\",\"light\":3,\"speed\":2,\"R\":0,\"G\":176,\"B\":255}";

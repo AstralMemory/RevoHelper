@@ -282,6 +282,42 @@ public sealed class Win32DisplayModeApi : IWindowsDisplayModeApi
         return null;
     }
 
+    /// <summary>
+    /// Whether the built-in panel is driven by the discrete GPU right now. Read-only; null when
+    /// the panel is off, not found, or its adapter cannot be classified.
+    /// </summary>
+    public static bool? ReadInternalPanelOnDiscreteGpu()
+    {
+        const uint queryOnlyActivePaths = 2;
+        if (GetDisplayConfigBufferSizes(queryOnlyActivePaths, out var pathCount, out var modeCount) != ErrorSuccess) return null;
+        var paths = new DISPLAYCONFIG_PATH_INFO[pathCount];
+        var modes = new DISPLAYCONFIG_MODE_INFO[modeCount];
+        if (QueryDisplayConfig(queryOnlyActivePaths, ref pathCount, paths, ref modeCount, modes, IntPtr.Zero) != ErrorSuccess) return null;
+        for (var index = 0; index < pathCount; index++)
+        {
+            // INTERNAL (0x80000000), LVDS (6), embedded DisplayPort (11), embedded UDI (13).
+            if (paths[index].targetInfo.outputTechnology is not (unchecked((int)0x80000000) or 6 or 11 or 13)) continue;
+            if (ReadSourceDeviceName(paths[index].sourceInfo) is not { } source) return null;
+            for (uint adapter = 0; ; adapter++)
+            {
+                var device = CreateDisplayDevice();
+                if (!EnumDisplayDevices(null, adapter, ref device, 0)) return null;
+                if (string.Equals(device.DeviceName, source, StringComparison.OrdinalIgnoreCase))
+                    return ClassifyAdapterAsDiscrete(device.DeviceString);
+            }
+        }
+        return null;
+    }
+
+    public static bool? ClassifyAdapterAsDiscrete(string? adapterName)
+    {
+        if (string.IsNullOrWhiteSpace(adapterName)) return null;
+        bool Has(string text) => adapterName.Contains(text, StringComparison.OrdinalIgnoreCase);
+        if (Has("NVIDIA") || Has("GeForce") || Has("Radeon RX")) return true;
+        if (Has("Intel") || Has("Radeon")) return false;
+        return null;
+    }
+
     private static string? ReadSourceDeviceName(DISPLAYCONFIG_PATH_SOURCE_INFO source)
     {
         var request = new DISPLAYCONFIG_SOURCE_DEVICE_NAME

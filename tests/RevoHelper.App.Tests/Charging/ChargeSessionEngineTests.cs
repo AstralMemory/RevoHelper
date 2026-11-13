@@ -5,6 +5,68 @@ namespace RevoHelper.App.Tests.Charging;
 
 public sealed class ChargeSessionEngineTests
 {
+    // A user who had tried other tools first was refused with "原始状态0x07B9已改变".
+    [Theory]
+    [InlineData(100u, 100u, 80)] [InlineData(70u, 0u, 60)] [InlineData(0x80u | 90u, 90u, 80)]
+    [InlineData(80u, 80u, 80)]   // already at the requested value: only the platform state is ours
+    public void AThresholdLeftByAnotherToolIsTakenOverAndPutBack(uint leftover, uint cache, int limit)
+    {
+        var fixture = new Fixture();
+        fixture.Registers[0x07B9] = leftover; fixture.Registers[0x9164] = cache;
+        var original = fixture.Snapshot();
+        ChargeSessionEngine.ValidateInitial(original);
+        var seen = new List<uint>();
+        fixture.Published = _ => seen.Add(fixture.Registers[0x07B9] & 0x7F);
+        fixture.AfterWait = () => fixture.Stop = true;
+
+        var result = fixture.Run(limit, original);
+
+        Assert.Contains((uint)limit, seen);
+        Assert.True(result.CriticalRestored, string.Join("；", result.Errors));
+        Assert.Equal(leftover & 0x7F, fixture.Registers[0x07B9] & 0x7F);
+        Assert.Equal(7u, fixture.Registers[0x07C3]);
+    }
+
+    [Fact]
+    public void ARefusalNamesTheValueItFound()
+    {
+        var fixture = new Fixture(); fixture.Registers[0x07C3] = 5;
+        var error = Assert.Throws<InvalidOperationException>(() => ChargeSessionEngine.ValidateInitial(fixture.Snapshot()));
+        Assert.Equal("原始状态0x07C3已改变（当前0x05）；不接管已有设置。", error.Message);
+        Assert.DoesNotContain(RevoHelper.App.Presentation.UiTextCatalog.Translate(error.Message, "en-US"), c => c is >= '\u4e00' and <= '\u9fff');
+    }
+
+    [Fact]
+    public void ShutdownHold_LeavesTheAppliedValuesAndALaterRecoveryRestoresThem()
+    {
+        var fixture = new Fixture();
+        var original = fixture.Snapshot();
+        var held = false;
+        fixture.LeaveApplied = () => held;
+        fixture.AfterWait = () => { held = true; fixture.Stop = true; };
+
+        fixture.Run(60, original);
+
+        // Applied, never restored: 60 into B9 and 4 into C3 are the only writes.
+        Assert.Equal(new byte[] { 60, 4 }, fixture.Writes.Select(write =>
+            write.Address == 0x07B9 ? (byte)(write.Target & 0x7F) : write.Target));
+        Assert.Equal(4u, fixture.Registers[0x07C3]);
+
+        var result = fixture.Recover(original, 60);
+        Assert.True(result.CriticalRestored);
+        Assert.Equal(7u, fixture.Registers[0x07C3]);
+        Assert.Equal(0u, fixture.Registers[0x07B9] & 0x7F);
+    }
+
+    [Fact]
+    public void WithoutAHold_StopStillRestores()
+    {
+        var fixture = new Fixture { LeaveApplied = () => false };
+        fixture.AfterWait = () => fixture.Stop = true;
+        Assert.True(fixture.Run(60).CriticalRestored);
+        Assert.Equal(7u, fixture.Registers[0x07C3]);
+    }
+
     [Fact]
     public void ConstructionDoesNotCreateTransportOrEnableAnything()
     {
@@ -24,7 +86,7 @@ public sealed class ChargeSessionEngineTests
 
     [Theory]
     [InlineData(0x07C3, 4)] [InlineData(0x0770, 4)]
-    [InlineData(0x07B9, 80)] [InlineData(0x07B9, 0x100)] [InlineData(0x07D0, 60)]
+    [InlineData(0x07B9, 101)] [InlineData(0x07B9, 0x100)] [InlineData(0x07D0, 60)]
     [InlineData(0x9164, 80)] [InlineData(0x07A6, 0x18)] [InlineData(0x0742, 0x26)]
     [InlineData(0x0490, 0x0E)] [InlineData(0x0490, 0x0B)]
     public void InitialStateNeverTakesOverAnExistingControlSetting(int address, uint value)
@@ -389,10 +451,11 @@ public sealed class ChargeSessionEngineTests
         public ChargeEcSnapshot Snapshot() => new(Identity, new Dictionary<ushort, uint>(Registers), Soc,
             Online, Charging, false, Rate, 90000, DateTimeOffset.UtcNow, InterfaceInstanceName);
 
+        public Func<bool>? LeaveApplied;
         public ChargeRecoveryResult Run(int limit = 80, ChargeEcSnapshot? original = null) =>
             Engine.Run(original ?? Snapshot(), limit, () => Stop, CheckOwners,
                 () => { if (!SkipPollingWaitAfterStop || !Stop) Wait(); }, Journal,
-                snapshot => Published?.Invoke(snapshot), recoveryWait: RecoveryWait);
+                snapshot => Published?.Invoke(snapshot), recoveryWait: RecoveryWait, leaveApplied: LeaveApplied);
 
         public ChargeRecoveryResult Recover(ChargeEcSnapshot original, int limit = 80, bool emergency = false) =>
             Engine.Recover(original, limit, thresholdAttempted: true, platformAttempted: true, emergency, Journal, Wait);

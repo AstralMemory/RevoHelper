@@ -34,6 +34,7 @@ public sealed class ReviewedChargeProtocolTests
     [InlineData(0x07C3, 7, 4)] [InlineData(0x07C3, 4, 7)]
     [InlineData(0x07B9, 0, 60)] [InlineData(0x07B9, 60, 80)] [InlineData(0x07B9, 80, 0)]
     [InlineData(0x07B9, 0x80, 0xBC)] [InlineData(0x07B9, 0xD0, 0x80)]
+    [InlineData(0x07B9, 70, 80)] [InlineData(0x07B9, 60, 100)] // a leftover threshold, replaced and put back
     public void WriteEncoderSetsOnlyAddressAndDataLow(int address, int expected, int target)
     {
         var packet = ReviewedChargeProtocol.EncodeOwnedWrite((ushort)address, (byte)expected, (byte)target);
@@ -43,7 +44,7 @@ public sealed class ReviewedChargeProtocolTests
 
     [Theory]
     [InlineData(0x0770, 0xFF, 4)] [InlineData(0x9164, 0, 80)] [InlineData(0x07C3, 7, 5)]
-    [InlineData(0x07C3, 3, 4)] [InlineData(0x07B9, 0, 75)] [InlineData(0x07B9, 70, 80)]
+    [InlineData(0x07C3, 3, 4)] [InlineData(0x07B9, 0, 75)] [InlineData(0x07B9, 70, 75)] [InlineData(0x07B9, 101, 80)]
     [InlineData(0x07B9, 0x80, 60)] [InlineData(0x07B9, 0, 0xD0)]
     public void OtherWritesOrChangingFirmwareOwnedBitSevenAreRejected(int address, int expected, int target) =>
         Assert.Throws<ArgumentOutOfRangeException>(() =>

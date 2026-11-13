@@ -3,7 +3,7 @@ using RevoHelper.Core.Control.ExperimentalCharge;
 
 namespace RevoHelper.App.Presentation;
 
-/// <summary>A session-only UI. Construction and draft selection never enable charging control.</summary>
+/// <summary>Construction and draft selection never enable charging control.</summary>
 public sealed class ExperimentalChargeViewModel : INotifyPropertyChanged, IDisposable
 {
     private readonly IExperimentalChargeController? controller;
@@ -27,6 +27,12 @@ public sealed class ExperimentalChargeViewModel : INotifyPropertyChanged, IDispo
         desiredEnabled = controller?.Status.Enabled == true;
         if (controller is not null) controller.StatusChanged += Controller_StatusChanged;
     }
+
+    /// <summary>
+    /// Told the limit the user switched on (60/80/100) or 0 when they switch it off, so the next
+    /// start can carry on. Stops made by the program itself (exit, power loss) are not reported.
+    /// </summary>
+    public Action<int>? RememberLimit { get; set; }
 
     public event PropertyChangedEventHandler? PropertyChanged;
     // The switch represents the requested UI state while applying, not proof of a
@@ -73,9 +79,25 @@ public sealed class ExperimentalChargeViewModel : INotifyPropertyChanged, IDispo
         }
     }
 
-    public Task SetEnabledAsync(bool enabled, CancellationToken cancellationToken = default) => enabled
-        ? EnableAsync(cancellationToken)
-        : StopAsync(cancellationToken: cancellationToken);
+    public Task SetEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        if (enabled) return EnableAsync(cancellationToken);
+        RememberLimit?.Invoke(0);
+        return StopAsync(cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
+    /// Carries on a limit the user left switched on: first restores whatever the last run left
+    /// behind, then enables the same limit. Does nothing when restoration cannot be confirmed.
+    /// </summary>
+    public async Task ResumeAsync(int limitPercent, CancellationToken cancellationToken = default)
+    {
+        if (controller is null || disposed) return;
+        if (RecoveryPending) await RecoverAsync(cancellationToken).ConfigureAwait(false);
+        if (limitPercent is not (60 or 80 or 100) || RecoveryPending || IsEnabled || IsBusy) return;
+        SelectedLimitPercent = limitPercent;
+        await EnableAsync(cancellationToken).ConfigureAwait(false);
+    }
 
     public Task EnableAsync(CancellationToken cancellationToken = default)
     {
@@ -104,7 +126,10 @@ public sealed class ExperimentalChargeViewModel : INotifyPropertyChanged, IDispo
             if (!IsCurrent()) return false;
             var limit = SelectedLimitPercent;
             if (controller!.Status is { Enabled: true, Busy: false, RecoveryPending: false } current && current.LimitPercent == limit)
+            {
+                RememberLimit?.Invoke(limit);
                 return true;
+            }
             if (!controller.Status.PowerPaused && (controller.Status.Enabled || controller.Status.Busy))
             {
                 await controller.StopAsync("切换限充档位，先恢复已有实验限制。", cancellationToken).ConfigureAwait(false);
@@ -123,6 +148,7 @@ public sealed class ExperimentalChargeViewModel : INotifyPropertyChanged, IDispo
                 if (controller.Status is { RecoveryPending: true } or { Enabled: true } or { Busy: true })
                     throw new InvalidOperationException("旧限充会话尚未恢复；不启用排队的新档位。");
             }
+            else RememberLimit?.Invoke(limit);
             return true;
         }, "限充操作失败", cancellationToken);
 

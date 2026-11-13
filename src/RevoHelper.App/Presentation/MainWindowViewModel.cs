@@ -758,9 +758,9 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
     public bool IsPlatformSwitchPending => isApplyingPlatformMode &&
         Volatile.Read(ref platformCommandRevision) == Volatile.Read(ref platformRequestRevision);
 
-    public string ReleaseVersionText => "V1.0.4.1";
+    public string ReleaseVersionText => "V1.0.5";
 
-    public string ReleaseBadgeText => "V1.0.4.1";
+    public string ReleaseBadgeText => "V1.0.5";
 
     public string AppVersionText => $"RevoHelper {ReleaseVersionText} · {UiCopy.OpenSourceAndFree}";
 
@@ -4005,7 +4005,9 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
     {
         gpuOutputState = state;
         SelectedGpuOutputMode = state.Mode;
-        GpuOutputStatusText = $"当前：{GpuModeLabel(state.Mode)} · 更改后需要重启生效";
+        GpuOutputStatusText = state.IsPendingRestart
+            ? $"已设置为{GpuModeLabel(state.Mode)}，尚未生效 · 请点“重启”，关机再开机可能不生效"
+            : $"当前：{GpuModeLabel(state.Mode)} · 更改后需要重启生效";
         RefreshGpuOutputProperties();
     }
 

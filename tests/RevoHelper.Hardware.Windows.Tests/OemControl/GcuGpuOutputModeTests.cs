@@ -99,6 +99,39 @@ public sealed class GcuGpuOutputModeTests
         public GpuOutputMachineSupport Read() => new(direct, integrated);
     }
 
+    [Theory]
+    [InlineData("NVIDIA GeForce RTX 5090 Laptop GPU", true)]
+    [InlineData("AMD Radeon RX 7600M XT", true)]
+    [InlineData("Intel(R) Graphics", false)]
+    [InlineData("AMD Radeon(TM) 780M Graphics", false)]
+    [InlineData("MuMu Virtual Display Adapter", null)]
+    [InlineData("", null)]
+    public void PanelAdapter_IsClassifiedByNameOrLeftUnknown(string name, bool? discrete) =>
+        Assert.Equal(discrete, RevoHelper.Hardware.Windows.Display.Win32DisplayModeApi.ClassifyAdapterAsDiscrete(name));
+
+    [Fact]
+    public async Task ReadState_ReportsThePanelSoAPendingSettingIsVisible_AndSurvivesAProbeFailure()
+    {
+        var channel = new FakeChannel(new(GpuOutputMode.Discrete, true, true));
+        var pending = await new GcuGpuOutputModeController(channel, new FakeCapabilities(true, true), () => false)
+            .ReadStateAsync(CancellationToken.None);
+        Assert.True(pending!.IsPendingRestart);
+
+        var broken = await new GcuGpuOutputModeController(channel, new FakeCapabilities(true, true),
+            () => throw new InvalidOperationException("display query failed")).ReadStateAsync(CancellationToken.None);
+        Assert.Null(broken!.PanelOnDiscreteGpu);
+        Assert.False(broken.IsPendingRestart);
+    }
+
+    // Read-only check against this machine; prints nothing and never fails on an unknown panel.
+    [Fact]
+    public void PanelProbe_RunsWithoutThrowing()
+    {
+        var value = RevoHelper.Hardware.Windows.Display.Win32DisplayModeApi.ReadInternalPanelOnDiscreteGpu();
+        if (Environment.GetEnvironmentVariable("REVOHELPER_PANEL_PROBE_FILE") is { Length: > 0 } file)
+            File.WriteAllText(file, value?.ToString() ?? "null");
+    }
+
     private sealed class FakeChannel(GcuGpuOutputModeStatus status) : IGcuGpuOutputModeChannel
     {
         public GcuGpuOutputModeStatus Status { get; private set; } = status;

@@ -1961,7 +1961,7 @@
 
                             <Border presentation:ThemeScope.AccentSurface="True" Margin="0,10,0,0" Padding="11,9" Background="#FFF7E8"
                                     BorderBrush="#E5B95C" BorderThickness="1" CornerRadius="10">
-                                <TextBlock x:Name="GpuOutputRestartWarning" Text="{presentation:UiText '切换显卡输出后需重启电脑。请先保存工作；RevoHelper 不会自动重启。'}"
+                                <TextBlock x:Name="GpuOutputRestartWarning" Text="{presentation:UiText '切换后请点“重启”才会生效；开着快速启动时，关机再开机不会生效。请先保存工作，RevoHelper 不会自动重启。'}"
                                            Foreground="#D9363E" FontSize="{presentation:UiFont 8.8}" TextWrapping="Wrap" />
                             </Border>
                             <Button x:Name="ApplyGpuOutputModeButton" Content="{presentation:UiText '应用并回读'}"
@@ -2157,7 +2157,7 @@
                                         Click="OemDefaultLighting_Click">
                                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                         <TextBlock Text="◉" Foreground="#D78A00" FontSize="{presentation:UiFont 15}" Margin="0,0,9,0" VerticalAlignment="Center" />
-                                        <StackPanel><TextBlock Text="{presentation:UiText '机器最初始默认背光'}" FontSize="{presentation:UiFont 9.5}" FontWeight="SemiBold" /><TextBlock Text="{presentation:UiText '恢复官方彩色静态键盘背光'}" Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 7.6}" /></StackPanel>
+                                        <StackPanel><TextBlock Text="{presentation:UiText '机器最初始默认背光'}" FontSize="{presentation:UiFont 9.5}" FontWeight="SemiBold" /><TextBlock Text="{presentation:UiText '恢复官方默认键盘灯效'}" Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 7.6}" /></StackPanel>
                                     </StackPanel>
                                 </Button>
                                 <UniformGrid Columns="2" Margin="0,6,0,0">

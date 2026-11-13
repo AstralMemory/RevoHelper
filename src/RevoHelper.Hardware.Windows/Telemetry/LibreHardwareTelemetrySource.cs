@@ -13,12 +13,16 @@ public sealed class LibreHardwareTelemetrySource : IHardwareTelemetrySource
     };
     private readonly SemaphoreSlim gate = new(1, 1);
     private readonly UpdateVisitor visitor = new();
+    private readonly DiscreteGpuPollGate discreteGpuGate = new();
+    private readonly Func<bool?> readDiscreteGpuPowered;
     private readonly IProcessorPerformanceReader processorPerformanceReader;
     private bool opened;
     private bool disposed;
 
-    public LibreHardwareTelemetrySource(IProcessorPerformanceReader? processorPerformanceReader = null)
+    public LibreHardwareTelemetrySource(IProcessorPerformanceReader? processorPerformanceReader = null,
+        Func<bool?>? readDiscreteGpuPowered = null)
     {
+        this.readDiscreteGpuPowered = readDiscreteGpuPowered ?? new NvidiaDevicePowerProbe().ReadPowered;
         this.processorPerformanceReader = processorPerformanceReader ??
             new WindowsProcessorPerformanceReader(new RetryingWmiQuery(
                 new SystemManagementWmiQuery(),
@@ -81,7 +85,10 @@ public sealed class LibreHardwareTelemetrySource : IHardwareTelemetrySource
 
     private HardwareTelemetrySnapshot ReadCore()
     {
-        UpdateComputer();
+        var now = DateTimeOffset.Now;
+        // Asking the NVIDIA driver once a second keeps an idle GPU awake, so ask Windows first.
+        var pollDiscrete = discreteGpuGate.ShouldPoll(readDiscreteGpuPowered(), now);
+        UpdateComputer(pollDiscrete);
         var devices = new List<DeviceTelemetry>();
         foreach (var hardware in computer.Hardware)
         {
@@ -103,6 +110,14 @@ public sealed class LibreHardwareTelemetrySource : IHardwareTelemetrySource
                 selected = ProcessorTelemetryFallback.ReadIfNeeded(selected, processorPerformanceReader);
             }
 
+            if (hardware.HardwareType is HardwareType.GpuNvidia)
+            {
+                if (pollDiscrete) discreteGpuGate.Observe(selected.UsagePercent, now);
+                // Powered down: the sensors still hold the last reading from before it slept.
+                if (discreteGpuGate.Asleep)
+                    selected = selected with { UsagePercent = 0, PowerWatts = 0, TemperatureC = null, FrequencyMhz = null };
+            }
+
             devices.Add(new(
                 kind.Value,
                 hardware.Name,
@@ -121,7 +136,7 @@ public sealed class LibreHardwareTelemetrySource : IHardwareTelemetrySource
 
     private IReadOnlyList<HardwareSensorCatalogEntry> ReadSensorCatalogCore()
     {
-        UpdateComputer();
+        UpdateComputer(pollDiscreteGpu: true);
         return computer.Hardware
             .SelectMany(hardware => EnumerateSensors(hardware).Select(sensor => new HardwareSensorCatalogEntry(
                 hardware.HardwareType.ToString(),
@@ -132,8 +147,9 @@ public sealed class LibreHardwareTelemetrySource : IHardwareTelemetrySource
             .ToArray();
     }
 
-    private void UpdateComputer()
+    private void UpdateComputer(bool pollDiscreteGpu)
     {
+        visitor.SkipNvidia = !pollDiscreteGpu;
         if (!opened)
         {
             computer.Open();
@@ -166,9 +182,11 @@ public sealed class LibreHardwareTelemetrySource : IHardwareTelemetrySource
     {
         public void VisitComputer(IComputer target) => target.Traverse(this);
 
+        public bool SkipNvidia { get; set; }
+
         public void VisitHardware(IHardware hardware)
         {
-            hardware.Update();
+            if (!(SkipNvidia && hardware.HardwareType is HardwareType.GpuNvidia)) hardware.Update();
             foreach (var subHardware in hardware.SubHardware)
             {
                 subHardware.Accept(this);

@@ -2,7 +2,7 @@
 
 轻量、免费且开源的机械革命笔记本第三方控制台。在官方控制台的功能基础上拓展更多功能，且性能开销更低、启动更快。
 
-**当前最新版本：V1.0.4.1 正式版**
+**当前最新版本：V1.0.5 正式版**
 
 ## 产品预览
 
@@ -43,7 +43,7 @@
 
 ## 快速开始：下载与运行
 
-1. 前往 [最新正式版](https://github.com/AstralMemory/RevoHelper/releases/latest)，下载运行包 `RevoHelper.v1.0.4.1.zip`，不要将 `Source Code` 源码包当作运行包。无法打开 GitHub 时，可在第三方加速站查看版本并下载：`https://gh-proxy.com/https://github.com/AstralMemory/RevoHelper`。
+1. 前往 [最新正式版](https://github.com/AstralMemory/RevoHelper/releases/latest)，下载运行包 `RevoHelper.v1.0.5.zip`，不要将 `Source Code` 源码包当作运行包。无法打开 GitHub 时，可在第三方加速站查看版本并下载：`https://gh-proxy.com/https://github.com/AstralMemory/RevoHelper`。
 2. 解压后运行 `RevoHelper.exe`，建议以管理员身份运行。**RevoHelper是绿色免安装的。**
 3. 系统需要 **Windows 11 64 位**和 [.NET 10 Desktop Runtime（桌面运行时）](https://dotnet.microsoft.com/zh-cn/download/dotnet/10.0)。若提示缺少运行库，请选择 **Desktop Runtime**，而不是普通 Runtime。
 
@@ -55,7 +55,7 @@
 
 本项目采用 **Vibe Coding** 开发方式：仅代码主要由Agent（ChatGPT/Claude）辅助编写，开发者则完全负责产品逻辑、方案与改动审批、UI 设计、实际测试和迭代维护。
 
-程序承诺永久免费使用。V1.0.4.1 应用源码已在本仓库公开，自有代码采用 [MIT 许可证](./LICENSE)，第三方组件遵循各自许可证，详见 [第三方声明](./THIRD_PARTY_NOTICES.md)。
+程序承诺永久免费使用。V1.0.5 应用源码已在本仓库公开，自有代码采用 [MIT 许可证](./LICENSE)，第三方组件遵循各自许可证，详见 [第三方声明](./THIRD_PARTY_NOTICES.md)。
 
 开发者可直接浏览 [应用源码](./src)，构建、测试与目录说明见 [BUILDING.md](./BUILDING.md)。
 
@@ -82,7 +82,7 @@
 
 RevoHelper is a lightweight, free and open-source third-party control panel for MECHREVO laptops. It extends the functionality of the official control panel, with lower overhead and faster startup.
 
-**Latest version: V1.0.4.1 — Stable Release**
+**Latest version: V1.0.5 — Stable Release**
 
 ### Product preview
 
@@ -123,7 +123,7 @@ The following images preview the application interface (The UI text in the image
 
 ### Quick start: download and run
 
-1. Go to the [latest stable release](https://github.com/AstralMemory/RevoHelper/releases/latest) and download the application package, `RevoHelper.v1.0.4.1.zip`. Do not use the `Source Code` archive as the application package. If GitHub is unreachable, releases can also be viewed and downloaded through a third-party mirror: `https://gh-proxy.com/https://github.com/AstralMemory/RevoHelper`.
+1. Go to the [latest stable release](https://github.com/AstralMemory/RevoHelper/releases/latest) and download the application package, `RevoHelper.v1.0.5.zip`. Do not use the `Source Code` archive as the application package. If GitHub is unreachable, releases can also be viewed and downloaded through a third-party mirror: `https://gh-proxy.com/https://github.com/AstralMemory/RevoHelper`.
 2. Extract the archive and run `RevoHelper.exe`. Running as administrator is recommended. **RevoHelper is portable and requires no installation.**
 3. You need **64-bit Windows 11** and the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/en-us/download/dotnet/10.0). If prompted to install a missing runtime, choose **Desktop Runtime**, not the standard Runtime.
 
@@ -135,7 +135,7 @@ Developed and maintained by [Astral Memory](https://github.com/AstralMemory).
 
 The project uses a **Vibe Coding** development workflow: code is primarily written with assistance from agents (ChatGPT/Claude), while the developer takes full responsibility for product logic, proposals and change approval, UI design, hands-on testing and ongoing maintenance.
 
-The program is committed to remaining free permanently. The V1.0.4.1 application source code is available in this repository. The project's own code uses the [MIT License](./LICENSE); third-party components retain their respective licenses. See the [third-party notices](./THIRD_PARTY_NOTICES.md).
+The program is committed to remaining free permanently. The V1.0.5 application source code is available in this repository. The project's own code uses the [MIT License](./LICENSE); third-party components retain their respective licenses. See the [third-party notices](./THIRD_PARTY_NOTICES.md).
 
 Developers can browse the [application source](./src). See [BUILDING.md](./BUILDING.md) for build and test instructions and a guide to the directory structure.
 

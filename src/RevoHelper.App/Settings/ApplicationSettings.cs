@@ -29,4 +29,6 @@ public sealed record ApplicationSettings(
     DateTimeOffset? LastSuccessfulUpdateCheckUtc = null,
     string? VersionFirstSeen = null,
     DateTimeOffset? VersionFirstSeenUtc = null,
-    string? PossibleUpdateNoticeReadVersion = null);
+    string? PossibleUpdateNoticeReadVersion = null,
+    // 60, 80 or 100 while the user has the charge limit switched on; 0 after they switch it off.
+    int ChargeLimitResumePercent = 0);

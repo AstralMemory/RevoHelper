@@ -70,13 +70,15 @@ public static class UiTextCatalog
         Rule(@"^(启用|停止|恢复)实验性限充失败：(.+)$", m => (m.Groups[1].Value switch { "启用" => "Enabling", "停止" => "Stopping", _ => "Restoring" }) + " experimental charge limiting failed: " + Translate(m.Groups[2].Value, "en-US")),
         Rule(@"^实验性限充未完成：(.+)$", m => "Experimental charge limiting did not complete: " + Translate(m.Groups[1].Value, "en-US")),
         Rule(@"^实验已停止，监护正在复核恢复：(.+)$", m => "The experiment stopped; the guardian is checking restoration: " + Translate(m.Groups[1].Value, "en-US")),
-        Rule(@"^原始状态0x([0-9A-F]{4})已改变；不接管已有设置。$", m => "Original state 0x" + m.Groups[1].Value + " changed; existing settings will not be taken over."),
+        Rule(@"^原始状态0x([0-9A-F]{4})已改变（当前0x([0-9A-F]{2})）；不接管已有设置。$", m => "Original state 0x" + m.Groups[1].Value + " changed (now 0x" + m.Groups[2].Value + "); existing settings will not be taken over."),
         Rule(@"^部分状态读取失败，已保留已确认状态：(.+)$", m => "Some statuses could not be read; confirmed values were preserved: " + TranslateStatusDetails(m.Groups[1].Value)),
         Rule(@"^部分状态未读取：(.+)$", m => "Some statuses were not read: " + TranslateStatusDetails(m.Groups[1].Value)),
         Rule(@"^(按键与设备状态|电源与电池状态|按键状态|设备开关状态|键盘灯光状态|电池保护状态|电源设置状态|快捷设置状态|充电上限状态)读取失败：(.+)$", m => TranslateKnown(m.Groups[1].Value) + " could not be read: " + TranslateStatusDetails(m.Groups[2].Value)),
         Rule(@"^(按键状态|设备开关状态|键盘灯光状态|电池保护状态|电源设置状态|快捷设置状态|充电上限状态)未返回可识别状态。$", m => TranslateKnown(m.Groups[1].Value) + " did not return a recognized status."),
         Rule(@"^未运行：(.+)\n启动后会自动匹配该程序。$", m => $"Not running: {m.Groups[1].Value}\nIt will be matched when it starts."),
         Rule(@"^当前：([^\n]+)\n([\s\S]+)$", m => $"Current: {m.Groups[1].Value}\n{TranslateKnown(m.Groups[2].Value)}"),
+        Rule(@"^已设置为(.+)，尚未生效 · 请点“重启”，关机再开机可能不生效$", m => $"Set to {TranslateKnown(m.Groups[1].Value)}, not active yet · Choose Restart; shutting down and powering on may not apply it"),
+        Rule(@"^已写入并回读验证：(.+)；请点“重启”生效，关机再开机可能不生效。$", m => $"Saved and verified: {TranslateKnown(m.Groups[1].Value)}. Choose Restart to apply it; shutting down and powering on may not."),
         Rule(@"^当前：(.+) · 更改后需要重启生效$", m => $"Current: {TranslateKnown(m.Groups[1].Value)} · Restart after changing"),
         Rule(@"^当前：(.+)$", m => "Current: " + TranslateKnown(m.Groups[1].Value)),
         Rule(@"^状态：(.+)$", m => "Status: " + TranslateKnown(m.Groups[1].Value)),
@@ -318,7 +320,7 @@ public static class UiTextCatalog
 黄色 #FFFF00	Yellow #FFFF00
 恢复 OEM 读取值并立即应用	Restore and apply OEM values
 恢复该档位原厂默认曲线	Restore the profile's factory curve
-恢复官方彩色静态键盘背光	Restore the factory multicolor keyboard lighting
+恢复官方默认键盘灯效	Restore the factory keyboard effect
 恢复机器默认灯光，不会应用下方自选参数。	Restore factory lighting without applying the editor values below.
 恢复水冷模块状态	Reset the cooling module
 恢复所选服务	Restore selected services
@@ -385,6 +387,8 @@ public static class UiTextCatalog
 切换到自定义模式后可调整风扇。	Switch to Custom mode to edit the fans.
 切换后需重启电脑。	Restart required after switching.
 切换显卡输出后，重新打开本页刷新可用刷新率。	After changing GPU output, reopen this page to refresh available rates.
+切换后请点“重启”才会生效；开着快速启动时，关机再开机不会生效。请先保存工作，RevoHelper 不会自动重启。	Choose Restart to apply the change; with Fast Startup on, shutting down and powering on does not apply it. Save your work first. RevoHelper will not restart automatically.
+关机期间保持限充；下次打开 RevoHelper 时自动接续。	The limit stays applied while the laptop is off; RevoHelper carries on the next time it starts.
 切换显卡输出后需重启电脑。请先保存工作；RevoHelper 不会自动重启。	Changing GPU output requires a restart. Save your work; RevoHelper will not restart automatically.
 青蓝色 #00B0FF	Cyan #00B0FF
 取消关机	Cancel shutdown

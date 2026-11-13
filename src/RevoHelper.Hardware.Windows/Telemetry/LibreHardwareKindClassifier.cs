@@ -10,7 +10,7 @@ public static class LibreHardwareKindClassifier
         {
             HardwareType.Cpu => DeviceKind.Cpu,
             HardwareType.GpuNvidia => DeviceKind.DiscreteGpu,
-            HardwareType.GpuIntel when name.Contains("Arc", StringComparison.OrdinalIgnoreCase) =>
+            HardwareType.GpuIntel when GpuNames.IsDiscreteIntelArc(name) =>
                 DeviceKind.DiscreteGpu,
             HardwareType.GpuIntel => DeviceKind.IntegratedGpu,
             HardwareType.GpuAmd when name.Contains(" RX ", StringComparison.OrdinalIgnoreCase) =>
