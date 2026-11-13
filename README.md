@@ -23,6 +23,7 @@
 - **灯光与常用设置**：集中调整支持的键盘、灯带、LOGO 和水冷灯光，已开始制作面向自定义的设计（灯光这项还在开发）
 - **实验性充电上限**：在“电源”页底部手动开启，提供 60% / 80% / 100% 三档；100% 先解除已有实验限制，再按笔记本原生策略充电，关闭开关则完全退出本功能。不按型号预先拒绝，可手动尝试；不保证每台实际生效。
 - **水冷控制智能重连**：已连接设备意外断开后，最多保留 10 分钟的同设备重连机会，尝试间隔至少 3 秒。主动断开、更换设备或注水／重置会取消对应重连。
+- **来电后自动连接水冷**：接上电源时，自动尝试连接已保存的水冷设备，不用再手动点连接；可在水冷页关闭自动连接。
 - **更低的性能开销**：本机观察中，启动时内存占用峰值接近 200 MB，转入后台后约为 70 MB；实际占用随运行状态而变化。
 - **其他工具**：支持定时关机、动态节能（动态省电模式）等功能。
 
@@ -103,6 +104,7 @@ The following images preview the application interface (The UI text in the image
 - **Lighting and common settings:** Adjust supported keyboard, light-bar, logo and liquid-cooler lighting in one place, without being limited to the official default presets.
 - **Experimental charge limits:** Enable the feature manually at the bottom of the Power page and choose 60%, 80% or 100%. 100% first removes any existing experimental limit, then follows the laptop's native charging policy; turning the switch off exits the feature completely. Models are not rejected in advance; you can try it manually, but effectiveness is not guaranteed on every laptop.
 - **Liquid-cooling control and reconnection:** A Smart Control switch and four manual strategies—Quieter, Quiet, Balanced and Maximum—are available. After an unexpected disconnect, reconnection to the same previously connected device is attempted for up to 10 minutes, at intervals of at least 3 seconds. Manual disconnection, changing devices, priming or resetting cancels the corresponding reconnection attempt.
+- **Automatic cooler connection when power returns:** When mains power is connected, RevoHelper tries to connect the saved liquid-cooling device automatically. This can be turned off on the liquid-cooling page.
 - **Lower overhead:** On the developer's system, memory usage peaks at nearly 200 MB during startup and drops to around 70 MB in the background. Actual usage varies with operating conditions.
 - **Other tools:** Scheduled shutdown, dynamic power saving and other features.
 
