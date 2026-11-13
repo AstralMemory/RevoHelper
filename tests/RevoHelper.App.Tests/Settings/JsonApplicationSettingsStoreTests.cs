@@ -5,6 +5,53 @@ namespace RevoHelper.App.Tests.Settings;
 
 public sealed class JsonApplicationSettingsStoreTests
 {
+    // A power cut once left a 459-byte file of zero bytes in this folder. For settings that used
+    // to mean: load defaults silently, then overwrite everything the user had chosen.
+    [Theory]
+    [InlineData("")]
+    [InlineData("\0\0\0\0\0\0\0\0")]
+    [InlineData("{ \"StartWithWindows\": tru")]
+    public void AnUnreadableFile_FallsBackToTheLastGoodCopy_AndKeepsTheEvidence(string damaged)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"revohelper-tests-{Guid.NewGuid():N}");
+        var path = Path.Combine(directory, "settings.json");
+        var store = new JsonApplicationSettingsStore(path);
+        try
+        {
+            var first = new ApplicationSettings(StartWithWindows: true, UiLanguageCode: "en-US", ChargeLimitResumePercent: 80);
+            store.Save(first);
+            store.Save(first with { WindowScalePercent = 120 });   // the first save is now the backup
+            File.WriteAllText(path, damaged);
+
+            var loaded = new JsonApplicationSettingsStore(path).Load();
+
+            Assert.True(loaded.StartWithWindows);
+            Assert.Equal("en-US", loaded.UiLanguageCode);
+            Assert.Equal(80, loaded.ChargeLimitResumePercent);
+            Assert.Equal(damaged, File.ReadAllText(path + ".unreadable"));
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public void ADamagedFileNeverReplacesTheBackup()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"revohelper-tests-{Guid.NewGuid():N}");
+        var path = Path.Combine(directory, "settings.json");
+        var store = new JsonApplicationSettingsStore(path);
+        try
+        {
+            store.Save(new ApplicationSettings(AlwaysOnTop: true));
+            store.Save(new ApplicationSettings(AlwaysOnTop: true, WindowScalePercent: 110));
+            File.WriteAllText(path, "\0\0\0");
+            store.Save(new ApplicationSettings(WindowScalePercent: 90));   // must not copy the zeros over the backup
+
+            File.WriteAllText(path, "");
+            Assert.True(store.Load().AlwaysOnTop);
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
     [Fact]
     public void SaveAndLoad_RoundTripsGeneralPreferences()
     {

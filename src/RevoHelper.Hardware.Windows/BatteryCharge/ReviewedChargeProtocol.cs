@@ -28,9 +28,13 @@ public static class ReviewedChargeProtocol
         return (byte)raw;
     }
 
+    // Read by the experimental hold limiter: its countdown, threshold, result flag and gates.
+    public static IReadOnlyList<ushort> HoldAddresses { get; } = Array.AsReadOnly<ushort>(
+        [0x07F4, 0x07F5, 0x07F6, 0x0984, 0x06E6, 0x073F, 0x0727, 0x097C]);
+
     public static ulong EncodeRead(ushort address)
     {
-        if (!SnapshotAddresses.Contains(address))
+        if (!SnapshotAddresses.Contains(address) && !HoldAddresses.Contains(address))
             throw new ArgumentOutOfRangeException(nameof(address), "Address is outside the reviewed read set.");
         return (0x0100UL << 32) | address;
     }
@@ -42,6 +46,11 @@ public static class ReviewedChargeProtocol
             0x07C3 => expected is 4 or 7 && target is 4 or 7,
             0x07B9 => IsThreshold(expected) && IsThreshold(target) && (IsOurs(expected) || IsOurs(target))
                 && (expected & 0x80) == (target & 0x80),
+            // Hold limiter: the countdown is a short keep-alive while RevoHelper runs and at most
+            // 0x10FF minutes (three days) across a shutdown; the threshold is a percentage.
+            0x07F4 => target <= 0x10,
+            0x07F5 => true,
+            0x07F6 => target <= 100,
             _ => false
         };
         if (!valid) throw new ArgumentOutOfRangeException(nameof(target), "Write is outside the reviewed owned-byte transitions.");

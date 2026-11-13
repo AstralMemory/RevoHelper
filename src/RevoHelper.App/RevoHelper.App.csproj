@@ -7,6 +7,7 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <AssemblyName>RevoHelper</AssemblyName>
     <RootNamespace>RevoHelper.App</RootNamespace>
+    <StartupObject>RevoHelper.App.Program</StartupObject>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\RevoHelper.ico</ApplicationIcon>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
@@ -16,16 +17,15 @@
     <EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
     <DebugType>none</DebugType>
     <DebugSymbols>false</DebugSymbols>
-    <Version>1.0.5</Version>
-    <AssemblyVersion>1.0.5.0</AssemblyVersion>
-    <FileVersion>1.0.5.9</FileVersion>
-    <InformationalVersion>1.0.5+20261113</InformationalVersion>
+    <Version>1.0.6</Version>
+    <AssemblyVersion>1.0.6.0</AssemblyVersion>
+    <FileVersion>1.0.6.9</FileVersion>
+    <InformationalVersion>1.0.6+20261113</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>
     <Resource Include="Assets\RevoHelperLogo.png" />
-    <EmbeddedResource Include="..\..\packaging\BootWater\RevoHelper.BootWater.exe" LogicalName="RevoHelper.BootWater.exe" />
   </ItemGroup>
 
   <ItemGroup>

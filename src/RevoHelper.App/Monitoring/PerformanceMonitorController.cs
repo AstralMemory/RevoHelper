@@ -215,6 +215,7 @@ public sealed class PerformanceMonitorController : IAsyncDisposable
         var fallback = temperature is not null && DateTimeOffset.UtcNow - temperature.CapturedAt <= TimeSpan.FromSeconds(5)
             ? (double?)temperature.Value : null;
         monitor?.SetReadings(MonitorLineFormatter.Format(sample, fps.FramesPerSecond, fallback));
+        monitor?.KeepAboveForeground();
         panel.ApplyFrameRateStatus(fps);
     }
 

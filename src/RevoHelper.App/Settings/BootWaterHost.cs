@@ -1,11 +1,20 @@
+using System.IO;
 using RevoHelper.Core.Control;
 using RevoHelper.Hardware.Windows.OemControl;
 using RevoHelper.Hardware.Windows.OemStatus;
 
-return await BootWaterProgram.RunAsync(args);
+namespace RevoHelper.App.Settings;
 
-internal static class BootWaterProgram
+/// <summary>
+/// What the pre-sign-in task does: connect the remembered liquid cooler within 35 seconds, then
+/// exit. It used to be a separate executable embedded in this one; it is now this executable
+/// started with <c>--boot</c>, so nothing is unpacked from the program.
+/// </summary>
+public static class BootWaterHost
 {
+    public const string Argument = "--boot";
+    public static bool IsBoot(string[] args) => args is [Argument];
+
     private static readonly string LogDirectory = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
         "RevoHelper", "BootWater");

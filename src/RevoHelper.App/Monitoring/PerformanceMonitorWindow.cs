@@ -150,6 +150,33 @@ public sealed class PerformanceMonitorWindow : Window
             throw new Win32Exception(Marshal.GetLastWin32Error(), "无法刷新性能监控小窗的输入模式。");
     }
 
+    /// <summary>
+    /// Topmost windows are ordered among themselves by who was raised last, so a game that makes
+    /// its own window topmost covers this one for good. Called on every refresh; it only acts
+    /// when the foreground window is another program's topmost window that sits above this one.
+    /// </summary>
+    public void KeepAboveForeground()
+    {
+        if (!currentPreferences.AlwaysOnTop || !IsVisible || dragging || ContextMenu is { IsOpen: true }) return;
+        var handle = new WindowInteropHelper(this).Handle;
+        var foreground = GetForegroundWindow();
+        if (handle == IntPtr.Zero || foreground == IntPtr.Zero || foreground == handle) return;
+        GetWindowThreadProcessId(foreground, out var owner);
+        if (owner == (uint)Environment.ProcessId) return;
+        if (!MonitorZOrder.ShouldRaise(handle, foreground,
+                window => (GetWindowLongPtr(window, ExtendedStyleIndex).ToInt64() & TopmostStyle) != 0,
+                window => GetWindow(window, 3))) return;
+        // HWND_TOPMOST, without moving, sizing or activating.
+        SetWindowPos(handle, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0200 | 0x0400);
+    }
+
+    private const long TopmostStyle = 0x00000008;
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetWindow(IntPtr hwnd, uint command);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
     private static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
@@ -181,5 +208,22 @@ public sealed class PerformanceMonitorWindow : Window
             }
             text.Foreground = brush;
         }
+    }
+}
+
+public static class MonitorZOrder
+{
+    /// <summary>True when <paramref name="foreground"/> is topmost and above <paramref name="self"/> in the Z order.</summary>
+    public static bool ShouldRaise(IntPtr self, IntPtr foreground, Func<IntPtr, bool> isTopmost, Func<IntPtr, IntPtr> previous)
+    {
+        if (!isTopmost(foreground)) return false;      // an ordinary window can never cover a topmost one
+        var current = self;
+        for (var step = 0; step < 512; step++)
+        {
+            current = previous(current);
+            if (current == IntPtr.Zero) return false;
+            if (current == foreground) return true;
+        }
+        return false;
     }
 }

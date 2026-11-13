@@ -23,8 +23,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RevoHelper.App", "src\RevoH
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RevoHelper.App.Tests", "tests\RevoHelper.App.Tests\RevoHelper.App.Tests.csproj", "{EE381F77-88BC-43F4-BE51-5FDB6957E656}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RevoHelper.BootWater", "tools\RevoHelper.BootWater\RevoHelper.BootWater.csproj", "{6ADF74F0-41D2-4A58-94F7-088DBC6075F4}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -119,18 +117,6 @@ Global
 		{EE381F77-88BC-43F4-BE51-5FDB6957E656}.Release|x64.Build.0 = Release|Any CPU
 		{EE381F77-88BC-43F4-BE51-5FDB6957E656}.Release|x86.ActiveCfg = Release|Any CPU
 		{EE381F77-88BC-43F4-BE51-5FDB6957E656}.Release|x86.Build.0 = Release|Any CPU
-		{6ADF74F0-41D2-4A58-94F7-088DBC6075F4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{6ADF74F0-41D2-4A58-94F7-088DBC6075F4}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{6ADF74F0-41D2-4A58-94F7-088DBC6075F4}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{6ADF74F0-41D2-4A58-94F7-088DBC6075F4}.Debug|x64.Build.0 = Debug|Any CPU
-		{6ADF74F0-41D2-4A58-94F7-088DBC6075F4}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{6ADF74F0-41D2-4A58-94F7-088DBC6075F4}.Debug|x86.Build.0 = Debug|Any CPU
-		{6ADF74F0-41D2-4A58-94F7-088DBC6075F4}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{6ADF74F0-41D2-4A58-94F7-088DBC6075F4}.Release|Any CPU.Build.0 = Release|Any CPU
-		{6ADF74F0-41D2-4A58-94F7-088DBC6075F4}.Release|x64.ActiveCfg = Release|Any CPU
-		{6ADF74F0-41D2-4A58-94F7-088DBC6075F4}.Release|x64.Build.0 = Release|Any CPU
-		{6ADF74F0-41D2-4A58-94F7-088DBC6075F4}.Release|x86.ActiveCfg = Release|Any CPU
-		{6ADF74F0-41D2-4A58-94F7-088DBC6075F4}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -143,6 +129,5 @@ Global
 		{51348CD2-3197-4EEB-9AFD-7B6013295D97} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{1106FDB9-AD44-451B-843D-51D37163D880} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{EE381F77-88BC-43F4-BE51-5FDB6957E656} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
-		{6ADF74F0-41D2-4A58-94F7-088DBC6075F4} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
 	EndGlobalSection
 EndGlobal

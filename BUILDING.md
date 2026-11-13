@@ -1,10 +1,10 @@
 # RevoHelper
 
-轻量、免费的第三方机械革命笔记本控制台。V1.0.5，开发与维护：Astral Memory。
+轻量、免费的第三方机械革命笔记本控制台。V1.0.6，开发与维护：Astral Memory。
 
-本仓库当前源码对应 RevoHelper V1.0.5（产品版本 `1.0.5+20261113`，文件版本 `1.0.5.9`）。RevoHelper 自有代码采用 MIT，版权声明为 `Copyright (c) 2026 Astral Memory`，详见 `LICENSE`。第三方组件、嵌入二进制及其对应源码保留各自许可；项目 MIT 不替代它们的许可条件。下载、源码获取与更新以 [项目仓库](https://github.com/AstralMemory/RevoHelper) 为准。
+本仓库当前源码对应 RevoHelper V1.0.6（产品版本 `1.0.6+20261113`，文件版本 `1.0.6.9`）。RevoHelper 自有代码采用 MIT，版权声明为 `Copyright (c) 2026 Astral Memory`，详见 `LICENSE`。第三方组件、嵌入二进制及其对应源码保留各自许可；项目 MIT 不替代它们的许可条件。下载、源码获取与更新以 [项目仓库](https://github.com/AstralMemory/RevoHelper) 为准。
 
-本版的源码分发边界见 [V1.0.5 源码说明](./docs/release/V1.0.5_SOURCE_README.md)，用户说明见 [V1.0.5 使用说明](./docs/release/V1.0.5_USER_README.txt)。构建与离线测试不会启用限充，不要为了构建而运行硬件实验。
+本版的源码分发边界见 [V1.0.6 源码说明](./docs/release/V1.0.6_SOURCE_README.md)，用户说明见 [V1.0.6 使用说明](./docs/release/V1.0.6_USER_README.txt)。构建与离线测试不会启用限充，不要为了构建而运行硬件实验。
 
 实验性限充不按型号、BIOS/EC 版本或固定 EC 项目号预先拒绝，可手动尝试；不保证每台实际生效。仍保留必要协议、唯一接口路线、控制值所有权、回读及恢复检查；构建或模拟测试通过不等于具体机器已验证有效。
 
@@ -26,20 +26,13 @@ dotnet publish src/RevoHelper.App/RevoHelper.App.csproj -c Release -r win-x64 --
 
 - `src`：界面、业务模型、Windows / OEM 硬件接口。
 - `tests`：单元测试与离线 WPF 界面测试。
-- `tools/RevoHelper.BootWater`：可选的登录前水冷组件源码。
 - `tools/RevoHelper.Probe`：硬件诊断工具源码，普通用户不需要运行。
-- `packaging/BootWater/RevoHelper.BootWater.exe`：由本轮对应源码重建并内嵌的水冷组件，构建主程序时需要保留。
 - `packaging/PresentMon`：未修改的独立 FPS 采集器、来源和许可；不是游戏注入组件。
 - `packaging/ThirdParty`、`packaging/ThirdPartySource`：许可原文和对应第三方源码材料。
 - `docs/release`：使用、构建及重新打包所需的公开文档。
 - `Third-Party.txt`：整合的第三方声明、许可原文和对应源码附件。
 
-BootWater 的源码和对应内嵌产物都已保留。主程序的普通构建使用这份已内嵌组件。修改组件时先重新发布它、复制到 `packaging/BootWater`，再重新发布主程序。安装时会把待部署文件与主程序内嵌资源逐字节比对，并检查目录、文件权限和链接；无需手工维护摘要。不保证更换 SDK 或依赖后生成的二进制逐字节相同。
-
-```powershell
-dotnet publish tools/RevoHelper.BootWater/RevoHelper.BootWater.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o artifacts/bootwater
-Copy-Item artifacts/bootwater/RevoHelper.BootWater.exe packaging/BootWater/RevoHelper.BootWater.exe
-```
+登录前水冷连接不再有单独的组件。计划任务运行的是 RevoHelper 自身的一份副本（参数 `--boot`，代码在 `src/RevoHelper.App/Settings/BootWaterHost.cs`），主程序里不内嵌也不释放其它可执行文件。安装时把正在运行的 `RevoHelper.exe` 复制到受保护的系统目录，逐字节比对，并检查目录、文件权限和链接。
 
 源码包不执行水冷组件，也不安装任何计划任务。需要登录前连接时，请使用应用内的安装/移除入口；历史直接注册 SYSTEM 任务的脚本不随正式源码分发。
 
@@ -66,10 +59,10 @@ dotnet test tests/RevoHelper.App.Tests/RevoHelper.App.Tests.csproj
 打包脚本可以用 Windows 自带的 PowerShell 5.1 或 PowerShell 7 运行。
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File packaging/Prepare-V105Release.ps1 -PublishExe artifacts/publish/RevoHelper.exe -OutputDirectory artifacts/release-v1.0.5
+powershell -NoProfile -ExecutionPolicy Bypass -File packaging/Prepare-V106Release.ps1 -PublishExe artifacts/publish/RevoHelper.exe -OutputDirectory artifacts/release-v1.0.6
 ```
 
-输出目录必须为新目录或空目录，包含运行目录、`RevoHelper v1.0.5.zip`、`RevoHelper v1.0.5 Source Code.zip` 与更新日志。再次打包时使用新的输出路径；脚本不会覆盖已有资源。该步骤只生成本地文件，不操作 GitHub，也不生成哈希。源包需要联网还原 NuGet 依赖，不是全部工具链的离线镜像。历史打包脚本与固定输入仅为兼容既有离线测试而保留，请以本版脚本和说明为准。
+输出目录必须为新目录或空目录，包含运行目录、`RevoHelper v1.0.6.zip`、`RevoHelper v1.0.6 Source Code.zip` 与更新日志。再次打包时使用新的输出路径；脚本不会覆盖已有资源。该步骤只生成本地文件，不操作 GitHub，也不生成哈希。源包需要联网还原 NuGet 依赖，不是全部工具链的离线镜像。历史打包脚本与固定输入仅为兼容既有离线测试而保留，请以本版脚本和说明为准。
 
 ## 功能边界
 

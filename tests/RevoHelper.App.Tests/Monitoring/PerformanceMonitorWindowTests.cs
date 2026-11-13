@@ -81,4 +81,17 @@ public sealed class PerformanceMonitorWindowTests
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
     private static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
+
+    // A game that makes its own window topmost covers the overlay; an ordinary window cannot.
+    [Theory]
+    [InlineData(true, true, true)]      // topmost game above us: raise
+    [InlineData(true, false, false)]    // topmost window already below us
+    [InlineData(false, true, false)]    // ordinary window
+    public void OverlayIsRaisedOnlyOverATopmostForegroundWindowAboveIt(bool topmost, bool above, bool expected)
+    {
+        IntPtr self = 10, game = 20, other = 30;
+        var order = above ? new[] { other, game, self } : new[] { other, self, game };   // top to bottom
+        IntPtr Previous(IntPtr window) { var i = Array.IndexOf(order, window); return i > 0 ? order[i - 1] : IntPtr.Zero; }
+        Assert.Equal(expected, RevoHelper.App.Monitoring.MonitorZOrder.ShouldRaise(self, game, _ => topmost, Previous));
+    }
 }

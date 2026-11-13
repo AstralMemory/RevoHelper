@@ -8,7 +8,9 @@ public sealed class StartupOrderingTests
         var source = File.ReadAllText(Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory, "..", "..", "..", "..", "..",
             "src", "RevoHelper.App", "App.xaml.cs")));
-        Assert.Contains("sessionCharge = new SessionChargeController(experimentalCharge,", source);
+        // The limit itself is the firmware hold; the old controller only restores sessions left by earlier versions.
+        Assert.Contains("holdCharge = new HoldChargeController(experimentalCharge);", source);
+        Assert.Contains("sessionCharge = new SessionChargeController(holdCharge,", source);
         Assert.Contains("chargeController: sessionCharge", source);
         var start = source.IndexOf("private void SystemEvents_PowerModeChanged", StringComparison.Ordinal);
         var end = source.IndexOf("private async Task InitializePerformancePolicyWhenReadyAsync", start, StringComparison.Ordinal);

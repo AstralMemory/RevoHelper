@@ -75,12 +75,12 @@ public sealed class ExperimentalChargeMarkupTests
         Assert.Contains("Tested on MECHREVO YAOSHI", LocalizedUiCopy.English.ExperimentalChargeRisk);
         Assert.Contains("no brand or model restriction", LocalizedUiCopy.English.ExperimentalChargeRisk);
         Assert.Contains("interface and original-value checks", LocalizedUiCopy.English.ExperimentalChargeRisk);
-        foreach (var word in new[] { "风扇", "功耗", "按键", "自动保存", "最小化", "隐藏到托盘继续", "拔电", "睡眠", "真正退出", "不能保证" })
+        foreach (var word in new[] { "不改变平台状态", "不影响风扇", "不会放电", "30 分钟", "3 天", "最小化", "隐藏到托盘继续", "拔电", "睡眠", "真正退出", "不能保证" })
             Assert.Contains(word, LocalizedUiCopy.Chinese.ExperimentalChargeRisk);
-        foreach (var word in new[] { "fans", "power", "keys", "automatically save", "Minimizing", "hiding to the tray keeps", "Unplugging", "sleeping", "Actual exit", "not all side effects" })
+        foreach (var word in new[] { "does not change the platform state", "does not affect fans", "never discharged", "30 minutes", "3 days", "Minimizing", "hiding to the tray keeps", "Unplugging", "sleeping", "Actual exit", "not all side effects" })
             Assert.Contains(word, LocalizedUiCopy.English.ExperimentalChargeRisk);
-        Assert.Equal("切换或应用可能需要15–30秒。", LocalizedUiCopy.Chinese.ExperimentalChargeDelay);
-        Assert.Equal("Switching or applying may take 15–30 seconds.", LocalizedUiCopy.English.ExperimentalChargeDelay);
+        Assert.Equal("切换或应用需要几秒钟。", LocalizedUiCopy.Chinese.ExperimentalChargeDelay);
+        Assert.Equal("Switching or applying takes a few seconds.", LocalizedUiCopy.English.ExperimentalChargeDelay);
         Assert.DoesNotContain("请稍", LocalizedUiCopy.Chinese.ExperimentalChargeDelay);
         Assert.DoesNotContain("Please wait", LocalizedUiCopy.English.ExperimentalChargeDelay);
         Assert.Equal("不限制，按原生策略充电", LocalizedUiCopy.Chinese.ExperimentalChargeNoLimit);

@@ -2424,7 +2424,7 @@
                             <Border presentation:ThemeScope.AccentSurface="True" x:Name="BootWaterSection" Background="#F1F7FF" BorderBrush="#90BFF2" BorderThickness="1" CornerRadius="11" Padding="11" Margin="0,10,0,0">
                                 <StackPanel>
                                     <TextBlock Text="{presentation:UiText '登录前自动连接'}" FontSize="{presentation:UiFont 10.5}" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" />
-                                    <TextBlock Text="{presentation:UiText '开机后、输入密码前尝试连接上次水冷设备。'}" FontSize="{presentation:UiFont 8.5}" Foreground="{DynamicResource MutedBrush}" Margin="0,5,0,8" TextWrapping="Wrap" />
+                                    <TextBlock Text="{presentation:UiText '不安装也会在登录后自动连接水冷；但安装该小组件后开机登录前就能连上。'}" FontSize="{presentation:UiFont 8.5}" Foreground="{DynamicResource MutedBrush}" Margin="0,5,0,8" TextWrapping="Wrap" />
                                     <TextBlock Text="{presentation:UiText Value={Binding Experiments.BootWaterMessage}}" FontSize="{presentation:UiFont 8.5}" Foreground="#246292" TextWrapping="Wrap" />
                                     <UniformGrid Columns="3" Margin="0,9,0,0" IsEnabled="{Binding Experiments.CanManageBootWater}">
                                         <Button x:Name="BootWaterCheckButton" Content="{presentation:UiText '检查状态'}" Height="29" FontSize="{presentation:UiFont 8.5}" Margin="0,0,3,0" Style="{StaticResource IconButtonStyle}" Click="BootWaterCheck_Click" />

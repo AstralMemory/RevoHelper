@@ -767,9 +767,9 @@ public sealed class MainWindowViewModelTests
     {
         var viewModel = new MainWindowViewModel(CreateDashboard());
 
-        Assert.Equal("V1.0.5", viewModel.ReleaseVersionText);
-        Assert.Equal("V1.0.5", viewModel.ReleaseBadgeText);
-        Assert.Equal("RevoHelper V1.0.5 · 免费使用", viewModel.AppVersionText);
+        Assert.Equal("V1.0.6", viewModel.ReleaseVersionText);
+        Assert.Equal("V1.0.6", viewModel.ReleaseBadgeText);
+        Assert.Equal("RevoHelper V1.0.6 · 免费使用", viewModel.AppVersionText);
     }
 
     [Fact]
@@ -786,7 +786,7 @@ public sealed class MainWindowViewModelTests
         Assert.Equal("en-US", store.LastSaved?.UiLanguageCode);
         Assert.Equal("Laptop performance profiles", viewModel.UiCopy.HomeTitle);
         Assert.Equal("Performance", viewModel.DrawerTitle);
-        Assert.Equal("RevoHelper V1.0.5 · Free to use", viewModel.AppVersionText);
+        Assert.Equal("RevoHelper V1.0.6 · Free to use", viewModel.AppVersionText);
     }
 
     [Fact]

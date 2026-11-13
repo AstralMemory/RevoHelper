@@ -758,9 +758,9 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
     public bool IsPlatformSwitchPending => isApplyingPlatformMode &&
         Volatile.Read(ref platformCommandRevision) == Volatile.Read(ref platformRequestRevision);
 
-    public string ReleaseVersionText => "V1.0.5";
+    public string ReleaseVersionText => "V1.0.6";
 
-    public string ReleaseBadgeText => "V1.0.5";
+    public string ReleaseBadgeText => "V1.0.6";
 
     public string AppVersionText => $"RevoHelper {ReleaseVersionText} · {UiCopy.OpenSourceAndFree}";
 

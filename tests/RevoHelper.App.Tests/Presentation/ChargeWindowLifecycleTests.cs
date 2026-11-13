@@ -76,6 +76,7 @@ public sealed class ChargeWindowLifecycleTests
             Assert.Contains("开启后会记住", text);
             Assert.Contains("手动关闭后不再自动开启", text);
             Assert.Contains("未运行时不限充", text.Replace("没有运行时不限充", "未运行时不限充"));
+            Assert.Contains("3 天", text);
         }
         foreach (var text in new[] { LocalizedUiCopy.English.ExperimentalChargeRisk, AnnouncementCopy.For("en-US", "V1.0.2").Usage })
         {

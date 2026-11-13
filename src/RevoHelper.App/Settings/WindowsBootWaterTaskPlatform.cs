@@ -7,16 +7,21 @@ using Microsoft.Win32.SafeHandles;
 
 namespace RevoHelper.App.Settings;
 
-/// <summary>Only manages the fixed, packaged RevoHelper boot helper. Never launches it.</summary>
+/// <summary>
+/// Manages the pre-sign-in task and the copy of RevoHelper it runs. The copy is this executable
+/// itself (see <see cref="BootWaterHost"/>); nothing is embedded or unpacked. Never launches it.
+/// </summary>
 public sealed class WindowsBootWaterTaskPlatform : IBootWaterTaskPlatform
 {
     public const string TaskName = "RevoHelper Boot Water AutoConnect";
     public static string InstalledPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
         "RevoHelper", "BootWater", "RevoHelper.BootWater.exe");
 
-    public static Stream OpenPackagedHelper() => typeof(WindowsBootWaterTaskPlatform).Assembly
-        .GetManifestResourceStream("RevoHelper.BootWater.exe")
-        ?? throw new IOException("内置水冷组件不可用，未安装任务。");
+    private readonly string sourcePath;
+
+    /// <param name="sourcePath">The executable to deploy; defaults to the running RevoHelper.</param>
+    public WindowsBootWaterTaskPlatform(string? sourcePath = null) =>
+        this.sourcePath = sourcePath ?? Environment.ProcessPath ?? throw new IOException("无法确定 RevoHelper 的位置，未安装任务。");
 
     public string? ReadTaskXml() => WithFolder<string?>(folder =>
     {
@@ -54,7 +59,10 @@ public sealed class WindowsBootWaterTaskPlatform : IBootWaterTaskPlatform
                 !BootWaterFileSecurity.IsProtected(new DirectoryInfo(directory).GetAccessControl())) return false;
             VerifyProtectedFile(InstalledPath);
             VerifyExistingLog(directory);
-            return VerifyHelper(InstalledPath);
+            // The directory and file only admit administrators and SYSTEM (checked above), so the
+            // copy is whatever an administrator installed. It stays valid across RevoHelper updates:
+            // an older copy, or the separate helper that earlier versions installed, still works.
+            return IsRevoHelperExecutable(InstalledPath);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
     }
@@ -62,7 +70,7 @@ public sealed class WindowsBootWaterTaskPlatform : IBootWaterTaskPlatform
     public void DeployVerifiedHelper()
     {
         RequireAdministrator();
-        using var source = OpenPackagedHelper();
+        using var source = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read);
         var directory = Path.GetDirectoryName(InstalledPath)!;
         RejectReparsePoints(directory);
         foreach (var protectedDirectory in new[] { Path.GetDirectoryName(directory)!, directory })
@@ -83,9 +91,9 @@ public sealed class WindowsBootWaterTaskPlatform : IBootWaterTaskPlatform
             using (var destination = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
                 source.CopyTo(destination);
             new FileInfo(temporary).SetAccessControl(BootWaterFileSecurity.CreateFileSecurity());
-            if (!VerifyHelper(temporary)) throw new IOException("复制后辅助程序校验失败。");
+            if (!VerifyCopy(temporary, source)) throw new IOException("复制后辅助程序校验失败。");
             File.Move(temporary, InstalledPath, true);
-            if (!VerifyHelper(InstalledPath)) throw new IOException("已安装辅助程序校验失败。");
+            if (!VerifyCopy(InstalledPath, source)) throw new IOException("已安装辅助程序校验失败。");
         }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
@@ -106,23 +114,24 @@ public sealed class WindowsBootWaterTaskPlatform : IBootWaterTaskPlatform
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return "连接记录暂不可读。"; }
     }
 
-    private static bool VerifyHelper(string path)
+    private static bool VerifyCopy(string path, Stream source)
     {
         RejectReparsePoints(path);
         if (!File.Exists(path)) return false;
         using var stream = File.OpenRead(path);
-        return MatchesPackagedHelper(stream);
+        source.Position = 0;
+        return SameContent(source, stream);
     }
 
-    /// <summary>Compares the candidate to this application's embedded trusted helper without taking ownership of the stream.</summary>
-    public static bool MatchesPackagedHelper(Stream candidate)
+    /// <summary>Byte-for-byte comparison that takes ownership of neither stream.</summary>
+    public static bool SameContent(Stream expectedStream, Stream candidate)
     {
+        ArgumentNullException.ThrowIfNull(expectedStream);
         ArgumentNullException.ThrowIfNull(candidate);
-        using var packaged = OpenPackagedHelper();
         Span<byte> expected = stackalloc byte[8192];
         Span<byte> actual = stackalloc byte[8192];
         int count;
-        while ((count = packaged.Read(expected)) > 0)
+        while ((count = expectedStream.Read(expected)) > 0)
         {
             try { candidate.ReadExactly(actual[..count]); }
             catch (EndOfStreamException) { return false; }
@@ -130,6 +139,16 @@ public sealed class WindowsBootWaterTaskPlatform : IBootWaterTaskPlatform
         }
         return candidate.ReadByte() == -1;
     }
+
+    /// <summary>RevoHelper itself, or the separate helper that versions before 1.0.6 installed.</summary>
+    public static bool IsRevoHelperExecutable(string path)
+    {
+        RejectReparsePoints(path);
+        if (!File.Exists(path)) return false;
+        return IsRevoHelperProduct(System.Diagnostics.FileVersionInfo.GetVersionInfo(path).ProductName);
+    }
+
+    public static bool IsRevoHelperProduct(string? productName) => productName is "RevoHelper" or "RevoHelper.BootWater";
 
     private static void VerifyExistingLog(string directory)
     {

@@ -54,6 +54,7 @@ public partial class App : Application
     private ExperimentalControlsViewModel? experiments;
     private ExperimentalChargeClient? experimentalCharge;
     private SessionChargeController? sessionCharge;
+    private HoldChargeController? holdCharge;
     private volatile bool chargeResumeWaitingForPower;
     private WindowsProcessorFrequencyLimitController? processorFrequencyLimitController;
     private WindowsProcessorBoostController? processorBoostController;
@@ -62,9 +63,46 @@ public partial class App : Application
     private System.Windows.Forms.PowerLineStatus lastPowerLineStatus;
     private readonly WindowsDisplayController displayController = new();
 
+    // Most button handlers are "async void": without this, one unexpected exception in any of
+    // them closes the whole program with no trace. Record it and keep the window alive. A burst
+    // of failures is not survivable, so after several in a short time the crash is let through.
+    private void InstallCrashGuards()
+    {
+        var recent = new Queue<DateTime>();
+        DispatcherUnhandledException += (_, args) =>
+        {
+            RuntimeDiagnosticLog.Write("unhandled-ui", Describe(args.Exception));
+            var now = DateTime.UtcNow;
+            recent.Enqueue(now);
+            while (recent.Count > 0 && now - recent.Peek() > TimeSpan.FromSeconds(30)) recent.Dequeue();
+            args.Handled = recent.Count <= 5;
+        };
+        TaskScheduler.UnobservedTaskException += (_, args) =>
+        {
+            RuntimeDiagnosticLog.Write("unobserved-task", Describe(args.Exception));
+            args.SetObserved();
+        };
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+            RuntimeDiagnosticLog.Write("unhandled", args.ExceptionObject is Exception exception ? Describe(exception) : "unknown");
+
+        static string Describe(Exception exception)
+        {
+            var inner = exception is AggregateException { InnerException: { } first } ? first : exception;
+            var where = inner.StackTrace?.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim() ?? "";
+            return $"{inner.GetType().Name}: {inner.Message} {where}";
+        }
+    }
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        if (HoldChargeHost.IsHelper(e.Args))
+        {
+            previewOnly = true;
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            Shutdown(HoldChargeHost.Run(e.Args));
+            return;
+        }
         if (ExperimentalChargeHelperHost.IsHelper(e.Args))
         {
             previewOnly = true; // No settings, single-instance UI or vendor initialization.
@@ -80,6 +118,7 @@ public partial class App : Application
             Shutdown();
             return;
         }
+        InstallCrashGuards();
         var manualChargeLimit = ManualExperimentalChargeLaunch.ReadLimit(e.Args);
         var launchedFromWindowsStartup = StartupCommand.IsStartupLaunch(e.Args);
         var settingsPath = Path.Combine(
@@ -205,7 +244,8 @@ public partial class App : Application
 
         experimentalCharge = new ExperimentalChargeClient();
         experimentalCharge.InspectPendingRecovery();
-        sessionCharge = new SessionChargeController(experimentalCharge,
+        holdCharge = new HoldChargeController(experimentalCharge);
+        sessionCharge = new SessionChargeController(holdCharge,
             () => System.Windows.Forms.SystemInformation.PowerStatus.PowerLineStatus == System.Windows.Forms.PowerLineStatus.Online);
         experiments = new ExperimentalControlsViewModel(
             dynamicPowerController,
@@ -312,14 +352,14 @@ public partial class App : Application
         }
     }
 
-    // Windows is shutting down or signing out. An active 60/80 limit is left applied so the
-    // laptop does not charge to full while it is off and plugged in; the next start carries on.
+    // Windows is shutting down or signing out. A limit that is holding stays applied for up to
+    // three days, so a plugged-in laptop does not charge to full while it is off.
     protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
     {
         base.OnSessionEnding(e);
-        if (previewOnly || e.Cancel || experimentalCharge?.HoldForShutdown() != true) return;
+        if (previewOnly || e.Cancel || holdCharge?.HoldForShutdown() != true) return;
         RuntimeDiagnosticLog.Write("charge-hold", $"held for {e.ReasonSessionEnding}");
-        // If the shutdown is cancelled and the app keeps running, do not stay unsupervised.
+        // If the shutdown is cancelled and the app keeps running, take the limit back in hand.
         if (mainViewModel is { } viewModel)
             _ = ResumeChargeLimitAsync(viewModel, TimeSpan.FromSeconds(90));
     }
@@ -488,6 +528,7 @@ public partial class App : Application
         }
         experiments?.Dispose();
         sessionCharge?.Dispose();
+        holdCharge?.Dispose();
         experimentalCharge?.Dispose();
         if (platformAwareCpuPolicyController is not null)
         {

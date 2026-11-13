@@ -1,6 +1,5 @@
 namespace RevoHelper.App.Tests.Packaging;
 
-using System.Xml.Linq;
 using RevoHelper.App.Settings;
 
 public sealed class BootWaterPackagingTests
@@ -8,7 +7,7 @@ public sealed class BootWaterPackagingTests
     [Fact]
     public void BootHelper_IsShortLivedAndOnlyConnectsRememberedLiquidCoolingDevice()
     {
-        var source = File.ReadAllText(Locate("tools", "RevoHelper.BootWater", "Program.cs"));
+        var source = File.ReadAllText(Locate("src", "RevoHelper.App", "Settings", "BootWaterHost.cs"));
 
         Assert.Contains("GcuMqttStatusSource", source, StringComparison.Ordinal);
         Assert.Contains("frontendRole: GcuFrontendRole.BootWater", source, StringComparison.Ordinal);
@@ -39,45 +38,53 @@ public sealed class BootWaterPackagingTests
         Assert.DoesNotContain("Prepare-SnapshotRelease.ps1", release, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void InAppInstaller_VerifiesAgainstTheCurrentPackagedHelper()
-    {
-        var source = File.ReadAllText(Locate("src", "RevoHelper.App", "Settings", "WindowsBootWaterTaskPlatform.cs"));
-        Assert.Contains("MatchesPackagedHelper", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("HelperSha256", source, StringComparison.Ordinal);
-    }
-
     [Theory]
     [InlineData("same", true)]
     [InlineData("modified", false)]
     [InlineData("truncated", false)]
     [InlineData("appended", false)]
-    public void InstallerAcceptsOnlyExactEmbeddedHelperContent(string variant, bool expected)
+    public void InstallerAcceptsOnlyAnExactCopy(string variant, bool expected)
     {
-        using var original = WindowsBootWaterTaskPlatform.OpenPackagedHelper();
-        using var memory = new MemoryStream();
-        original.CopyTo(memory);
-        var bytes = memory.ToArray();
+        var bytes = Enumerable.Range(0, 20000).Select(i => (byte)(i * 31)).ToArray();
+        var copy = bytes.ToArray();
         switch (variant)
         {
-            case "modified": bytes[^1] ^= 1; break;
-            case "truncated": bytes = bytes[..^1]; break;
-            case "appended": bytes = [.. bytes, 0]; break;
+            case "modified": copy[^1] ^= 1; break;
+            case "truncated": copy = copy[..^1]; break;
+            case "appended": copy = [.. copy, 0]; break;
         }
-        using var candidate = new MemoryStream(bytes, writable: false);
-        Assert.Equal(expected, WindowsBootWaterTaskPlatform.MatchesPackagedHelper(candidate));
+        using var source = new MemoryStream(bytes, writable: false);
+        using var candidate = new MemoryStream(copy, writable: false);
+        Assert.Equal(expected, WindowsBootWaterTaskPlatform.SameContent(source, candidate));
     }
 
+    // Antivirus heuristics flag a program that carries another executable and writes it to disk.
+    // The boot task therefore runs a copy of RevoHelper itself.
     [Fact]
-    public void MainExecutable_ContainsBootHelperWithoutAdjacentFiles()
+    public void MainExecutable_CarriesNoSecondExecutable_AndIsItsOwnBootHelper()
     {
-        using var stream = WindowsBootWaterTaskPlatform.OpenPackagedHelper();
-        Assert.True(stream.Length > 1000000);
-        Assert.Equal('M', stream.ReadByte());
-        Assert.Equal('Z', stream.ReadByte());
-        var source = File.ReadAllText(Locate("src", "RevoHelper.App", "Settings", "WindowsBootWaterTaskPlatform.cs"));
-        Assert.DoesNotContain("AppContext.BaseDirectory", source, StringComparison.Ordinal);
+        var project = File.ReadAllText(Locate("src", "RevoHelper.App", "RevoHelper.App.csproj"));
+        Assert.DoesNotContain(".exe", project, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("<StartupObject>RevoHelper.App.Program</StartupObject>", project, StringComparison.Ordinal);
+        Assert.DoesNotContain(typeof(WindowsBootWaterTaskPlatform).Assembly.GetManifestResourceNames(),
+            name => name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase));
+
+        var entry = File.ReadAllText(Locate("src", "RevoHelper.App", "Program.cs"));
+        Assert.True(entry.IndexOf("BootWaterHost.IsBoot", StringComparison.Ordinal) < entry.IndexOf("App.Main()", StringComparison.Ordinal));
+        Assert.True(BootWaterHost.IsBoot(["--boot"]));
+        Assert.False(BootWaterHost.IsBoot([]));
+        Assert.False(BootWaterHost.IsBoot(["--boot", "x"]));
+        // The task that earlier versions registered keeps working: same path, same argument.
+        Assert.Contains($"<Arguments>{BootWaterHost.Argument}</Arguments>", BootWaterTaskDefinition.Create(WindowsBootWaterTaskPlatform.InstalledPath), StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData("RevoHelper", true)]
+    [InlineData("RevoHelper.BootWater", true)]      // installed by versions before 1.0.6
+    [InlineData("Something else", false)]
+    [InlineData(null, false)]
+    public void AnInstalledCopyIsRecognisedByItsProductName(string? product, bool expected) =>
+        Assert.Equal(expected, WindowsBootWaterTaskPlatform.IsRevoHelperProduct(product));
 
     [Fact]
     public void WaterCoolingDrawer_PresentsPreLoginInstallAsSupportedBetaFeature()
@@ -85,19 +92,6 @@ public sealed class BootWaterPackagingTests
         var xaml = File.ReadAllText(Locate("src", "RevoHelper.App", "MainWindow.xaml"));
         Assert.Contains("登录前自动连接", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("登录前自动连接 · 实验", xaml, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void BootHelper_BundlesNativeDependenciesInsideItsSingleExecutable()
-    {
-        var project = XDocument.Load(Locate("tools", "RevoHelper.BootWater", "RevoHelper.BootWater.csproj"));
-        var properties = project.Descendants("PropertyGroup")
-            .SelectMany(group => group.Elements())
-            .ToDictionary(element => element.Name.LocalName, element => element.Value);
-
-        Assert.Equal("true", properties["PublishSingleFile"]);
-        Assert.Equal("false", properties["SelfContained"]);
-        Assert.Equal("true", properties["IncludeNativeLibrariesForSelfExtract"]);
     }
 
     private static string Locate(params string[] relativePath)

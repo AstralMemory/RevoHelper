@@ -70,6 +70,11 @@ public static class UiTextCatalog
         Rule(@"^(启用|停止|恢复)实验性限充失败：(.+)$", m => (m.Groups[1].Value switch { "启用" => "Enabling", "停止" => "Stopping", _ => "Restoring" }) + " experimental charge limiting failed: " + Translate(m.Groups[2].Value, "en-US")),
         Rule(@"^实验性限充未完成：(.+)$", m => "Experimental charge limiting did not complete: " + Translate(m.Groups[1].Value, "en-US")),
         Rule(@"^实验已停止，监护正在复核恢复：(.+)$", m => "The experiment stopped; the guardian is checking restoration: " + Translate(m.Groups[1].Value, "en-US")),
+        Rule(@"^限充未启用：(.+)$", m => "Charge limit not enabled: " + TranslateKnown(m.Groups[1].Value)),
+        Rule(@"^限充已停止，已恢复原值。(.*)$", m => "Charge limit stopped; original values restored. " + TranslateKnown(m.Groups[1].Value)),
+        Rule(@"^限充已停止，恢复未确认；固件会在约 30 分钟内自行恢复正常充电。(.*)$", m => "Charge limit stopped; restoration unconfirmed. The firmware returns to normal charging by itself within about 30 minutes. " + TranslateKnown(m.Groups[1].Value)),
+        Rule(@"^固件的保持计时已在使用（0x([0-9A-F]{4})）；不接管。$", m => "The firmware hold countdown is already in use (0x" + m.Groups[1].Value + "); it will not be taken over."),
+        Rule(@"^固件当前不执行保持功能（(.+)）。$", m => "The firmware is not running its hold feature right now (" + m.Groups[1].Value + ")."),
         Rule(@"^原始状态0x([0-9A-F]{4})已改变（当前0x([0-9A-F]{2})）；不接管已有设置。$", m => "Original state 0x" + m.Groups[1].Value + " changed (now 0x" + m.Groups[2].Value + "); existing settings will not be taken over."),
         Rule(@"^部分状态读取失败，已保留已确认状态：(.+)$", m => "Some statuses could not be read; confirmed values were preserved: " + TranslateStatusDetails(m.Groups[1].Value)),
         Rule(@"^部分状态未读取：(.+)$", m => "Some statuses were not read: " + TranslateStatusDetails(m.Groups[1].Value)),
@@ -352,7 +357,7 @@ public static class UiTextCatalog
 静夜微光	Quiet night
 均衡	Balanced
 均衡模式	Balanced
-开机后、输入密码前尝试连接上次水冷设备。	Tries to connect the last cooler before you sign in to Windows.
+不安装也会在登录后自动连接水冷；但安装该小组件后开机登录前就能连上。	The cooler connects after sign-in even without this; install the helper to connect before sign-in.
 开启后可调整 TGP、Dynamic Boost 与频率偏移；关闭时统一锁定。	Unlocks TGP, Dynamic Boost and clock offsets. Turn off to lock all three.
 开始倒计时	Start countdown
 可能冲突服务检测	Other control software
@@ -389,6 +394,23 @@ public static class UiTextCatalog
 切换显卡输出后，重新打开本页刷新可用刷新率。	After changing GPU output, reopen this page to refresh available rates.
 切换后请点“重启”才会生效；开着快速启动时，关机再开机不会生效。请先保存工作，RevoHelper 不会自动重启。	Choose Restart to apply the change; with Fast Startup on, shutting down and powering on does not apply it. Save your work first. RevoHelper will not restart automatically.
 关机期间保持限充；下次打开 RevoHelper 时自动接续。	The limit stays applied while the laptop is off; RevoHelper carries on the next time it starts.
+正在启动限充并检查固件。	Starting the charge limit and checking the firmware.
+限充运行中：低于上限，正在充电。	Charge limit running: below the limit, charging.
+限充运行中：已达上限，当前未充电。	Charge limit running: limit reached, not charging.
+关机期间保持限充，最多 3 天。	The limit stays applied through the shutdown, for up to 3 days.
+限充运行中：已请求停充，等待固件响应。	Charge limit running: hold requested, waiting for the firmware.
+已开启：100% 不限制，按原生策略充电。	On: 100% sets no limit; charging follows the native policy.
+限充已关闭；按原生策略充电。	Charge limit off; charging follows the native policy.
+限充已关闭；恢复未确认，固件会在约 30 分钟内自行恢复正常充电。	Charge limit off; restoration unconfirmed. The firmware returns to normal charging by itself within about 30 minutes.
+旧版限充仍在生效，请先恢复原值。	The earlier limit method is still applied; restore the original values first.
+另一个限充会话或恢复仍在运行。	Another charge-limit session or restoration is still running.
+无法启动限充进程。	Could not start the charge-limit process.
+限充进程未能启动。	The charge-limit process did not start.
+限充进程已退出。	The charge-limit process has exited.
+限充启动超时。	Starting the charge limit timed out.
+已断开电源或电池状态无效，停止并恢复。	Power was disconnected or the battery state is invalid; stopping and restoring.
+平台状态被改变，停止并恢复。	The platform state changed; stopping and restoring.
+固件计时出现意外数值，停止并恢复。	The firmware countdown shows an unexpected value; stopping and restoring.
 切换显卡输出后需重启电脑。请先保存工作；RevoHelper 不会自动重启。	Changing GPU output requires a restart. Save your work; RevoHelper will not restart automatically.
 青蓝色 #00B0FF	Cyan #00B0FF
 取消关机	Cancel shutdown
