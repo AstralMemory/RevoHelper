@@ -119,4 +119,47 @@ public sealed class HomeDashboardFactoryTests
         Assert.Equal(DeviceKind.DiscreteGpu, gpu.Kind);
         Assert.Equal("独显", gpu.Label);
     }
+
+    // V1.0.7: hardware facts decide, so a new product name needs no new rule.
+    [Fact]
+    public void CreateFromAdapters_TheBusPositionDecidesAnIntelGpuWhateverItsName()
+    {
+        var dashboard = HomeDashboardFactory.CreateFromAdapters(Identity,
+        [
+            new DisplayAdapter("Intel(R) Arc(TM) B390 GPU", HardwareVendor.Intel, Integrated: true),
+            new DisplayAdapter("Intel(R) Arc(TM) A370M Graphics", HardwareVendor.Intel, Integrated: false)
+        ]);
+
+        Assert.Equal(DeviceKind.DiscreteGpu, dashboard.Devices[1].Kind);
+        Assert.Equal("Intel Arc A370M Graphics", dashboard.Devices[1].Model);
+        Assert.Equal(DeviceKind.IntegratedGpu, dashboard.Devices[2].Kind);
+        Assert.Equal("核显", dashboard.Devices[2].Label);
+        Assert.Equal(HardwareVendor.Intel, dashboard.Devices[2].Vendor);
+    }
+
+    [Theory]
+    [InlineData("RTX A1000 Laptop GPU", HardwareVendor.Nvidia, DeviceKind.DiscreteGpu)]
+    [InlineData("NVIDIA RTX PRO 2000 Blackwell Generation Laptop GPU", HardwareVendor.Nvidia, DeviceKind.DiscreteGpu)]
+    [InlineData("AMD Radeon(TM) 8060S Graphics", HardwareVendor.Amd, DeviceKind.IntegratedGpu)]
+    [InlineData("AMD Radeon RX 9070M", HardwareVendor.Amd, DeviceKind.DiscreteGpu)]
+    [InlineData("Some Future Graphics", HardwareVendor.Amd, DeviceKind.IntegratedGpu)]
+    [InlineData("Example Graphics 9000", HardwareVendor.Unknown, DeviceKind.UnknownGpu)]
+    public void CreateFromAdapters_TheVendorFromThePciIdDecidesWithoutVendorWordsInTheName(
+        string name, HardwareVendor vendor, DeviceKind expected)
+    {
+        var gpu = HomeDashboardFactory.CreateFromAdapters(Identity, [new DisplayAdapter(name, vendor)]).Devices[1];
+
+        Assert.Equal(expected, gpu.Kind);
+        Assert.Equal(vendor, gpu.Vendor);
+    }
+
+    [Fact]
+    public void Create_NamesWithoutHardwareIdsStillCarryTheirVendor()
+    {
+        var dashboard = HomeDashboardFactory.Create(Identity, ["NVIDIA RTX A1000 Laptop GPU", "Intel(R) Graphics"]);
+
+        Assert.Equal(HardwareVendor.Nvidia, dashboard.Devices[1].Vendor);
+        Assert.Equal(DeviceKind.DiscreteGpu, dashboard.Devices[1].Kind);
+        Assert.Equal(HardwareVendor.Intel, dashboard.Devices[2].Vendor);
+    }
 }

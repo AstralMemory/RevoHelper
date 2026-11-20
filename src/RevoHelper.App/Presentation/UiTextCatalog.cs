@@ -150,6 +150,8 @@ public static class UiTextCatalog
         Rule(@"^当前已经是(.+)。$", m => $"{TranslateKnown(m.Groups[1].Value)} is already active."),
         Rule(@"^已应用并回读：PL1 (.+) W / PL2 (.+) W。$", m => $"Applied and verified: PL1 {m.Groups[1].Value} W / PL2 {m.Groups[2].Value} W."),
         Rule(@"^(设置定时关机失败|取消定时关机失败)（退出码 (-?\d+)）([\s\S]*)$", m => $"{TranslateKnown(m.Groups[1].Value)} (exit code {m.Groups[2].Value}){m.Groups[3].Value}"),
+        Rule(@"^驱动生效上限 ([\d.]+) W，显卡最大 ([\d.]+) W。$", m => $"Driver limit in effect: {m.Groups[1].Value} W; GPU maximum: {m.Groups[2].Value} W."),
+        Rule(@"^(简短|完整)报告 · (\d+) 字$", m => $"{(m.Groups[1].Value == "简短" ? "Brief" : "Full")} report · {m.Groups[2].Value} characters"),
         Rule(@"^([\s\S]+) 部分状态未读取：([\s\S]+)$", m => Translate(m.Groups[1].Value, "en-US") + " Some statuses were not read: " + TranslateStatusDetails(m.Groups[2].Value)),
         Rule($@"^(.+)({Alternation(LabelEndings.Keys)})$", m => TranslateKnown(m.Groups[1].Value) + LabelEndings[m.Groups[2].Value]),
         // Last: a known prefix before "：" or " · ", followed by a native detail that stays as reported.
@@ -360,7 +362,6 @@ public static class UiTextCatalog
 不安装也会在登录后自动连接水冷；但安装该小组件后开机登录前就能连上。	The cooler connects after sign-in even without this; install the helper to connect before sign-in.
 开启后可调整 TGP、Dynamic Boost 与频率偏移；关闭时统一锁定。	Unlocks TGP, Dynamic Boost and clock offsets. Turn off to lock all three.
 开始倒计时	Start countdown
-可能冲突服务检测	Other control software
 可能有1-2秒的切换延迟	Profile switching may take 1–2 seconds.
 可能改写功耗策略；可临时停止或恢复，不会修改开机启动类型。	May change power policy. Temporary stop/restore does not change its startup type.
 可能无法调节超过机械革命官方预设的功耗 PL 值。例如平衡模式默认最高 85 W，该限制无法被突破，但可以向下调整。若想尝试自定义调整，请使用狂暴模式，或在自定义模式方案中细调。	OEM presets can impose power ceilings, such as 85 W in Balanced mode. Lower limits may work; use Turbo or Custom for more control.
@@ -574,7 +575,6 @@ Windows 处理器策略或 OEM 功耗控制后端已确认可用。	Windows CPU 
 尚未确认可用的处理器控制后端。	No compatible CPU control backend has been verified.
 正在探测当前设备是否支持此功能。	Checking whether this device supports the feature.
 重新检测	Recheck
-设备与功能检测	Device and feature detection
 设备与功能状态	Device and feature status
 按键与设备状态	Keyboard and device status
 电源与电池状态	Power and battery status
@@ -1020,5 +1020,29 @@ FPS 采集暂不可用	FPS capture unavailable
 未能移除记录	Could not remove the entry
 未选择程序	No program selected
 Windows 显示控制器未接入。	Windows display control is not connected.
+诊断报告	Diagnostic report
+用于反馈问题。仅包含软硬件型号、读数和运行记录，不含用户名、电脑名、序列号和网络地址；生成后先在下方预览，不会自动复制。	For reporting problems. Only hardware and software models, readings and logs; no user name, computer name, serial numbers or network addresses. The report shows below first and is not copied automatically.
+常规	General
+界面与窗口	Interface and window
+故障排查	Troubleshooting
+可能冲突的服务	Possibly conflicting services
+生成简短报告	Brief report
+生成完整报告	Full report
+500 字以内，可以直接发 B 站私信或评论。	Up to 500 characters; fits in one Bilibili message or comment.
+另含显卡功耗读数和近 24 小时的运行日志，约需 10 秒，适合保存为文件。	Adds the GPU power readings and the last 24 hours of logs. Takes about 10 seconds; best saved as a file.
+诊断报告内容	Diagnostic report text
+复制	Copy
+保存为文件…	Save as file…
+正在生成简短报告…	Creating the brief report…
+正在生成完整报告，读取显卡功耗大约需要 10 秒…	Creating the full report; reading the GPU power takes about 10 seconds…
+已生成，还没有复制。请先看一遍内容，再选择复制或保存为文件。	Created, not copied yet. Read it first, then copy it or save it as a file.
+已复制到剪贴板，可以粘贴到私信、评论或 Issue。	Copied to the clipboard. Paste it into a message, a comment or an issue.
+没能复制到剪贴板，请在框内全选后复制。	Could not copy to the clipboard. Select all the text in the box and copy it.
+已保存	Saved
+保存失败	Could not save
+生成失败	Could not create the report
+已取消生成。	Report cancelled.
+没有读到 NVIDIA 驱动的功耗上限。	No NVIDIA driver power limit was read.
+休眠	Asleep
 """;
 }

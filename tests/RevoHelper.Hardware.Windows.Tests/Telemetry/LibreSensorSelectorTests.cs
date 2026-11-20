@@ -52,8 +52,10 @@ public sealed class LibreSensorSelectorTests
         Assert.Equal(original, sensors);
     }
 
+    // A zero watt reading is a sensor that reports nothing, so the next named one is used (V1.0.7: no N/A
+    // while another power sensor of the same GPU has a value). A zero load is a real idle reading.
     [Fact]
-    public void SelectGpu_PreservesPriorityIncludingZeroPowerBeforeLowerPriorityFallback()
+    public void SelectGpu_KeepsPriorityAndSkipsAPowerSensorThatReadsZero()
     {
         var reading = LibreSensorSelector.SelectGpu([
             new("D3D 3D", SensorValueKind.Load, 90),
@@ -64,7 +66,58 @@ public sealed class LibreSensorSelectorTests
             new("GPU Power", SensorValueKind.Power, 0)]);
 
         Assert.Equal(0, reading.UsagePercent);
-        Assert.Null(reading.PowerWatts);
+        Assert.Equal(50, reading.PowerWatts);
+    }
+
+    [Fact]
+    public void SelectCpu_ANewTemperatureLabelOfTheDieIsStillRead()
+    {
+        Assert.Equal(71, LibreSensorSelector.SelectCpu([
+            new("CCD1 (Tdie)", SensorValueKind.Temperature, 66),
+            new("CCD2 (Tdie)", SensorValueKind.Temperature, 71),
+            new("CPU Core #1 Distance to TjMax", SensorValueKind.Temperature, 40)]).TemperatureC);
+        Assert.Equal(83, LibreSensorSelector.SelectCpu([
+            new("P-Core #1", SensorValueKind.Temperature, 83),
+            new("E-Core #1", SensorValueKind.Temperature, 60)]).TemperatureC);
+    }
+
+    [Fact]
+    public void SelectCpu_AZeroDegreeReadingIsNotATemperature()
+    {
+        var reading = LibreSensorSelector.SelectCpu([
+            new("CPU Package", SensorValueKind.Temperature, 0),
+            new("Core Max", SensorValueKind.Temperature, 74)]);
+
+        Assert.Equal(74, reading.TemperatureC);
+    }
+
+    [Fact]
+    public void SelectCpu_WithoutCpuTotalAveragesTheCoreLoads()
+    {
+        var reading = LibreSensorSelector.SelectCpu([
+            new("CPU Core #1", SensorValueKind.Load, 10),
+            new("CPU Core #2", SensorValueKind.Load, 30),
+            new("Memory", SensorValueKind.Load, 80)]);
+
+        Assert.Equal(20, reading.UsagePercent);
+        Assert.Equal(30, reading.MaximumCoreUsagePercent);
+    }
+
+    [Fact]
+    public void SelectGpu_OtherLabelsOfTheSameReadingsAreUsedAsTaskManagerWould()
+    {
+        var reading = LibreSensorSelector.SelectGpu([
+            new("D3D Copy", SensorValueKind.Load, 4),
+            new("D3D Video Decode", SensorValueKind.Load, 37),
+            new("GPU Hot Spot", SensorValueKind.Temperature, 81),
+            new("GPU Memory Junction", SensorValueKind.Temperature, 90),
+            new("GPU Edge", SensorValueKind.Temperature, 63),
+            new("GPU SoC", SensorValueKind.Power, 8),
+            new("GPU Total", SensorValueKind.Power, 41)]);
+
+        Assert.Equal(37, reading.UsagePercent);
+        Assert.Equal(63, reading.TemperatureC);
+        Assert.Equal(41, reading.PowerWatts);
     }
 
     [Fact]

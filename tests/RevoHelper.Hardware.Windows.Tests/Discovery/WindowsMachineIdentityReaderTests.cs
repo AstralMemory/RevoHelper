@@ -12,7 +12,7 @@ public sealed class WindowsMachineIdentityReaderTests
     public void Read_WhenAnIndependentQueryFails_PreservesConfirmedComputerIdentity(string failedClass)
     {
         var identity = new WindowsMachineIdentityReader(
-            new PartiallyFailingWmiQuery(failedClass), new FakeCpuIdReader(null)).Read();
+            new PartiallyFailingWmiQuery(failedClass), new FakeCpuIdReader(null), readFirmwareRegistry: NoRegistry).Read();
 
         Assert.Equal("MECHREVO", identity.Manufacturer);
         Assert.Equal("AURORA X", identity.ProductName);
@@ -24,11 +24,58 @@ public sealed class WindowsMachineIdentityReaderTests
     public void Read_WhenComputerIdentityFails_DoesNotInferBrandFromOtherFields()
     {
         var identity = new WindowsMachineIdentityReader(
-            new PartiallyFailingWmiQuery("Win32_ComputerSystem"), new FakeCpuIdReader(null)).Read();
+            new PartiallyFailingWmiQuery("Win32_ComputerSystem"), new FakeCpuIdReader(null), readFirmwareRegistry: NoRegistry).Read();
 
         Assert.Empty(identity.Manufacturer);
         Assert.Equal("Board", identity.BaseboardProduct);
         Assert.Equal("CPU", identity.ProcessorName);
+    }
+
+    // The registry holds Windows' own copy of the same firmware tables; it is read, never inferred.
+    [Fact]
+    public void Read_WhenWmiIsBroken_TakesTheSameNamesFromTheFirmwareCopyInTheRegistry()
+    {
+        var registry = new Dictionary<string, string>
+        {
+            [@"HARDWARE\DESCRIPTION\System\BIOS|SystemManufacturer"] = "MECHREVO",
+            [@"HARDWARE\DESCRIPTION\System\BIOS|SystemProductName"] = "YAOSHI Series",
+            [@"HARDWARE\DESCRIPTION\System\BIOS|BaseBoardProduct"] = "YAOSHI Series-X6AR55xY",
+            [@"HARDWARE\DESCRIPTION\System\BIOS|BIOSVersion"] = "N.1.18MRO24",
+            [@"HARDWARE\DESCRIPTION\System\CentralProcessor\0|ProcessorNameString"] = "Intel(R) Core(TM) Ultra 9 275HX"
+        };
+
+        var identity = new WindowsMachineIdentityReader(new EveryClassFailsWmiQuery(), new FakeCpuIdReader(null),
+            readFirmwareRegistry: key => registry.GetValueOrDefault(key, "")).Read();
+
+        Assert.Equal("MECHREVO", identity.Manufacturer);
+        Assert.Equal("YAOSHI Series", identity.ProductName);
+        Assert.Equal("YAOSHI Series-X6AR55xY", identity.BaseboardProduct);
+        Assert.Equal("N.1.18MRO24", identity.BiosVersion);
+        Assert.Equal("Intel(R) Core(TM) Ultra 9 275HX", identity.ProcessorName);
+        Assert.Equal(0, identity.ProcessorCoreCount);
+        Assert.Equal(Environment.ProcessorCount, identity.ProcessorThreadCount);
+    }
+
+    [Fact]
+    public void Read_WmiValuesWinOverTheRegistryCopy()
+    {
+        var identity = new WindowsMachineIdentityReader(new PartiallyFailingWmiQuery("none"), new FakeCpuIdReader(null),
+            readFirmwareRegistry: _ => "REGISTRY").Read();
+
+        Assert.Equal("MECHREVO", identity.Manufacturer);
+        Assert.Equal("Board", identity.BaseboardProduct);
+        Assert.Equal("1.0", identity.BiosVersion);
+    }
+
+    private static string NoRegistry(string key) => "";
+
+    private sealed class EveryClassFailsWmiQuery : IWmiQuery
+    {
+        public IReadOnlyDictionary<string, string> ReadFirst(string className) =>
+            throw new InvalidOperationException("WMI is broken");
+
+        public IReadOnlyList<IReadOnlyDictionary<string, string>> ReadAll(string className) =>
+            throw new InvalidOperationException("WMI is broken");
     }
 
     [Fact]

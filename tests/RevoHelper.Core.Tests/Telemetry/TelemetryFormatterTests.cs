@@ -60,4 +60,17 @@ public sealed class TelemetryFormatterTests
 
         Assert.Equal("P 5187 MHz\nE 1995 MHz", display.Frequency);
     }
+
+    // A powered-down discrete GPU is not a failed reading: say so instead of N/A.
+    [Fact]
+    public void Format_ASleepingGpuSaysAsleepWhereItHasNoLiveValue()
+    {
+        var display = TelemetryFormatter.Format(new DeviceTelemetry(
+            DeviceKind.DiscreteGpu, "GeForce RTX 5090 Laptop GPU", 0, null, 0, null, Asleep: true));
+
+        Assert.Equal("0%", display.Usage);
+        Assert.Equal("休眠", display.Temperature);
+        Assert.Equal("0 W", display.Power);
+        Assert.Equal("休眠", display.Frequency);
+    }
 }

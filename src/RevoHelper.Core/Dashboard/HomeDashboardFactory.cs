@@ -14,9 +14,15 @@ public static class HomeDashboardFactory
         new("custom", "自定义", "保存你的专属调度")
     ];
 
+    /// <summary>Names only, as offline previews have them; the vendor is read from the name.</summary>
     public static HomeDashboard Create(
         MachineIdentity identity,
-        IEnumerable<string> displayAdapterNames)
+        IEnumerable<string> displayAdapterNames) =>
+        CreateFromAdapters(identity, displayAdapterNames.Select(name => new DisplayAdapter(name, HardwareVendors.FromName(name))));
+
+    public static HomeDashboard CreateFromAdapters(
+        MachineIdentity identity,
+        IEnumerable<DisplayAdapter> displayAdapters)
     {
         var devices = new List<DeviceStatus>
         {
@@ -24,19 +30,20 @@ public static class HomeDashboardFactory
                 DeviceKind.Cpu,
                 "CPU",
                 CleanCpuModelName(identity.ProcessorName),
-                ProcessorDetails(identity))
+                ProcessorDetails(identity),
+                HardwareVendor.Unknown)
         };
 
-        var adapters = displayAdapterNames
-            .Where(name => !string.IsNullOrWhiteSpace(name))
-            .Select(CleanModelName)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(AdapterSortOrder)
-            .ThenBy(name => name, StringComparer.OrdinalIgnoreCase);
+        var adapters = displayAdapters
+            .Where(adapter => !string.IsNullOrWhiteSpace(adapter.Name))
+            .Select(adapter => adapter with { Name = CleanModelName(adapter.Name) })
+            .DistinctBy(adapter => adapter.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(adapter => (Adapter: adapter, Kind: ClassifyAdapter(adapter)))
+            .OrderBy(item => AdapterSortOrder(item.Kind))
+            .ThenBy(item => item.Adapter.Name, StringComparer.OrdinalIgnoreCase);
 
-        foreach (var adapter in adapters)
+        foreach (var (adapter, kind) in adapters)
         {
-            var kind = ClassifyAdapter(adapter);
             devices.Add(CreateDevice(
                 kind,
                 kind switch
@@ -45,8 +52,9 @@ public static class HomeDashboardFactory
                     DeviceKind.DiscreteGpu => "独显",
                     _ => "GPU"
                 },
-                adapter,
-                string.Empty));
+                adapter.Name,
+                string.Empty,
+                adapter.Vendor));
         }
 
         return new(identity, Profiles, devices);
@@ -56,7 +64,8 @@ public static class HomeDashboardFactory
         DeviceKind kind,
         string label,
         string model,
-        string details) =>
+        string details,
+        HardwareVendor vendor) =>
         new(
             kind,
             label,
@@ -65,37 +74,42 @@ public static class HomeDashboardFactory
             UnknownReading,
             UnknownReading,
             UnknownReading,
-            UnknownReading);
+            UnknownReading,
+            vendor);
 
     private static string ProcessorDetails(MachineIdentity identity) =>
         identity.ProcessorCoreCount > 0 && identity.ProcessorThreadCount > 0
             ? $"{identity.ProcessorCoreCount} 核 · {identity.ProcessorThreadCount} 线程"
             : "自动识别";
 
-    private static DeviceKind ClassifyAdapter(string name)
+    /// <summary>
+    /// Hardware facts first, names last. Where the PCI location settles it (every Intel integrated
+    /// GPU is at bus 0, device 2) no name is read, so a new product name never needs a new rule.
+    /// </summary>
+    public static DeviceKind ClassifyAdapter(DisplayAdapter adapter)
     {
-        if (name.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("GeForce", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("Radeon RX", StringComparison.OrdinalIgnoreCase) ||
-            GpuNames.IsDiscreteIntelArc(name))
+        if (adapter.Integrated is { } integrated) return integrated ? DeviceKind.IntegratedGpu : DeviceKind.DiscreteGpu;
+        var vendor = adapter.Vendor is HardwareVendor.Unknown ? HardwareVendors.FromName(adapter.Name) : adapter.Vendor;
+        return vendor switch
         {
-            return DeviceKind.DiscreteGpu;
-        }
-
-        // AMD names its integrated GPUs "Radeon Graphics" as well as "Radeon 610M" or
-        // "Radeon 780M Graphics". Treat any non-RX Radeon as integrated, the same rule the
-        // telemetry side uses, or the two sides never match and the row stays N/A.
-        if (name.Contains("Intel", StringComparison.OrdinalIgnoreCase) ||
-            name.Contains("Radeon", StringComparison.OrdinalIgnoreCase))
-        {
-            return DeviceKind.IntegratedGpu;
-        }
-
-        return DeviceKind.UnknownGpu;
+            // NVIDIA makes no integrated GPU for these processors.
+            HardwareVendor.Nvidia => DeviceKind.DiscreteGpu,
+            // AMD's discrete mobile GPUs are all "Radeon RX …" (or "Radeon Pro …"); its integrated
+            // ones are "Radeon Graphics", "Radeon 780M", "Radeon 8060S" and so on.
+            HardwareVendor.Amd => IsAmdDiscreteName(adapter.Name) ? DeviceKind.DiscreteGpu : DeviceKind.IntegratedGpu,
+            // Only reached when Windows gave no PCI location for the Intel adapter.
+            HardwareVendor.Intel => GpuNames.IsDiscreteIntelArc(adapter.Name) ? DeviceKind.DiscreteGpu : DeviceKind.IntegratedGpu,
+            _ => DeviceKind.UnknownGpu
+        };
     }
 
-    private static int AdapterSortOrder(string name) =>
-        ClassifyAdapter(name) switch
+    private static bool IsAmdDiscreteName(string name) =>
+        name.Contains("Radeon RX", StringComparison.OrdinalIgnoreCase) ||
+        name.Contains(" RX ", StringComparison.OrdinalIgnoreCase) ||
+        name.Contains("Radeon Pro", StringComparison.OrdinalIgnoreCase);
+
+    private static int AdapterSortOrder(DeviceKind kind) =>
+        kind switch
         {
             DeviceKind.DiscreteGpu => 0,
             DeviceKind.IntegratedGpu => 1,

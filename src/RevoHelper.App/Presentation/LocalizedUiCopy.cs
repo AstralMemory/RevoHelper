@@ -56,6 +56,8 @@ public sealed class LocalizedUiCopy
     public string MonitorTitle { get; init; } = "";
     public string MonitorEntryTitle { get; init; } = "";
     public string PerformanceAdjustmentTitle { get; init; } = "";
+    /// <summary>The home button is 104 px wide; "Performance" did not fit beside its icon.</summary>
+    public string PerformanceEntryTitle { get; init; } = "";
     public string FanAdjustmentTitle { get; init; } = "";
     public string SettingsTitle { get; init; } = "";
     public string StartupSectionTitle { get; init; } = "";
@@ -118,7 +120,7 @@ public sealed class LocalizedUiCopy
         KeyboardTitle = "按键开关", KeyboardSubtitle = "Win / Fn / OSD",
         BatteryTitle = "电源", BatterySubtitle = "功耗释放模式",
         DisplayTitle = "显示", DisplaySubtitle = "色彩与屏幕功能", OtherTitle = "其它", OtherSubtitle = "强冷 / 定时关机", MonitorTitle = "性能监控（外置监控小横条）", MonitorEntryTitle = "性能监控",
-        PerformanceAdjustmentTitle = "性能调整", FanAdjustmentTitle = "风扇调整", SettingsTitle = "设置",
+        PerformanceAdjustmentTitle = "性能调整", PerformanceEntryTitle = "性能调整", FanAdjustmentTitle = "风扇调整", SettingsTitle = "设置",
         UpdateSectionTitle = "更新", AutomaticUpdateCheckTitle = "自动检查更新",
         AutomaticUpdateCheckDescription = "启动 2 分钟后检查，之后每天一次，失败时 3 小时后重试。只读取 GitHub 上的最新版本号，不发送设备信息。关闭后不再自动联网。",
         CheckForUpdatesButton = "检查更新", UpdateChecking = "正在检查…", UpdateUpToDate = "已是最新版本",
@@ -173,7 +175,7 @@ public sealed class LocalizedUiCopy
         KeyboardTitle = "Keys", KeyboardSubtitle = "Win / Fn / OSD",
         BatteryTitle = "Power", BatterySubtitle = "Power profiles",
         DisplayTitle = "Display", DisplaySubtitle = "Color / screen", OtherTitle = "Other", OtherSubtitle = "Fans / shutdown", MonitorTitle = "Performance monitor (floating bar)", MonitorEntryTitle = "Monitor",
-        PerformanceAdjustmentTitle = "Performance", FanAdjustmentTitle = "Fan control", SettingsTitle = "Settings",
+        PerformanceAdjustmentTitle = "Performance", PerformanceEntryTitle = "Tuning", FanAdjustmentTitle = "Fan control", SettingsTitle = "Settings",
         UpdateSectionTitle = "Updates", AutomaticUpdateCheckTitle = "Check for updates automatically",
         AutomaticUpdateCheckDescription = "Checks 2 minutes after launch, then once a day, retrying after 3 hours if it fails. Only reads the latest version number from GitHub and sends no device information. When off, the app does not go online on its own.",
         CheckForUpdatesButton = "Check now", UpdateChecking = "Checking…", UpdateUpToDate = "Up to date",

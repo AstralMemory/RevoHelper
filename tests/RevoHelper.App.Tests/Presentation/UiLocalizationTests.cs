@@ -77,6 +77,10 @@ public sealed class UiLocalizationTests
     [InlineData("整机档位读取失败 · GCU timeout", "Reading the profile failed · GCU timeout")]
     [InlineData("显卡输出控制器未接入", "GPU output control is not connected")]
     [InlineData("没有可测画面时 FPS 显示为“—”，硬件信息仍会更新。", "FPS shows “—” when no frames can be measured; hardware readings still update.")]
+    [InlineData("驱动生效上限 150 W，显卡最大 175 W。", "Driver limit in effect: 150 W; GPU maximum: 175 W.")]
+    [InlineData("驱动生效上限 112.5 W，显卡最大 115 W。", "Driver limit in effect: 112.5 W; GPU maximum: 115 W.")]
+    [InlineData("生成失败：读取超时", "Could not create the report: 读取超时")]
+    [InlineData("已复制到剪贴板，可以粘贴到私信、评论或 Issue。", "Copied to the clipboard. Paste it into a message, a comment or an issue.")]
     public void RuntimeStatusLines_HaveEnglishCopy(string chinese, string english)
     {
         Assert.Equal(english, UiTextCatalog.Translate(chinese, "en-US"));

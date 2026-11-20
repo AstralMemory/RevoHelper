@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Collections.ObjectModel;
 using System.Runtime.CompilerServices;
 using RevoHelper.App.Controls;
+using RevoHelper.App.Diagnostics;
 using RevoHelper.App.Monitoring;
 using RevoHelper.App.Lifecycle;
 using RevoHelper.App.Settings;
@@ -42,6 +43,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
     private readonly IFanBoostController? fanBoostController;
     private readonly IShutdownScheduler? shutdownScheduler;
     private readonly ILatestReleaseSource? latestReleaseSource;
+    private readonly IDiagnosticReportSource? diagnosticReport;
     private readonly Func<bool> officialConsoleRunningProbe;
     private readonly Func<DateTimeOffset> utcNow;
     private readonly PerformanceScheduleController? scheduleController;
@@ -211,9 +213,11 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
         IFanBoostController? fanBoostController = null,
         IShutdownScheduler? shutdownScheduler = null,
         Action<string, string>? diagnostic = null,
-        ILatestReleaseSource? latestReleaseSource = null)
+        ILatestReleaseSource? latestReleaseSource = null,
+        IDiagnosticReportSource? diagnosticReport = null)
     {
         this.latestReleaseSource = latestReleaseSource;
+        this.diagnosticReport = diagnosticReport;
         Experiments = experiments ?? new();
         Dashboard = dashboard;
         deviceSampleTimes.Clear();
@@ -397,10 +401,15 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
         RefreshConflictServiceActionProperties();
     }
 
-    public async Task RefreshConflictServicesAsync(CancellationToken cancellationToken)
+    private void RefreshOfficialConsoleStatus()
     {
         try { IsOfficialConsoleRunning = officialConsoleRunningProbe(); }
         catch { IsOfficialConsoleRunning = false; }
+    }
+
+    public async Task RefreshConflictServicesAsync(CancellationToken cancellationToken)
+    {
+        RefreshOfficialConsoleStatus();
         if (conflictServiceManager is null) return;
         try
         {
@@ -758,9 +767,9 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
     public bool IsPlatformSwitchPending => isApplyingPlatformMode &&
         Volatile.Read(ref platformCommandRevision) == Volatile.Read(ref platformRequestRevision);
 
-    public string ReleaseVersionText => "V1.0.6";
+    public string ReleaseVersionText => "V1.0.7";
 
-    public string ReleaseBadgeText => "V1.0.6";
+    public string ReleaseBadgeText => "V1.0.7";
 
     public string AppVersionText => $"RevoHelper {ReleaseVersionText} · {UiCopy.OpenSourceAndFree}";
 
@@ -2153,13 +2162,14 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
     {
         var freshOemTemperature = oemCpuTemperatureAt is { } sampledAt &&
             snapshot.CapturedAt - sampledAt <= TelemetryMaximumAge ? oemCpuTemperatureC : null;
-        var cpuPackageTemperature = snapshot.Devices
-            .FirstOrDefault(device => device.Kind is DeviceKind.Cpu)?.TemperatureC;
+        var cpuTelemetry = snapshot.Devices.FirstOrDefault(device => device.Kind is DeviceKind.Cpu);
+        // Sensors first, then the OEM service, then the firmware's thermal zone.
+        var cpuPackageTemperature = cpuTelemetry?.TemperatureC;
         if (cpuPackageTemperature is not { } packageTemperature ||
             !double.IsFinite(packageTemperature) ||
             packageTemperature <= 0)
         {
-            cpuPackageTemperature = freshOemTemperature;
+            cpuPackageTemperature = freshOemTemperature ?? cpuTelemetry?.ZoneTemperatureC;
         }
 
         foreach (var telemetry in snapshot.Devices)
@@ -2173,7 +2183,8 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
             var device = Devices[matchIndex];
             deviceSampleTimes[(device.Kind, device.Model)] = snapshot.CapturedAt;
             var formatted = TelemetryFormatter.Format(telemetry);
-            var sharesCpuPackageTemperature = telemetry.Kind is DeviceKind.IntegratedGpu &&
+            // The row's kind comes from the PCI facts; the sensor library's guess only helps find the row.
+            var sharesCpuPackageTemperature = device.Kind is DeviceKind.IntegratedGpu &&
                                                telemetry.TemperatureC is null &&
                                                cpuPackageTemperature is { };
             var defaultDetails = device.Details;
@@ -2186,15 +2197,15 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
                     break;
                 }
             }
-            var dedicatedMemoryDetails = telemetry.Kind is DeviceKind.DiscreteGpu or DeviceKind.UnknownGpu
+            var dedicatedMemoryDetails = device.Kind is DeviceKind.DiscreteGpu or DeviceKind.UnknownGpu
                 ? FormatDedicatedMemory(telemetry.DedicatedMemoryMegabytes)
                 : null;
             var temperature = sharesCpuPackageTemperature
                 ? FormatTemperature(cpuPackageTemperature!.Value)
                 : telemetry.Kind is DeviceKind.Cpu &&
                   telemetry.TemperatureC is null &&
-                  freshOemTemperature is { } oemTemperature
-                    ? FormatTemperature(oemTemperature)
+                  (freshOemTemperature ?? telemetry.ZoneTemperatureC) is { } fallbackTemperature
+                    ? FormatTemperature(fallbackTemperature)
                     : formatted.Temperature;
             var details = dedicatedMemoryDetails ?? defaultDetails;
             if (device.Usage == formatted.Usage && device.Temperature == temperature &&
@@ -2245,6 +2256,20 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
                     string.Equals(device.Model, telemetryName, StringComparison.OrdinalIgnoreCase))
                     return index;
             }
+        }
+
+        // The vendor is a fact from the drivers on both sides; one row of that vendor is the device.
+        if (telemetry.Kind is not DeviceKind.Cpu && telemetry.Vendor is not HardwareVendor.Unknown)
+        {
+            var vendorIndex = -1;
+            var vendorCount = 0;
+            for (var index = 0; index < Devices.Count; index++)
+            {
+                if (Devices[index].Kind is DeviceKind.Cpu || Devices[index].Vendor != telemetry.Vendor) continue;
+                vendorIndex = index;
+                vendorCount++;
+            }
+            if (vendorCount == 1) return vendorIndex;
         }
 
         var candidateIndex = -1;
@@ -4043,6 +4068,8 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
 
     public void OpenSettings()
     {
+        // The official console may have been opened or closed since startup.
+        RefreshOfficialConsoleStatus();
         ActiveDrawer = HomeDrawer.Settings;
         StatusMessage = "设置已打开 · 可管理启动、冲突服务与界面选项";
     }
@@ -4174,6 +4201,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
         isShuttingDown = true;
         CancelLiquidCoolingRecovery();
         liquidCoolingLifetime.Cancel();
+        CancelDiagnosticReport();
         OnPropertyChanged(nameof(CanRecheckCapabilities));
     }
 

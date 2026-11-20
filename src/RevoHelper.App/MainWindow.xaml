@@ -195,6 +195,7 @@
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="PlanPill" Property="Opacity" Value="0.82" />
+                                <Setter TargetName="PlanPill" Property="presentation:TextClarity.Enabled" Value="False" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -226,6 +227,7 @@
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="FanChannelPill" Property="Opacity" Value="0.82" />
+                                <Setter TargetName="FanChannelPill" Property="presentation:TextClarity.Enabled" Value="False" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -373,7 +375,7 @@
                                     </ControlTemplate>
                                 </ToggleButton.Template>
                             </ToggleButton>
-                            <Popup x:Name="Popup" Placement="Bottom" AllowsTransparency="True" Focusable="False"
+                            <Popup x:Name="Popup" Placement="Bottom" AllowsTransparency="True" Focusable="False" presentation:TextClarity.Enabled="False"
                                    IsOpen="{TemplateBinding IsDropDownOpen}" PopupAnimation="Fade">
                                 <Border MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"
                                         MaxHeight="210" Margin="0,4,0,0" Padding="3"
@@ -535,6 +537,7 @@
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
                                 <Setter TargetName="ActionBorder" Property="Opacity" Value="0.7" />
+                                <Setter TargetName="ActionBorder" Property="presentation:TextClarity.Enabled" Value="False" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -557,6 +560,7 @@
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
                                 <Setter TargetName="BadgeSurface" Property="Opacity" Value="0.7" />
+                                <Setter TargetName="BadgeSurface" Property="presentation:TextClarity.Enabled" Value="False" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -579,6 +583,7 @@
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
                                 <Setter TargetName="IconSurface" Property="Opacity" Value="0.7" />
+                                <Setter TargetName="IconSurface" Property="presentation:TextClarity.Enabled" Value="False" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -687,12 +692,17 @@
     </Window.Resources>
 
     <Viewbox x:Name="WindowScaleViewbox" Stretch="Uniform">
-    <Border x:Name="WindowLogicalRoot" Width="580" Height="550"
-            Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource NeutralC8D2DFBrush}"
-            BorderThickness="1" CornerRadius="21">
+    <Grid>
+    <!-- The shadow is drawn by its own layer. An effect on the panel itself would render every
+         piece of text through a bitmap, without ClearType, which looks blurry once scaled. -->
+    <Border x:Name="WindowShadow" CornerRadius="21" Background="{DynamicResource SurfaceBrush}" IsHitTestVisible="False">
         <Border.Effect>
             <DropShadowEffect BlurRadius="22" ShadowDepth="5" Opacity="0.2" Color="#34445C" />
         </Border.Effect>
+    </Border>
+    <Border x:Name="WindowLogicalRoot" Width="580" Height="550"
+            Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource NeutralC8D2DFBrush}"
+            BorderThickness="1" CornerRadius="21" RenderOptions.ClearTypeHint="Enabled">
         <Grid>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition x:Name="DrawerColumn" Width="0" />
@@ -932,7 +942,7 @@
 
                 <Border Grid.Row="2" Background="{DynamicResource LineBrush}" />
 
-                <ScrollViewer Grid.Row="3" Margin="0,9,0,3"
+                <ScrollViewer Grid.Row="3" Margin="0,9,0,3" presentation:TextClarity.Enabled="True"
                               VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                               HorizontalContentAlignment="Stretch">
                     <StackPanel HorizontalAlignment="Stretch">
@@ -1218,7 +1228,7 @@
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
                             <TextBlock Text="⚡" Foreground="{Binding FanAccentColor}" FontSize="{presentation:UiFont 15}" Margin="0,0,4,0" />
                             <TextBlock Text="|" Foreground="{DynamicResource Neutral9AA7B8Brush}" FontSize="{presentation:UiFont 12}" Margin="0,0,4,0" />
-                            <TextBlock x:Name="PerformanceEntryTitle" Text="{Binding UiCopy.PerformanceAdjustmentTitle}" Foreground="{Binding FanAccentColor}" FontSize="{presentation:UiFont 11}"
+                            <TextBlock x:Name="PerformanceEntryTitle" Text="{Binding UiCopy.PerformanceEntryTitle}" Foreground="{Binding FanAccentColor}" FontSize="{presentation:UiFont 11}"
                                        FontWeight="SemiBold" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
@@ -1361,7 +1371,7 @@
                                        Foreground="{Binding FanAccentColor}" FontSize="{presentation:UiFont 8.2}" FontWeight="SemiBold" />
                         </Border>
                     </StackPanel>
-                    <ScrollViewer x:Name="AnnouncementsDrawerContent" Grid.Row="2" Visibility="Collapsed"
+                    <ScrollViewer x:Name="AnnouncementsDrawerContent" presentation:TextClarity.Enabled="True" Grid.Row="2" Visibility="Collapsed"
                                   VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                         <StackPanel Margin="0,0,8,10">
                             <Button x:Name="AnnouncementsBackButton" Content="{Binding Announcements.BackButton}" Click="AnnouncementsBack_Click"
@@ -1416,7 +1426,7 @@
                             <TextBlock Text="{Binding Announcements.OfflineNote}" Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 8.8}" TextWrapping="Wrap" Margin="2,7,2,0" />
                         </StackPanel>
                     </ScrollViewer>
-                    <ScrollViewer x:Name="PerformanceMonitorDrawerContent" Grid.Row="2" Visibility="Collapsed"
+                    <ScrollViewer x:Name="PerformanceMonitorDrawerContent" presentation:TextClarity.Enabled="True" Grid.Row="2" Visibility="Collapsed"
                                   DataContext="{Binding Monitor}" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                         <StackPanel Margin="0,0,8,10">
                             <TextBlock Text="{presentation:UiText '独立小窗 · 只读监控 · 不注入游戏'}" Foreground="{DynamicResource MutedBrush}"
@@ -1576,7 +1586,7 @@
                                        FontSize="{presentation:UiFont 8.8}" Margin="2,8,2,0" TextWrapping="Wrap" />
                         </StackPanel>
                     </ScrollViewer>
-                    <ScrollViewer x:Name="PerformanceDrawerContent" Grid.Row="2" Visibility="Collapsed"
+                    <ScrollViewer x:Name="PerformanceDrawerContent" presentation:TextClarity.Enabled="True" Grid.Row="2" Visibility="Collapsed"
                                   VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                         <StackPanel Margin="0,0,3,0">
                             <TextBlock Text="{presentation:UiText '调整后自动应用'}"
@@ -1913,7 +1923,7 @@
                                     Style="{StaticResource IconButtonStyle}" Click="ResetPerformanceDraft_Click" />
                         </StackPanel>
                     </ScrollViewer>
-                    <ScrollViewer x:Name="GpuOutputDrawerContent" Grid.Row="2" Visibility="Collapsed"
+                    <ScrollViewer x:Name="GpuOutputDrawerContent" presentation:TextClarity.Enabled="True" Grid.Row="2" Visibility="Collapsed"
                                   VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                         <StackPanel Margin="0,0,3,0">
                             <Border Padding="11,10" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource NeutralD7E0EBBrush}"
@@ -1970,7 +1980,7 @@
                                     Style="{StaticResource IconButtonStyle}" Click="ApplyGpuOutputMode_Click" />
                         </StackPanel>
                     </ScrollViewer>
-                    <ScrollViewer x:Name="LightingDrawerContent" Grid.Row="2" Visibility="Collapsed"
+                    <ScrollViewer x:Name="LightingDrawerContent" presentation:TextClarity.Enabled="True" Grid.Row="2" Visibility="Collapsed"
                                   VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                         <StackPanel x:Name="LightingControlsStack" Margin="7,6,7,12">
 
@@ -2198,7 +2208,7 @@
 
                         </StackPanel>
                     </ScrollViewer>
-                    <ScrollViewer x:Name="LiquidCoolingDrawerContent" Grid.Row="2" Visibility="Collapsed"
+                    <ScrollViewer x:Name="LiquidCoolingDrawerContent" presentation:TextClarity.Enabled="True" Grid.Row="2" Visibility="Collapsed"
                                   VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                         <StackPanel x:Name="LiquidCoolingContentStack" Margin="7,6,7,10">
                             <Border presentation:ThemeScope.AccentSurface="True" Padding="11,9" Background="#EEF8FF" BorderBrush="#83BDE8" BorderThickness="1" CornerRadius="10">
@@ -2441,7 +2451,7 @@
                             </Border>
                         </StackPanel>
                     </ScrollViewer>
-                    <ScrollViewer x:Name="KeyboardDrawerContent" Grid.Row="2" Visibility="Collapsed"
+                    <ScrollViewer x:Name="KeyboardDrawerContent" presentation:TextClarity.Enabled="True" Grid.Row="2" Visibility="Collapsed"
                                   VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                         <StackPanel x:Name="KeyboardControlsStack" Margin="7,3,7,12">
                             <Border presentation:ThemeScope.AccentSurface="True" Padding="11,9" Background="#F2EFFF" BorderBrush="#B9A8FF" BorderThickness="1" CornerRadius="10" Margin="0,0,0,10">
@@ -2494,7 +2504,7 @@
                             </Border>
                         </StackPanel>
                     </ScrollViewer>
-                    <ScrollViewer x:Name="BatteryDrawerContent" Grid.Row="2" Visibility="Collapsed"
+                    <ScrollViewer x:Name="BatteryDrawerContent" presentation:TextClarity.Enabled="True" Grid.Row="2" Visibility="Collapsed"
                                   VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                         <StackPanel x:Name="PowerControlsStack" Margin="7,3,7,12">
                             <Border presentation:ThemeScope.AccentSurface="True" Padding="11,9" Background="#FFF6DD" BorderBrush="#F0C45B" BorderThickness="1" CornerRadius="10" Margin="0,0,0,10">
@@ -2627,7 +2637,7 @@
                             </Border>
                         </StackPanel>
                     </ScrollViewer>
-                    <ScrollViewer x:Name="DisplayColorDrawerContent" Grid.Row="2" Visibility="Collapsed"
+                    <ScrollViewer x:Name="DisplayColorDrawerContent" presentation:TextClarity.Enabled="True" Grid.Row="2" Visibility="Collapsed"
                                   VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                         <StackPanel Margin="7,4,7,10">
                             <UniformGrid x:Name="DisplaySettingsTabs" Columns="{Binding DisplaySettingsTabCount}">
@@ -2804,7 +2814,7 @@
                             </StackPanel>
                         </StackPanel>
                     </ScrollViewer>
-                    <ScrollViewer x:Name="FanDrawerContent" Grid.Row="2"
+                    <ScrollViewer x:Name="FanDrawerContent" presentation:TextClarity.Enabled="True" Grid.Row="2"
                                   VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                         <StackPanel Margin="0,0,3,0">
                             <TextBlock x:Name="FanCurveModeHeading" Text="{presentation:UiText Value={Binding FanCurveModeHeading}}"
@@ -2826,7 +2836,7 @@
                                 </StackPanel>
                             </Border>
 
-                            <Border x:Name="FanResponseControls" Margin="2,9,2,0" Padding="9,7"
+                            <Border x:Name="FanResponseControls" Margin="2,9,2,0" Padding="9,7" presentation:TextClarity.Enabled="False"
                                     Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource NeutralD7E0EBBrush}" BorderThickness="1" CornerRadius="9"
                                     Opacity="{Binding FanCurveSurfaceOpacity}"
                                     IsEnabled="{Binding CanEditFanSettings}">
@@ -2908,7 +2918,7 @@
                                     </Style>
                                 </TextBlock.Style>
                             </TextBlock>
-                            <Border presentation:ThemeScope.AccentSurface="True" x:Name="FanCurveChartSurface" Height="176" Background="{Binding FanAccentSurfaceColor}"
+                            <Border presentation:ThemeScope.AccentSurface="True" presentation:TextClarity.Enabled="False" x:Name="FanCurveChartSurface" Height="176" Background="{Binding FanAccentSurfaceColor}"
                                     Opacity="{Binding FanCurveSurfaceOpacity}" CornerRadius="10"
                                     IsEnabled="{Binding CanEditFanSettings}"
                                     PreviewMouseLeftButtonUp="FanCurveEditor_Commit">
@@ -2917,7 +2927,7 @@
                                                         AccentBrush="{Binding FanAccentColor}" />
                             </Border>
 
-                            <ItemsControl x:Name="FanPointEditors" ItemsSource="{Binding FanPoints}"
+                            <ItemsControl x:Name="FanPointEditors" ItemsSource="{Binding FanPoints}" presentation:TextClarity.Enabled="False"
                                           Opacity="{Binding FanCurveSurfaceOpacity}"
                                           IsEnabled="{Binding CanEditFanSettings}">
                                 <ItemsControl.ItemsPanel>
@@ -2957,7 +2967,7 @@
                                     Style="{StaticResource IconButtonStyle}" Click="RestoreOemFanCurve_Click" />
                         </StackPanel>
                     </ScrollViewer>
-                    <ScrollViewer x:Name="OtherDrawerContent" Grid.Row="2" Visibility="Collapsed"
+                    <ScrollViewer x:Name="OtherDrawerContent" presentation:TextClarity.Enabled="True" Grid.Row="2" Visibility="Collapsed"
                                   VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,8">
                         <StackPanel Margin="1,0,1,5">
                             <TextBlock Text="{presentation:UiText '系统工具'}" Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 9.3}" FontWeight="SemiBold" Margin="2,1,0,7" />
@@ -3026,7 +3036,7 @@
                             </Border>
                         </StackPanel>
                     </ScrollViewer>
-                    <ScrollViewer x:Name="MoreProfilesDrawerContent" Grid.Row="2" Visibility="Collapsed"
+                    <ScrollViewer x:Name="MoreProfilesDrawerContent" presentation:TextClarity.Enabled="True" Grid.Row="2" Visibility="Collapsed"
                                   VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,8">
                         <StackPanel Margin="1,0,1,5">
                             <Border presentation:ThemeScope.AccentSurface="True" Background="#F1F7FF" BorderBrush="#90BFF2" BorderThickness="1" CornerRadius="12" Padding="13">
@@ -3070,49 +3080,70 @@
                             </Border>
                         </StackPanel>
                     </ScrollViewer>
-                    <ScrollViewer x:Name="SettingsDrawerContent" Grid.Row="2" Visibility="Collapsed"
+                    <ScrollViewer x:Name="SettingsDrawerContent" presentation:TextClarity.Enabled="True" Grid.Row="2" Visibility="Collapsed"
                                   VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                         <StackPanel Margin="0,0,8,0">
-                            <TextBlock Text="{Binding UiCopy.StartupSectionTitle}" Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 10}"
+                            <TextBlock Text="{presentation:UiText '常规'}" Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 10}"
                                        FontWeight="SemiBold" Margin="0,2,0,7" />
-                            <Border Padding="13,11" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource NeutralD7E0EBBrush}"
+                            <Border Padding="13,3" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource NeutralD7E0EBBrush}"
                                     BorderThickness="1" CornerRadius="12">
-                                <Grid>
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                    <StackPanel>
-                                        <TextBlock Text="{Binding UiCopy.StartWithWindowsTitle}" Foreground="{DynamicResource TextBrush}" FontSize="{presentation:UiFont 11.5}" FontWeight="SemiBold" />
-                                        <TextBlock Text="{Binding UiCopy.StartWithWindowsDescription}" Foreground="{DynamicResource MutedBrush}"
-                                                   ToolTip="{presentation:UiText '设置后会回读确认系统启动项。'}"
-                                                   FontSize="{presentation:UiFont 8.8}" Margin="0,3,8,0" TextWrapping="Wrap" />
-                                    </StackPanel>
-                                    <CheckBox Grid.Column="1" IsChecked="{Binding StartWithWindows, Mode=TwoWay}"
-                                              Style="{StaticResource SettingsToggleStyle}" VerticalAlignment="Center" />
-                                </Grid>
+                                <StackPanel>
+                                    <Grid Margin="0,9">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding UiCopy.StartWithWindowsTitle}" Foreground="{DynamicResource TextBrush}" FontSize="{presentation:UiFont 11.5}" FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding UiCopy.StartWithWindowsDescription}" Foreground="{DynamicResource MutedBrush}"
+                                                       ToolTip="{presentation:UiText '设置后会回读确认系统启动项。'}"
+                                                       FontSize="{presentation:UiFont 8.8}" Margin="0,3,8,0" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                        <CheckBox Grid.Column="1" IsChecked="{Binding StartWithWindows, Mode=TwoWay}"
+                                                  Style="{StaticResource SettingsToggleStyle}" VerticalAlignment="Center" />
+                                    </Grid>
+                                    <Border Height="1" Background="{DynamicResource NeutralE3E8F0Brush}" />
+                                    <Grid Margin="0,9">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding UiCopy.AutomaticUpdateCheckTitle}" Foreground="{DynamicResource TextBrush}" FontSize="{presentation:UiFont 11.5}" FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding UiCopy.AutomaticUpdateCheckDescription}" Foreground="{DynamicResource MutedBrush}"
+                                                       FontSize="{presentation:UiFont 8.8}" Margin="0,3,8,0" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                        <CheckBox x:Name="AutomaticUpdateCheckToggle" Grid.Column="1" IsChecked="{Binding CheckForUpdatesAutomatically, Mode=TwoWay}"
+                                                  Style="{StaticResource SettingsToggleStyle}" VerticalAlignment="Center" />
+                                    </Grid>
+                                </StackPanel>
                             </Border>
 
-                            <TextBlock Text="{Binding UiCopy.UpdateSectionTitle}" Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 10}"
-                                       FontWeight="SemiBold" Margin="0,16,0,7" />
-                            <Border Padding="13,11" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource NeutralD7E0EBBrush}"
-                                    BorderThickness="1" CornerRadius="12">
-                                <Grid>
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                    <StackPanel>
-                                        <TextBlock Text="{Binding UiCopy.AutomaticUpdateCheckTitle}" Foreground="{DynamicResource TextBrush}" FontSize="{presentation:UiFont 11.5}" FontWeight="SemiBold" />
-                                        <TextBlock Text="{Binding UiCopy.AutomaticUpdateCheckDescription}" Foreground="{DynamicResource MutedBrush}"
-                                                   FontSize="{presentation:UiFont 8.8}" Margin="0,3,8,0" TextWrapping="Wrap" />
-                                    </StackPanel>
-                                    <CheckBox x:Name="AutomaticUpdateCheckToggle" Grid.Column="1" IsChecked="{Binding CheckForUpdatesAutomatically, Mode=TwoWay}"
-                                              Style="{StaticResource SettingsToggleStyle}" VerticalAlignment="Center" />
-                                </Grid>
-                            </Border>
-
-                            <TextBlock Text="{Binding UiCopy.WindowSectionTitle}" Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 10}"
+                            <TextBlock Text="{presentation:UiText '界面与窗口'}" Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 10}"
                                        FontWeight="SemiBold" Margin="0,16,0,7" />
                             <Border Padding="13,3" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource NeutralD7E0EBBrush}"
                                     BorderThickness="1" CornerRadius="12">
                                 <StackPanel>
                                     <Grid Margin="0,9">
-                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="88" /></Grid.ColumnDefinitions>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="126" /></Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding UiCopy.LanguageTitle}" Foreground="{DynamicResource TextBrush}"
+                                                   FontSize="{presentation:UiFont 11.5}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                        <ComboBox x:Name="UiLanguageSelector" Grid.Column="1" Height="30"
+                                                  Style="{StaticResource ModernComboBoxStyle}"
+                                                  ItemsSource="{Binding UiLanguageOptions}"
+                                                  DisplayMemberPath="Label" SelectedValuePath="Code"
+                                                  SelectedValue="{Binding SelectedUiLanguageCode, Mode=TwoWay}" />
+                                    </Grid>
+                                    <Border Height="1" Background="{DynamicResource NeutralE3E8F0Brush}" />
+                                    <Grid Margin="0,9">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="126" /></Grid.ColumnDefinitions>
+                                        <TextBlock Text="{presentation:UiText '外观'}" Foreground="{DynamicResource TextBrush}"
+                                                   FontSize="{presentation:UiFont 11.5}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                        <ComboBox x:Name="UiThemeSelector" Grid.Column="1" Height="30"
+                                                  Style="{StaticResource ModernComboBoxStyle}" ItemsSource="{Binding UiThemeOptions}"
+                                                  SelectedValuePath="Code" SelectedValue="{Binding SelectedUiThemeCode, Mode=TwoWay}">
+                                            <ComboBox.ItemTemplate><DataTemplate>
+                                                <TextBlock Text="{presentation:UiText Value={Binding Label}}" />
+                                            </DataTemplate></ComboBox.ItemTemplate>
+                                        </ComboBox>
+                                    </Grid>
+                                    <Border Height="1" Background="{DynamicResource NeutralE3E8F0Brush}" />
+                                    <Grid Margin="0,9">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="126" /></Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,8,0">
                                             <TextBlock Text="{Binding UiCopy.WindowScaleTitle}" Foreground="{DynamicResource TextBrush}" FontSize="{presentation:UiFont 11.5}" FontWeight="SemiBold" />
                                             <TextBlock x:Name="WindowScaleHint" Text="{Binding UiCopy.WindowScaleDescription}"
@@ -3148,11 +3179,77 @@
                                 </StackPanel>
                             </Border>
 
-                            <TextBlock Text="{presentation:UiText '可能冲突服务检测'}" Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 10}"
+                            <TextBlock Text="{presentation:UiText '故障排查'}" Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 10}"
                                        FontWeight="SemiBold" Margin="0,16,0,7" />
-                            <Border Padding="13,11" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource NeutralD7E0EBBrush}"
+                            <Border x:Name="CapabilityDetectionSection" Padding="13,11" Background="{DynamicResource SurfaceBrush}"
+                                    BorderBrush="{DynamicResource NeutralD7E0EBBrush}" BorderThickness="1" CornerRadius="12">
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                    <StackPanel VerticalAlignment="Center" Margin="0,0,8,0">
+                                        <TextBlock Text="{presentation:UiText '设备与功能状态'}" Foreground="{DynamicResource TextBrush}"
+                                                   FontSize="{presentation:UiFont 11.5}" FontWeight="SemiBold" />
+                                        <TextBlock Text="{presentation:UiText Value={Binding PlatformModeAvailabilityReason}}"
+                                                   ToolTip="{presentation:UiText Value={Binding PlatformModeAvailabilityReason}}"
+                                                   Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 8.8}"
+                                                   Margin="0,3,0,0" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <Button x:Name="CapabilityRecheckButton" Grid.Column="1"
+                                            Content="{presentation:UiText Value={Binding CapabilityRecheckLabel}}"
+                                            IsEnabled="{Binding CanRecheckCapabilities}" Click="CapabilityRecheck_Click"
+                                            Height="30" Padding="14,5" MinWidth="82" VerticalAlignment="Center"
+                                            Background="#EAF4FF" BorderBrush="#B9D5F2" Foreground="#2676B8"
+                                            FontWeight="SemiBold" Style="{StaticResource IconButtonStyle}" FontSize="{presentation:UiFont 8.8}"
+                                            ToolTip="{presentation:UiText Value={Binding PlatformModeAvailabilityReason}}"
+                                            ToolTipService.ShowOnDisabled="True" />
+                                </Grid>
+                            </Border>
+
+                            <!-- 只读：生成给开发者看的文字。生成后只显示在框里，复制或保存要用户再点一次，不会悄悄覆盖剪贴板。 -->
+                            <Border x:Name="DiagnosticReportSection" Padding="13,11" Margin="0,8,0,0" Background="{DynamicResource SurfaceBrush}"
+                                    BorderBrush="{DynamicResource NeutralD7E0EBBrush}" BorderThickness="1" CornerRadius="12">
+                                <StackPanel>
+                                    <TextBlock Text="{presentation:UiText '诊断报告'}" Foreground="{DynamicResource TextBrush}"
+                                               FontSize="{presentation:UiFont 11.5}" FontWeight="SemiBold" />
+                                    <TextBlock Text="{presentation:UiText '用于反馈问题。仅包含软硬件型号、读数和运行记录，不含用户名、电脑名、序列号和网络地址；生成后先在下方预览，不会自动复制。'}"
+                                               Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 8.8}" Margin="0,3,0,0" TextWrapping="Wrap" />
+                                    <Grid Margin="0,9,0,0">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                        <Button x:Name="BriefDiagnosticReportButton" Content="{presentation:UiText '生成简短报告'}" Height="29" Margin="0,0,3,0"
+                                                FontSize="{presentation:UiFont 8.6}" IsEnabled="{Binding CanGenerateDiagnosticReport}" Click="BriefDiagnosticReport_Click"
+                                                ToolTip="{presentation:UiText '500 字以内，可以直接发 B 站私信或评论。'}" ToolTipService.ShowOnDisabled="True"
+                                                Style="{StaticResource IconButtonStyle}" />
+                                        <Button x:Name="FullDiagnosticReportButton" Grid.Column="1" Content="{presentation:UiText '生成完整报告'}" Height="29" Margin="3,0,0,0"
+                                                FontSize="{presentation:UiFont 8.6}" IsEnabled="{Binding CanGenerateDiagnosticReport}" Click="FullDiagnosticReport_Click"
+                                                ToolTip="{presentation:UiText '另含显卡功耗读数和近 24 小时的运行日志，约需 10 秒，适合保存为文件。'}" ToolTipService.ShowOnDisabled="True"
+                                                Style="{StaticResource IconButtonStyle}" />
+                                    </Grid>
+                                    <TextBlock Text="{presentation:UiText Value={Binding DiagnosticReportStatusText}}" Foreground="{DynamicResource MutedBrush}"
+                                               FontSize="{presentation:UiFont 8.2}" Margin="1,7,1,0" TextWrapping="Wrap"
+                                               Visibility="{Binding HasDiagnosticReportStatus, Converter={StaticResource ModeVisibilityConverter}}" />
+                                    <TextBlock Text="{presentation:UiText Value={Binding DiagnosticReportSummary}}" Foreground="{DynamicResource TextBrush}"
+                                               FontSize="{presentation:UiFont 9}" FontWeight="SemiBold" Margin="1,6,1,0"
+                                               Visibility="{Binding HasDiagnosticReport, Converter={StaticResource ModeVisibilityConverter}}" />
+                                    <!-- 报告本身不翻译：它是给开发者看的原始读数。 -->
+                                    <TextBox x:Name="DiagnosticReportTextBox" Text="{Binding DiagnosticReportText, Mode=OneWay}" IsReadOnly="True"
+                                             Style="{StaticResource ModernTextBoxStyle}" FontFamily="Consolas, Microsoft YaHei UI" FontSize="{presentation:UiFont 9}"
+                                             TextWrapping="Wrap" Padding="7,6" Margin="0,6,0,0" MaxHeight="230" VerticalScrollBarVisibility="Auto"
+                                             Visibility="{Binding HasDiagnosticReport, Converter={StaticResource ModeVisibilityConverter}}"
+                                             AutomationProperties.Name="{presentation:UiText '诊断报告内容'}" />
+                                    <Grid Margin="0,8,0,0" Visibility="{Binding HasDiagnosticReport, Converter={StaticResource ModeVisibilityConverter}}">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                        <Button x:Name="CopyDiagnosticReportButton" Content="{presentation:UiText '复制'}" Height="29" Margin="0,0,3,0"
+                                                FontSize="{presentation:UiFont 8.6}" Click="CopyDiagnosticReport_Click" Style="{StaticResource IconButtonStyle}" />
+                                        <Button x:Name="SaveDiagnosticReportButton" Grid.Column="1" Content="{presentation:UiText '保存为文件…'}" Height="29" Margin="3,0,0,0"
+                                                FontSize="{presentation:UiFont 8.6}" Click="SaveDiagnosticReport_Click" Style="{StaticResource IconButtonStyle}" />
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Padding="13,11" Margin="0,8,0,0" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource NeutralD7E0EBBrush}"
                                     BorderThickness="1" CornerRadius="12">
                                 <StackPanel x:Name="ConflictServicesPanel">
+                                    <TextBlock Text="{presentation:UiText '可能冲突的服务'}" Foreground="{DynamicResource TextBrush}"
+                                               FontSize="{presentation:UiFont 11.5}" FontWeight="SemiBold" Margin="0,0,0,8" />
                                     <Border presentation:ThemeScope.AccentSurface="True" x:Name="OfficialConsoleConflictCard" Padding="10,8" Margin="0,0,0,10"
                                             Background="#F6F3FF" BorderBrush="#C9BAFF" BorderThickness="1" CornerRadius="10">
                                         <Grid>
@@ -3230,65 +3327,6 @@
                                                Margin="0,6,0,0" TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
-
-                            <TextBlock Text="{presentation:UiText '设备与功能检测'}" Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 10}"
-                                       FontWeight="SemiBold" Margin="0,16,0,7" />
-                            <Border x:Name="CapabilityDetectionSection" Padding="13,11" Background="{DynamicResource SurfaceBrush}"
-                                    BorderBrush="{DynamicResource NeutralD7E0EBBrush}" BorderThickness="1" CornerRadius="12">
-                                <Grid>
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                    <StackPanel VerticalAlignment="Center" Margin="0,0,8,0">
-                                        <TextBlock Text="{presentation:UiText '设备与功能状态'}" Foreground="{DynamicResource TextBrush}"
-                                                   FontSize="{presentation:UiFont 11.5}" FontWeight="SemiBold" />
-                                        <TextBlock Text="{presentation:UiText Value={Binding PlatformModeAvailabilityReason}}"
-                                                   ToolTip="{presentation:UiText Value={Binding PlatformModeAvailabilityReason}}"
-                                                   Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 8.8}"
-                                                   Margin="0,3,0,0" TextWrapping="Wrap" />
-                                    </StackPanel>
-                                    <Button x:Name="CapabilityRecheckButton" Grid.Column="1"
-                                            Content="{presentation:UiText Value={Binding CapabilityRecheckLabel}}"
-                                            IsEnabled="{Binding CanRecheckCapabilities}" Click="CapabilityRecheck_Click"
-                                            Height="30" Padding="14,5" MinWidth="82" VerticalAlignment="Center"
-                                            Background="#EAF4FF" BorderBrush="#B9D5F2" Foreground="#2676B8"
-                                            FontWeight="SemiBold" Style="{StaticResource IconButtonStyle}" FontSize="{presentation:UiFont 8.8}"
-                                            ToolTip="{presentation:UiText Value={Binding PlatformModeAvailabilityReason}}"
-                                            ToolTipService.ShowOnDisabled="True" />
-                                </Grid>
-                            </Border>
-
-                            <TextBlock Text="{Binding UiCopy.InterfaceSectionTitle}" Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 10}"
-                                       FontWeight="SemiBold" Margin="0,16,0,7" />
-                            <Border Padding="13,11" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource NeutralD7E0EBBrush}"
-                                    BorderThickness="1" CornerRadius="12">
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="126" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="{Binding UiCopy.LanguageTitle}" Foreground="{DynamicResource TextBrush}"
-                                               FontSize="{presentation:UiFont 11.5}" FontWeight="SemiBold" VerticalAlignment="Center" />
-                                    <ComboBox x:Name="UiLanguageSelector" Grid.Column="1" Height="30"
-                                              Style="{StaticResource ModernComboBoxStyle}"
-                                              ItemsSource="{Binding UiLanguageOptions}"
-                                              DisplayMemberPath="Label" SelectedValuePath="Code"
-                                              SelectedValue="{Binding SelectedUiLanguageCode, Mode=TwoWay}" />
-                                </Grid>
-                            </Border>
-                            <Border Padding="13,11" Margin="0,8,0,0" Background="{DynamicResource SurfaceBrush}"
-                                    BorderBrush="{DynamicResource NeutralD7E0EBBrush}" BorderThickness="1" CornerRadius="12">
-                                <Grid>
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="126" /></Grid.ColumnDefinitions>
-                                    <TextBlock Text="{presentation:UiText '外观'}" Foreground="{DynamicResource TextBrush}"
-                                               FontSize="{presentation:UiFont 11.5}" FontWeight="SemiBold" VerticalAlignment="Center" />
-                                    <ComboBox x:Name="UiThemeSelector" Grid.Column="1" Height="30"
-                                              Style="{StaticResource ModernComboBoxStyle}" ItemsSource="{Binding UiThemeOptions}"
-                                              SelectedValuePath="Code" SelectedValue="{Binding SelectedUiThemeCode, Mode=TwoWay}">
-                                        <ComboBox.ItemTemplate><DataTemplate>
-                                            <TextBlock Text="{presentation:UiText Value={Binding Label}}" />
-                                        </DataTemplate></ComboBox.ItemTemplate>
-                                    </ComboBox>
-                                </Grid>
-                            </Border>
                             <Button x:Name="AnnouncementsEntryButton" Click="Announcements_Click" Margin="0,12,0,0"
                                     Style="{StaticResource IconButtonStyle}" Height="38" HorizontalContentAlignment="Stretch">
                                 <Grid Width="272">
@@ -3307,5 +3345,6 @@
             </Border>
         </Grid>
     </Border>
+    </Grid>
     </Viewbox>
 </Window>

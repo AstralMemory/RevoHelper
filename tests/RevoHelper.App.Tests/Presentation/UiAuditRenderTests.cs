@@ -7,6 +7,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using RevoHelper.App.Diagnostics;
 using RevoHelper.App.Presentation;
 using RevoHelper.App.Settings;
 using RevoHelper.App.SystemControl;
@@ -51,6 +52,7 @@ public sealed class UiAuditRenderTests
             ("display-refresh", "DisplayColorDrawerContent", vm => { Wait(vm.OpenDisplayAsync(default)); vm.SelectDisplaySettingsPage(DisplaySettingsPage.RefreshRate); }),
             ("other", "OtherDrawerContent", vm => Wait(vm.OpenOtherAsync(default))),
             ("settings", "SettingsDrawerContent", vm => vm.OpenSettings()),
+            ("settings-report", "SettingsDrawerContent", vm => { vm.OpenSettings(); Wait(vm.GenerateDiagnosticReportAsync(DiagnosticReportDetail.Brief, default)); }),
             ("more-profiles", "MoreProfilesDrawerContent", vm => vm.OpenMoreProfiles()),
             ("monitor", "PerformanceMonitorDrawerContent", vm => vm.OpenPerformanceMonitor()),
             ("about", "AnnouncementsDrawerContent", vm => vm.OpenAnnouncements()),
@@ -63,7 +65,8 @@ public sealed class UiAuditRenderTests
                 new ApplicationSettings { UiLanguageCode = language, UiThemeCode = theme },
                 new Settings(), new Startup(),
                 quickControlsController: new GcuQuickControlsController(new FakeChannel(), (_, _) => Task.CompletedTask),
-                verificationDelay: (_, _) => Task.CompletedTask);
+                verificationDelay: (_, _) => Task.CompletedTask,
+                diagnosticReport: new SampleReportSource());
             var window = new MainWindow(vm) { AllowApplicationClose = true };
             try
             {
@@ -211,6 +214,16 @@ public sealed class UiAuditRenderTests
     {
         public ApplicationSettings Load() => new();
         public void Save(ApplicationSettings settings) { }
+    }
+
+    // Made-up readings so the report box and its buttons show in the settings render.
+    private sealed class SampleReportSource : IDiagnosticReportSource
+    {
+        public Task<DiagnosticSystemFacts> ReadAsync(DiagnosticReportDetail detail, CancellationToken cancellationToken) =>
+            Task.FromResult(new DiagnosticSystemFacts(
+                new("MECHREVO", "YAOSHI16 Ultra", "YAOSHI", "MRO24", "N.1.08MRO24", "1.8", "Intel(R) Core(TM) Ultra 9 275HX", "10.0.26300.0"),
+                "平衡", true, [new("NVIDIA GeForce RTX 5090 Laptop GPU", "621.14", "150", "95", "175")], null,
+                ["2026-11-19T10:00:00+08:00 gcu-connection: 连接失败"], DiagnosticLogState.Read, [], null));
     }
 
     private sealed class Startup : IStartupRegistration

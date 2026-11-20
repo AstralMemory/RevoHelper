@@ -489,6 +489,27 @@ public sealed class MainWindowViewModelTests
         Assert.DoesNotContain("请关闭官方前台", viewModel.OfficialConsoleInstructionText, StringComparison.Ordinal);
     }
 
+    // A user opened the official console after RevoHelper had started; settings kept saying
+    // it was not running because the status was only read once at startup.
+    [Fact]
+    public async Task OpeningSettings_ChecksTheOfficialConsoleAgain()
+    {
+        var running = false;
+        var viewModel = CreateViewModel(officialConsoleRunningProbe: () => running);
+        await viewModel.RefreshConflictServicesAsync(CancellationToken.None);
+        Assert.False(viewModel.IsOfficialConsoleRunning);
+
+        running = true;
+        viewModel.OpenSettings();
+        Assert.True(viewModel.IsOfficialConsoleRunning);
+        Assert.Equal("正在运行", viewModel.OfficialConsoleStatusText);
+
+        running = false;
+        viewModel.CloseDrawer();
+        viewModel.OpenSettings();
+        Assert.False(viewModel.IsOfficialConsoleRunning);
+    }
+
     [Fact]
     public void UpdateConflictServices_ReplacesPreviousDetectionSnapshot()
     {
@@ -767,9 +788,9 @@ public sealed class MainWindowViewModelTests
     {
         var viewModel = new MainWindowViewModel(CreateDashboard());
 
-        Assert.Equal("V1.0.6", viewModel.ReleaseVersionText);
-        Assert.Equal("V1.0.6", viewModel.ReleaseBadgeText);
-        Assert.Equal("RevoHelper V1.0.6 · 免费使用", viewModel.AppVersionText);
+        Assert.Equal("V1.0.7", viewModel.ReleaseVersionText);
+        Assert.Equal("V1.0.7", viewModel.ReleaseBadgeText);
+        Assert.Equal("RevoHelper V1.0.7 · 免费使用", viewModel.AppVersionText);
     }
 
     [Fact]
@@ -786,7 +807,8 @@ public sealed class MainWindowViewModelTests
         Assert.Equal("en-US", store.LastSaved?.UiLanguageCode);
         Assert.Equal("Laptop performance profiles", viewModel.UiCopy.HomeTitle);
         Assert.Equal("Performance", viewModel.DrawerTitle);
-        Assert.Equal("RevoHelper V1.0.6 · Free to use", viewModel.AppVersionText);
+        Assert.Equal("Tuning", viewModel.UiCopy.PerformanceEntryTitle);   // the home button is too narrow for "Performance"
+        Assert.Equal("RevoHelper V1.0.7 · Free to use", viewModel.AppVersionText);
     }
 
     [Fact]

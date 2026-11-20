@@ -9,6 +9,9 @@ public static class RuntimeDiagnosticLog
     private static string? previous;
     private static DateTimeOffset previousAt;
 
+    public static string DirectoryPath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RevoHelper", "diagnostics");
+
     public static void Write(string area, string message)
     {
         try
@@ -21,8 +24,7 @@ public static class RuntimeDiagnosticLog
                 if (text == previous && now - previousAt < TimeSpan.FromSeconds(30)) return;
                 previous = text;
                 previousAt = now;
-                var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "RevoHelper", "diagnostics");
+                var directory = DirectoryPath;
                 Directory.CreateDirectory(directory);
                 var path = Path.Combine(directory, "runtime.log");
                 if (File.Exists(path) && new FileInfo(path).Length > 256 * 1024)

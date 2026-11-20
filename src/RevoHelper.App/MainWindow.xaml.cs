@@ -8,6 +8,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Microsoft.Win32;
+using RevoHelper.App.Diagnostics;
 using RevoHelper.App.Presentation;
 using RevoHelper.App.Settings;
 using RevoHelper.Core.Control;
@@ -479,6 +480,69 @@ public partial class MainWindow : Window
         if (sender is not CheckBox checkBox) return;
         await ViewModel.SetFanBoostAsync(checkBox.IsChecked == true, CancellationToken.None);
         checkBox.GetBindingExpression(CheckBox.IsCheckedProperty)?.UpdateTarget();
+    }
+
+    // Making a report only shows it. The clipboard holds whatever the user copied last until they
+    // press Copy themselves.
+    private async void BriefDiagnosticReport_Click(object sender, RoutedEventArgs e) =>
+        await ViewModel.GenerateDiagnosticReportAsync(DiagnosticReportDetail.Brief, CancellationToken.None);
+
+    private async void FullDiagnosticReport_Click(object sender, RoutedEventArgs e) =>
+        await ViewModel.GenerateDiagnosticReportAsync(DiagnosticReportDetail.Full, CancellationToken.None);
+
+    private void CopyDiagnosticReport_Click(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.HasDiagnosticReport)
+            ViewModel.ReportDiagnosticReportCopied(TryCopyToClipboard(ViewModel.DiagnosticReportText));
+    }
+
+    private void SaveDiagnosticReport_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ViewModel.HasDiagnosticReport) return;
+        // The report on screen now is the one saved, even if a newer one finishes while the dialog is open.
+        var shown = ViewModel.DiagnosticReportText;
+        var name = ViewModel.DiagnosticReportFileName;
+        var english = ViewModel.SelectedUiLanguageCode == "en-US";
+        var dialog = new SaveFileDialog
+        {
+            Title = english ? "Save RevoHelper diagnostic report" : "保存 RevoHelper 诊断报告",
+            Filter = english ? "Text file (*.txt)|*.txt" : "文本文件 (*.txt)|*.txt",
+            DefaultExt = ".txt",
+            AddExtension = true,
+            OverwritePrompt = true,
+            FileName = name
+        };
+        if (dialog.ShowDialog(this) == true) ViewModel.SaveDiagnosticReport(dialog.FileName, shown);
+    }
+
+    // Another program can hold the clipboard for a moment; a few short retries cover that.
+    private static bool TryCopyToClipboard(string text)
+    {
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            try
+            {
+                System.Windows.Clipboard.SetText(text);
+                return true;
+            }
+            catch (ExternalException)
+            {
+                Thread.Sleep(60);
+            }
+        }
+        return false;
+    }
+
+    // A text box swallows the mouse wheel even when it has nothing to scroll; the drawer scrolls instead.
+    private void ForwardMouseWheel_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (e.Handled || sender is not DependencyObject element || VisualTreeHelper.GetParent(element) is not UIElement parent) return;
+        e.Handled = true;
+        parent.RaiseEvent(new MouseWheelEventArgs(e.MouseDevice, e.Timestamp, e.Delta)
+        {
+            RoutedEvent = UIElement.MouseWheelEvent,
+            Source = sender
+        });
     }
 
     private void ShutdownCountdownTimer_Tick(object? sender, EventArgs e) =>

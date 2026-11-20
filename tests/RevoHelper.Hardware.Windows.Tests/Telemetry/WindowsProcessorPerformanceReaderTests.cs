@@ -6,18 +6,25 @@ namespace RevoHelper.Hardware.Windows.Tests.Telemetry;
 public sealed class WindowsProcessorPerformanceReaderTests
 {
     [Fact]
-    public void Read_SelectsTotalProcessorUtilityAndFrequency()
+    public void Read_SelectsTotalRowAndReportsTheLiveAverageClock()
     {
         var query = new StubQuery(
         [
-            Row(("Name", "0,0"), ("PercentProcessorUtility", "50"), ("ProcessorFrequency", "4200")),
-            Row(("Name", "_Total"), ("PercentProcessorUtility", "18"), ("ProcessorFrequency", "2150"))
+            Row(("Name", "0,0"), ("PercentProcessorUtility", "50"), ("ProcessorFrequency", "4200"), ("PercentProcessorPerformance", "120")),
+            Row(("Name", "_Total"), ("PercentProcessorUtility", "18"), ("ProcessorFrequency", "2150"), ("PercentProcessorPerformance", "180"))
         ]);
 
         var reading = new WindowsProcessorPerformanceReader(query).Read();
 
         Assert.Equal(18, reading.UsagePercent);
-        Assert.Equal(2150, reading.FrequencyMhz);
+        Assert.Equal(3870, reading.FrequencyMhz);       // 2150 base x 180 %
+    }
+
+    [Fact]
+    public void Read_NeverReportsTheBaseClockAloneAsALiveClock()
+    {
+        var query = new StubQuery([Row(("Name", "_Total"), ("PercentProcessorUtility", "18"), ("ProcessorFrequency", "2150"))]);
+        Assert.Null(new WindowsProcessorPerformanceReader(query).Read().FrequencyMhz);
     }
 
     [Fact]

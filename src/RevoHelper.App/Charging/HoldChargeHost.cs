@@ -46,6 +46,7 @@ public static class HoldChargeHost
                     old.Delete();
             }
             catch (Exception cleanup) when (cleanup is IOException or UnauthorizedAccessException) { }
+            RemoveStaleTemporaryFiles(ChargeSessionFiles.Root);
             HoldChargeObservation? previous = null;
             var sinceLogged = 0;
             var engine = new HoldChargeEngine(() => new ReviewedChargeTransport());
@@ -57,9 +58,11 @@ public static class HoldChargeHost
                 {
                     // Keep the log small: write changes, and a heartbeat every half minute.
                     var changed = previous is null || observation with { At = previous.At } != previous;
+                    // Writing the log and the status is best effort: an exception thrown here would be
+                    // taken for an EC failure, and five in a row would stop the charge limit.
                     if (changed || ++sinceLogged >= 15)
                     {
-                        File.AppendAllText(log, JsonSerializer.Serialize(observation) + "\n");
+                        TryAppend(log, JsonSerializer.Serialize(observation));
                         sinceLogged = 0;
                     }
                     previous = observation;
@@ -67,7 +70,13 @@ public static class HoldChargeHost
                     var message = !observation.Holding ? "限充运行中：低于上限，正在充电。"
                         : !observation.Charging && observation.ChargeRateMw == 0 ? "限充运行中：已达上限，当前未充电。"
                         : "限充运行中：已请求停充，等待固件响应。";
-                    Save(new("Active", message, selectedLimit, DateTimeOffset.Now, observation));
+                    try { Save(new("Active", message, selectedLimit, DateTimeOffset.Now, observation)); }
+                    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                    {
+                        // The next round, a few seconds later, writes it again.
+                        TryAppend(log, JsonSerializer.Serialize(observation with
+                            { At = DateTimeOffset.Now, Note = "status-write: " + exception.Message }));
+                    }
                 }, keepForShutdown: () => shutdown.WaitOne(0));
             if (engine.HeldForShutdown)
             {
@@ -93,11 +102,48 @@ public static class HoldChargeHost
         catch (Exception exception) when (exception is IOException or JsonException or UnauthorizedAccessException) { return null; }
     }
 
-    private static void Save(HoldChargeStatus status)
+    private static void Save(HoldChargeStatus status) => ReplaceFile(StatusPath, JsonSerializer.Serialize(status));
+
+    /// <summary>
+    /// Replaces the file in one step. Windows refuses to replace a file that anyone has open, even
+    /// read-only for a moment (the window reads the status every second, and virus scanners look
+    /// at new files), so the replacement is retried briefly. The temporary file never stays behind.
+    /// </summary>
+    public static void ReplaceFile(string path, string contents)
     {
-        var temporary = StatusPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        File.WriteAllText(temporary, JsonSerializer.Serialize(status));
-        File.Move(temporary, StatusPath, true);
+        var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllText(temporary, contents);
+            for (var attempt = 1; ; attempt++)
+            {
+                try { File.Move(temporary, path, true); return; }
+                catch (Exception exception) when (attempt < 5 && exception is IOException or UnauthorizedAccessException)
+                { Thread.Sleep(20); }
+            }
+        }
+        finally
+        {
+            try { File.Delete(temporary); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
+        }
+    }
+
+    /// <summary>Temporary status files that version 1.0.6 left behind after a refused replacement.</summary>
+    public static void RemoveStaleTemporaryFiles(string folder)
+    {
+        try
+        {
+            foreach (var stale in new DirectoryInfo(folder).GetFiles("hold-status.json.*.tmp"))
+                stale.Delete();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
+    }
+
+    private static void TryAppend(string path, string line)
+    {
+        try { File.AppendAllText(path, line + "\n"); }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
     }
 
     private static IDisposable Acquire(string name)

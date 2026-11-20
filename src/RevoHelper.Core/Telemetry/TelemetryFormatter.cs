@@ -6,12 +6,15 @@ public static class TelemetryFormatter
 {
     private const string NotAvailable = "N/A";
 
+    /// <summary>A powered-down discrete GPU: nothing is wrong, it simply has no live temperature or clock.</summary>
+    public const string Asleep = "休眠";
+
     public static FormattedTelemetry Format(DeviceTelemetry telemetry) =>
         new(
             FormatValue(telemetry.UsagePercent, "%"),
-            FormatValue(telemetry.TemperatureC, "°C"),
+            telemetry.Asleep && telemetry.TemperatureC is null ? Asleep : FormatValue(telemetry.TemperatureC, "°C"),
             FormatValue(telemetry.PowerWatts, " W", includeSpace: false),
-            FormatFrequency(telemetry));
+            telemetry.Asleep && telemetry.FrequencyMhz is null ? Asleep : FormatFrequency(telemetry));
 
     private static string FormatFrequency(DeviceTelemetry telemetry)
     {

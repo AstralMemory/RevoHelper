@@ -137,6 +137,17 @@ public static class GcuCustomPerformanceStatusParser
         return limits.TgpMinimum <= limits.TgpMaximum && limits.DynamicBoostMinimum <= limits.DynamicBoostMaximum ? limits : null;
     }
 
+    /// <summary>OEM values exactly as reported, for the read-only GPU power report: no clamping and no defaults.</summary>
+    internal static IReadOnlyDictionary<string, string?> ReadReported(string payload, IReadOnlyList<string> names)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(payload);
+            return names.ToDictionary(name => name, name => Find(document.RootElement, name), StringComparer.Ordinal);
+        }
+        catch (JsonException) { return names.ToDictionary(name => name, _ => (string?)null, StringComparer.Ordinal); }
+    }
+
     private static int? ReadBit(JsonElement root, string name, string alternate) =>
         (FindBool(root, name) ?? FindBool(root, alternate)) is { } value ? (value ? 1 : 0) : null;
 

@@ -15,12 +15,16 @@ public static class MonitorLineFormatter
     public static IReadOnlyList<MonitorTextRun> Format(HardwareTelemetrySnapshot? snapshot, double? fps, double? fallbackCpuTemperature = null)
     {
         var cpu = snapshot?.Devices.FirstOrDefault(device => device.Kind == DeviceKind.Cpu);
+        // Any GPU is better than none: a GPU the sensors could not classify still has readings.
         var gpu = snapshot?.Devices.FirstOrDefault(device => device.Kind == DeviceKind.DiscreteGpu)
-            ?? snapshot?.Devices.FirstOrDefault(device => device.Kind == DeviceKind.IntegratedGpu);
+            ?? snapshot?.Devices.FirstOrDefault(device => device.Kind == DeviceKind.IntegratedGpu)
+            ?? snapshot?.Devices.FirstOrDefault(device => device.Kind != DeviceKind.Cpu);
+        // Sensors first, then the OEM service, then the firmware's thermal zone.
+        var cpuTemperature = cpu?.TemperatureC ?? fallbackCpuTemperature ?? cpu?.ZoneTemperatureC;
         var runs = new List<MonitorTextRun>
         {
             new("FPS " + Number(fps, ""), "#38FF98"), new("    CPU:  ", "#FFFFFF"),
-            new(Number(cpu?.TemperatureC ?? fallbackCpuTemperature, " °C") + "   " + Number(cpu?.UsagePercent, " %") + "   " + Number(cpu?.PowerWatts, " W"), "#57ACFF")
+            new(Number(cpuTemperature, " °C") + "   " + Number(cpu?.UsagePercent, " %") + "   " + Number(cpu?.PowerWatts, " W"), "#57ACFF")
         };
         if (cpu?.PerformanceCoreFrequencyMhz is > 0 || cpu?.EfficiencyCoreFrequencyMhz is > 0)
         {

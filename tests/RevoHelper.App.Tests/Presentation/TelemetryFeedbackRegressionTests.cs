@@ -59,9 +59,105 @@ public sealed class TelemetryFeedbackRegressionTests
         Assert.Equal("N/A", vm.Devices.Single(d => d.Kind == DeviceKind.Cpu).Temperature);
     }
 
+    // V1.0.7: sensors first, then the OEM service, then the firmware's thermal zone.
+    [Fact]
+    public void TheCpuTemperatureFallsBackToTheOemServiceAndThenTheThermalZone()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var vm = Create(() => now);
+        var cpu = vm.Devices.Single(d => d.Kind == DeviceKind.Cpu);
+        var withoutSensor = new DeviceTelemetry(DeviceKind.Cpu, cpu.Model, 30, null, 40, 3000, ZoneTemperatureC: 66.1);
+
+        vm.ApplyTelemetry(new(now, [withoutSensor]));
+        Assert.Equal("66°C", vm.Devices.Single(d => d.Kind == DeviceKind.Cpu).Temperature);
+
+        vm.ApplyOemCpuStatus(new(60, null, null));
+        vm.ApplyTelemetry(new(now, [withoutSensor]));
+        Assert.Equal("60°C", vm.Devices.Single(d => d.Kind == DeviceKind.Cpu).Temperature);
+
+        vm.ApplyTelemetry(new(now, [withoutSensor with { TemperatureC = 71 }]));
+        Assert.Equal("71°C", vm.Devices.Single(d => d.Kind == DeviceKind.Cpu).Temperature);
+    }
+
+    [Fact]
+    public void AGpuWhoseNameAndKindDifferFromWindowsStillFindsItsRowByVendor()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var vm = CreateFromAdapters(() => now);
+
+        vm.ApplyTelemetry(new(now, [new DeviceTelemetry(DeviceKind.UnknownGpu, "NVIDIA RTX (driver name)", 41, 52, 60, 1800,
+            Vendor: HardwareVendor.Nvidia)]));
+
+        var row = vm.Devices.Single(d => d.Kind == DeviceKind.DiscreteGpu);
+        Assert.Equal("41%", row.Usage);
+        Assert.Equal("52°C", row.Temperature);
+        Assert.Equal("N/A", vm.Devices.Single(d => d.Kind == DeviceKind.IntegratedGpu).Usage);
+    }
+
+    [Fact]
+    public void TheIntegratedGpuRowSharesTheCpuTemperatureEvenWhenTheSensorsGuessedOtherwise()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var vm = CreateFromAdapters(() => now);
+        var cpu = vm.Devices.Single(d => d.Kind == DeviceKind.Cpu);
+        var integrated = vm.Devices.Single(d => d.Kind == DeviceKind.IntegratedGpu);
+
+        vm.ApplyTelemetry(new(now,
+        [
+            new DeviceTelemetry(DeviceKind.Cpu, cpu.Model, 20, 64, 30, 4000),
+            // The library's name rule thought "Arc B390" was discrete; the PCI position says integrated.
+            new DeviceTelemetry(DeviceKind.DiscreteGpu, "Intel(R) Arc(TM) B390 GPU", 3, null, 0.4, 900, Vendor: HardwareVendor.Intel)
+        ]));
+
+        var row = vm.Devices.Single(d => d.Model == integrated.Model);
+        Assert.Equal("3%", row.Usage);
+        Assert.Equal("64°C", row.Temperature);
+    }
+
+    [Fact]
+    public void ASleepingDiscreteGpuSaysAsleepInsteadOfNA()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var vm = Create(() => now);
+        var gpu = vm.Devices.Single(d => d.Kind == DeviceKind.DiscreteGpu);
+
+        vm.ApplyTelemetry(new(now, [new DeviceTelemetry(DeviceKind.DiscreteGpu, gpu.Model, 0, null, 0, null, Asleep: true)]));
+
+        var row = vm.Devices.Single(d => d.Kind == DeviceKind.DiscreteGpu);
+        Assert.Equal("休眠", row.Temperature);
+        Assert.Equal("休眠", row.Frequency);
+        Assert.Equal("0%", row.Usage);
+    }
+
+    [Fact]
+    public void AGpuOnlyWindowsCouldReadStillFillsItsRow()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var vm = CreateFromAdapters(() => now);
+
+        // The sensor library listed no GPU; Windows' own data has usage, temperature, clock and memory, but no power.
+        vm.ApplyTelemetry(new(now, [new DeviceTelemetry(DeviceKind.DiscreteGpu, "NVIDIA GeForce RTX 5090 Laptop GPU", 31, 53.8, null, 1627,
+            DedicatedMemoryMegabytes: 24136, Vendor: HardwareVendor.Nvidia,
+            InstanceId: @"PCI\VEN_10DE&DEV_2C18&SUBSYS_60401D05&REV_A1\ECD6428B002DB04800")]));
+
+        var row = vm.Devices.Single(d => d.Kind == DeviceKind.DiscreteGpu);
+        Assert.Equal("31%", row.Usage);
+        Assert.Equal("54°C", row.Temperature);
+        Assert.Equal("1627 MHz", row.Frequency);
+        Assert.Equal("N/A", row.Power);
+        Assert.Equal("24 GB 显存", row.Details);
+    }
+
     private static MainWindowViewModel Create(Func<DateTimeOffset> now) => new(
         HomeDashboardFactory.Create(new MachineIdentity("MECHREVO", "Test", "", "Test CPU", ""),
             ["NVIDIA GeForce RTX 5090 Laptop GPU"]), new(), new MemorySettings(), new NoStartup(), utcNow: now);
+
+    private static MainWindowViewModel CreateFromAdapters(Func<DateTimeOffset> now) => new(
+        HomeDashboardFactory.CreateFromAdapters(new MachineIdentity("MECHREVO", "Test", "", "Test CPU", ""),
+        [
+            new DisplayAdapter("Intel(R) Arc(TM) B390 GPU", HardwareVendor.Intel, Integrated: true),
+            new DisplayAdapter("NVIDIA GeForce RTX 5090 Laptop GPU", HardwareVendor.Nvidia)
+        ]), new(), new MemorySettings(), new NoStartup(), utcNow: now);
 
     private sealed class MemorySettings : IApplicationSettingsStore
     {

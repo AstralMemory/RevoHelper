@@ -1,6 +1,7 @@
 using System.IO;
 using System.Reflection;
 using System.Windows;
+using RevoHelper.App.Diagnostics;
 using RevoHelper.App.Presentation;
 using RevoHelper.App.Settings;
 using RevoHelper.App.Lifecycle;
@@ -21,6 +22,7 @@ using RevoHelper.Hardware.Windows.OemControl;
 using RevoHelper.Hardware.Windows.PowerPolicy;
 using RevoHelper.Hardware.Windows.CpuPower;
 using RevoHelper.Hardware.Windows.Display;
+using RevoHelper.Hardware.Windows.GpuPower;
 using Microsoft.Win32;
 
 namespace RevoHelper.App;
@@ -279,7 +281,15 @@ public partial class App : Application
             fanBoostController: new GcuFanBoostController(gcuStatusSource),
             shutdownScheduler: new WindowsShutdownScheduler(),
             diagnostic: RuntimeDiagnosticLog.Write,
-            latestReleaseSource: new GitHubLatestReleaseSource());
+            latestReleaseSource: new GitHubLatestReleaseSource(),
+            diagnosticReport: new WindowsDiagnosticReportSource(
+                platformModeController.ReadPlatformModeAsync,
+                new GpuPowerDiagnosticCollector(
+                    typeof(App).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown",
+                    platformModeController.ReadPlatformModeAsync,
+                    gcuStatusSource.ReadCustomPerformanceStatusAsync),
+                RuntimeDiagnosticLog.DirectoryPath,
+                ChargeSessionFiles.Root));
         var window = new MainWindow(viewModel);
         mainViewModel = viewModel;
 
@@ -435,7 +445,7 @@ public partial class App : Application
             // must never turn an unknown manufacturer into a confirmed MECHREVO identity.
             identity = DiscoveryIdentityMerger.Merge(lastDiscoveredIdentity, identity);
             lastDiscoveredIdentity = identity;
-            var dashboard = HomeDashboardFactory.Create(identity, displayAdapters);
+            var dashboard = HomeDashboardFactory.CreateFromAdapters(identity, displayAdapters);
             var cpuBackends = new WindowsCpuBackendProbe().Probe(identity.Cpu);
             viewModel.UpdateDashboard(dashboard);
             var firstProfilesRead = !powerProfilesDiscovered && powerProfiles.Count > 0;
@@ -576,7 +586,7 @@ public partial class App : Application
             window.StateChanged += (_, _) => UpdateVisibility();
             UpdateVisibility();
         }
-        telemetrySource = new LibreHardwareTelemetrySource();
+        telemetrySource = new LibreHardwareTelemetrySource(diagnostic: RuntimeDiagnosticLog.Write);
         telemetryCancellation = new CancellationTokenSource();
         var pump = new TelemetryPump(telemetrySource, TimeSpan.FromSeconds(1));
         telemetryTask = pump.RunAsync(
@@ -876,11 +886,11 @@ public partial class App : Application
         }
     }
 
-    private static IReadOnlyList<string> ReadDisplayAdapters(IWmiQuery query)
+    private static IReadOnlyList<DisplayAdapter> ReadDisplayAdapters(IWmiQuery query)
     {
         try
         {
-            return new WindowsDisplayAdapterReader(query).ReadNames();
+            return new WindowsDisplayAdapterReader(query).ReadAdapters();
         }
         catch (Exception)
         {

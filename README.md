@@ -2,7 +2,7 @@
 
 轻量、免费且开源的机械革命笔记本第三方控制台。在官方控制台的功能基础上拓展更多功能，且性能开销更低、启动更快。
 
-**当前最新版本：V1.0.6 正式版**
+**当前最新版本：V1.0.7 正式版**
 
 ## 产品预览
 
@@ -25,6 +25,7 @@
 - **水冷控制智能重连**：已连接设备意外断开后，最多保留 10 分钟的同设备重连机会，尝试间隔至少 3 秒。主动断开、更换设备或注水／重置会取消对应重连。
 - **来电后自动连接水冷**：通电时，自动尝试连接已保存的水冷设备，不用再手动点连接；可在水冷页关闭自动连接。
 - **更低的性能开销**：本机观察中，启动时内存占用峰值约 200 MB，转入后台数小时后约为 90 MB；实际占用随运行状态而变化。
+- **诊断报告**：在“设置 → 故障排查”生成简短或完整的诊断报告，方便反馈问题。简短报告不超过 500 字，可以直接发 B 站私信或评论；报告不含用户名、电脑名、文件夹路径和网络地址，生成后先显示全文，复制或保存由你决定。
 - **其他工具**：支持定时关机、动态节能（动态省电模式）等功能。
 
 ## 使用前请留意
@@ -35,16 +36,16 @@
 - **限充方式与边界**：使用固件自带的保持功能，不改变平台状态，不影响风扇、功耗和按键。关机时如果已达上限，限充最多再保持 3 天，这期间电池不会充电，打开 RevoHelper 即恢复正常管理；RevoHelper 没有运行时不限充，意外结束后最多保持约 30 分钟。已在耀世开发机实测，不代表每台机器均有效。
 - **显卡输出切换**：需要重启电脑，重启前请先保存工作；RevoHelper 不会强制或突然重启电脑。
 - **参数调整**：功耗与频率受机型限制，超频可能导致不稳定。手动 CPU 频率限制在程序运行期间生效，正常退出时恢复。
-- **水冷启动组件**：BootWater 已内置；只有需要登录前连接水冷并主动点击“安装／修复”时，才会在系统目录部署辅助组件，用于开机后自动连接水冷设备。
+- **登录前连接水冷**：不安装也会在登录后自动连接水冷。需要开机登录前就连上时，在水冷页点击“安装／修复”，RevoHelper 会把自身复制到系统目录并创建开机任务；不再内嵌或释放其它程序。
 - **联网与检查更新**：从 V1.0.4 起，除了与本机官方服务的本地通信，RevoHelper 只在检查更新时访问互联网。程序启动约 2 分钟后，读取本仓库 GitHub Releases 上最新正式版的版本号；成功后每天最多检查一次，失败则约 3 小时后重试。请求不带账号信息，不发送设备、硬件或使用数据，也不会下载、安装或运行任何内容。
   - 发现新版本时，主页版本号旁会出现提示，点击打开“关于与公告”页，可选择 GitHub 下载或国内加速线路，是否更新由你决定。主页的刷新图标和“关于与公告”页可以随时手动检查。
   - “关于与公告”页的“加速线路 1”和“加速线路 2”分别打开第三方加速站 gh-proxy.com 和 gh-proxy.org 的版本列表，可自己选择版本和文件；不同网络下不一定都能打开，可逐个尝试。文件都转发自本仓库的 GitHub Releases，第三方页面上的广告与本项目无关。只有点击按钮时才会打开，检查更新不会经过这些服务。下载后可对照 Release 中的 SHA256 核对。
   - 部分网络无法连接 GitHub，此时检查会失败，但不影响其它功能，也不会弹出提示。如果当前版本已使用 15 天，且这段时间一直没能连上 GitHub，主页会提示一次“可能有新版本”。
-  - 可在“设置 → 更新”关闭自动检查，关闭后程序不会自动联网。实现代码见 [`src/RevoHelper.App/Updates`](./src/RevoHelper.App/Updates)。
+  - 可在“设置 → 常规”关闭自动检查，关闭后程序不会自动联网。实现代码见 [`src/RevoHelper.App/Updates`](./src/RevoHelper.App/Updates)。
 
 ## 快速开始：下载与运行
 
-1. 前往 [最新正式版](https://github.com/AstralMemory/RevoHelper/releases/latest)，下载运行包 `RevoHelper.v1.0.6.zip`，不要将 `Source Code` 源码包当作运行包。无法打开 GitHub 时，可在第三方加速站查看版本并下载：`https://gh-proxy.com/https://github.com/AstralMemory/RevoHelper`。
+1. 前往 [最新正式版](https://github.com/AstralMemory/RevoHelper/releases/latest)，下载运行包 `RevoHelper.v1.0.7.zip`，不要将 `Source Code` 源码包当作运行包。无法打开 GitHub 时，可在第三方加速站查看版本并下载：`https://gh-proxy.com/https://github.com/AstralMemory/RevoHelper`。
 2. 解压后运行 `RevoHelper.exe`，建议以管理员身份运行。**RevoHelper是绿色免安装的。**
 3. 系统需要 **Windows 11 64 位**和 [.NET 10 Desktop Runtime（桌面运行时）](https://dotnet.microsoft.com/zh-cn/download/dotnet/10.0)。若提示缺少运行库，请选择 **Desktop Runtime**，而不是普通 Runtime。
 
@@ -56,7 +57,7 @@
 
 本项目采用 **Vibe Coding** 开发方式：仅代码主要由Agent（ChatGPT/Claude）辅助编写，开发者则完全负责产品逻辑、方案与改动审批、UI 设计、实际测试和迭代维护。
 
-程序承诺永久免费使用。V1.0.6 应用源码已在本仓库公开，自有代码采用 [MIT 许可证](./LICENSE)，第三方组件遵循各自许可证，详见 [第三方声明](./THIRD_PARTY_NOTICES.md)。
+程序承诺永久免费使用。V1.0.7 应用源码已在本仓库公开，自有代码采用 [MIT 许可证](./LICENSE)，第三方组件遵循各自许可证，详见 [第三方声明](./THIRD_PARTY_NOTICES.md)。
 
 开发者可直接浏览 [应用源码](./src)，构建、测试与目录说明见 [BUILDING.md](./BUILDING.md)。
 
@@ -74,6 +75,7 @@
 - RevoHelper 版本与 Windows 版本。
 - 使用的是哪个功能，预期结果与实际结果。
 - 能复现时的操作步骤，必要时附截图。
+- 也可以附上“设置 → 故障排查 → 诊断报告”生成的简短报告，里面已经包含 RevoHelper 版本、机型、BIOS、处理器和显卡等信息。
 
 正常使用的反馈同样有帮助；无需上传包含个人信息的完整系统报告。无论正面反馈或负面反馈都有价值。不过目前处于缺少负面反馈，开发者自己难以确定bug的存在。
 
@@ -83,7 +85,7 @@
 
 RevoHelper is a lightweight, free and open-source third-party control panel for MECHREVO laptops. It extends the functionality of the official control panel, with lower overhead and faster startup.
 
-**Latest version: V1.0.6 — Stable Release**
+**Latest version: V1.0.7 — Stable Release**
 
 ### Product preview
 
@@ -106,6 +108,7 @@ The following images preview the application interface (The UI text in the image
 - **Liquid-cooling control and reconnection:** A Smart Control switch and four manual strategies—Quieter, Quiet, Balanced and Maximum—are available. After an unexpected disconnect, reconnection to the same previously connected device is attempted for up to 10 minutes, at intervals of at least 3 seconds. Manual disconnection, changing devices, priming or resetting cancels the corresponding reconnection attempt.
 - **Automatic cooler connection when power returns:** When mains power is connected, RevoHelper tries to connect the saved liquid-cooling device automatically. This can be turned off on the liquid-cooling page.
 - **Lower overhead:** On the developer's system, memory usage peaks at nearly 200 MB during startup and drops to around 70 MB in the background. Actual usage varies with operating conditions.
+- **Diagnostic report:** Under Settings → Troubleshooting, generate a brief or full report for feedback. The brief report stays within 500 characters, so it fits in a Bilibili message or comment. Reports leave out user names, computer names, folder paths and network addresses; the full text is shown first, and copying or saving is up to you.
 - **Other tools:** Scheduled shutdown, dynamic power saving and other features.
 
 ### Before you use RevoHelper
@@ -116,16 +119,16 @@ The following images preview the application interface (The UI text in the image
 - **How the limit works and where it ends:** It uses the firmware's own hold feature, leaves the platform state alone and does not affect fans, power or keys. If the limit has been reached when Windows shuts down, it stays applied for up to 3 days; the battery does not charge during that time, and opening RevoHelper returns to normal management. It does not limit while RevoHelper is not running; after an unexpected end it holds for about 30 minutes at most. Tested on the developer's YAOSHI laptop, which does not establish effectiveness on every laptop.
 - **GPU output switching:** A restart is required. Save your work before restarting; RevoHelper will not force or unexpectedly trigger a restart.
 - **Parameter adjustments:** Power and frequency settings are subject to the laptop's limits. Overclocking can cause instability. Manual CPU frequency limits apply while the application is running and are restored on normal exit.
-- **Liquid-cooling startup helper:** BootWater is bundled. The helper is deployed to the system directory only when you need to connect the cooler before sign-in and explicitly click “Install / Repair.” It is used to connect the liquid-cooling device automatically after startup.
+- **Connecting the cooler before sign-in:** the cooler connects after sign-in without any setup. To connect it before sign-in, click “Install / Repair” on the cooler page: RevoHelper copies itself to the system directory and creates a startup task. No other program is embedded or unpacked.
 - **Internet access and update checks:** Starting with V1.0.4, apart from local communication with the official services on your laptop, RevoHelper goes online only to check for updates. About 2 minutes after launch, it reads the version number of the latest stable release from this repository's GitHub Releases. After a successful check it checks at most once a day; if a check fails, it retries about 3 hours later. The request carries no account information, sends no device, hardware or usage data, and never downloads, installs or runs anything.
   - When a new version is available, a notice appears next to the version number on the home screen. Clicking it opens the About page, where you can download from GitHub or through a mirror; whether to update is up to you. You can check manually at any time with the refresh icon on the home screen or on the About page.
   - On the About page, “Mirror 1” and “Mirror 2” open the release list on the third-party relays gh-proxy.com and gh-proxy.org, where you choose a version and file; they may not open on every network, so try each. The files come from this repository's GitHub Releases, and ads on those third-party pages are not ours. They open only when you click them; update checks never use them. You can compare the SHA256 listed in each Release.
   - Some networks cannot reach GitHub. The check then fails without affecting other features or showing a popup. If the current version has been in use for 15 days without ever reaching GitHub in that time, the home screen shows “Maybe a new version” once.
-  - You can turn off automatic checks under Settings → Updates; the app then does not go online on its own. See [`src/RevoHelper.App/Updates`](./src/RevoHelper.App/Updates) for the implementation.
+  - You can turn off automatic checks under Settings → General; the app then does not go online on its own. See [`src/RevoHelper.App/Updates`](./src/RevoHelper.App/Updates) for the implementation.
 
 ### Quick start: download and run
 
-1. Go to the [latest stable release](https://github.com/AstralMemory/RevoHelper/releases/latest) and download the application package, `RevoHelper.v1.0.6.zip`. Do not use the `Source Code` archive as the application package. If GitHub is unreachable, releases can also be viewed and downloaded through a third-party mirror: `https://gh-proxy.com/https://github.com/AstralMemory/RevoHelper`.
+1. Go to the [latest stable release](https://github.com/AstralMemory/RevoHelper/releases/latest) and download the application package, `RevoHelper.v1.0.7.zip`. Do not use the `Source Code` archive as the application package. If GitHub is unreachable, releases can also be viewed and downloaded through a third-party mirror: `https://gh-proxy.com/https://github.com/AstralMemory/RevoHelper`.
 2. Extract the archive and run `RevoHelper.exe`. Running as administrator is recommended. **RevoHelper is portable and requires no installation.**
 3. You need **64-bit Windows 11** and the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/en-us/download/dotnet/10.0). If prompted to install a missing runtime, choose **Desktop Runtime**, not the standard Runtime.
 
@@ -137,7 +140,7 @@ Developed and maintained by [Astral Memory](https://github.com/AstralMemory).
 
 The project uses a **Vibe Coding** development workflow: code is primarily written with assistance from agents (ChatGPT/Claude), while the developer takes full responsibility for product logic, proposals and change approval, UI design, hands-on testing and ongoing maintenance.
 
-The program is committed to remaining free permanently. The V1.0.6 application source code is available in this repository. The project's own code uses the [MIT License](./LICENSE); third-party components retain their respective licenses. See the [third-party notices](./THIRD_PARTY_NOTICES.md).
+The program is committed to remaining free permanently. The V1.0.7 application source code is available in this repository. The project's own code uses the [MIT License](./LICENSE); third-party components retain their respective licenses. See the [third-party notices](./THIRD_PARTY_NOTICES.md).
 
 Developers can browse the [application source](./src). See [BUILDING.md](./BUILDING.md) for build and test instructions and a guide to the directory structure.
 
@@ -155,5 +158,6 @@ When providing feedback, please include:
 - RevoHelper version and Windows version.
 - The feature used, expected behavior and actual result.
 - Steps to reproduce the issue, with screenshots if needed.
+- Optionally, the brief report from Settings → Troubleshooting → Diagnostic report, which already includes the RevoHelper version, laptop model, BIOS, CPU and GPU.
 
 Reports of normal operation are helpful too; there is no need to upload complete system reports containing personal information. Both positive and negative feedback are valuable. However, negative feedback is currently scarce, making it difficult for the developer alone to identify existing bugs.

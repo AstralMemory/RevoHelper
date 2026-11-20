@@ -8,6 +8,24 @@ namespace RevoHelper.App.Tests.Presentation;
 public sealed class HomeVisualMarkupTests
 {
     private static readonly XNamespace Xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+
+    // A user at 130 % window scale saw blurry text. An effect on the panel renders all of its text
+    // through a bitmap without ClearType, so the shadow lives on a separate layer behind it.
+    [Fact]
+    public void TheWindowShadowIsNotAppliedToThePanelThatHoldsTheText()
+    {
+        var document = LoadMainWindowXaml();
+        var root = FindNamedElement(document, "WindowLogicalRoot");
+        var shadow = FindNamedElement(document, "WindowShadow");
+        Assert.DoesNotContain(root.Elements(), element => element.Name.LocalName == "Border.Effect");
+        Assert.Equal("Enabled", (string?)root.Attribute("RenderOptions.ClearTypeHint"));
+        Assert.Contains(shadow.Elements(), element => element.Name.LocalName == "Border.Effect");
+        Assert.Same(root.Parent, shadow.Parent);
+        Assert.True(shadow.ElementsAfterSelf().Contains(root), "The shadow must sit behind the panel.");
+        Assert.Equal((string?)root.Attribute("CornerRadius"), (string?)shadow.Attribute("CornerRadius"));
+        Assert.Equal("False", (string?)shadow.Attribute("IsHitTestVisible"));
+    }
+
     [Fact]
     public void September28_GpuSuperPerformanceControlsAndSliderStepsMatchTheContract()
     {
@@ -1285,7 +1303,7 @@ public sealed class HomeVisualMarkupTests
         Assert.Equal("StopSelectedConflictServices_Click", (string?)stopButton.Attribute("Click"));
         Assert.Equal("{Binding CanRestoreSelectedConflictServices}", (string?)restoreButton.Attribute("IsEnabled"));
         Assert.Equal("RestoreSelectedConflictServices_Click", (string?)restoreButton.Attribute("Click"));
-        Assert.Contains("可能冲突服务检测", document.ToString(), StringComparison.Ordinal);
+        Assert.Contains("可能冲突的服务", document.ToString(), StringComparison.Ordinal);
         Assert.Contains("不会修改开机启动类型", document.ToString(), StringComparison.Ordinal);
     }
 
@@ -1408,7 +1426,7 @@ public sealed class HomeVisualMarkupTests
             (string?)FindNamedElement(document, "OfficeProfileRadio").Attribute("Content"));
         Assert.Equal("{Binding UiCopy.GpuOutputTitle}",
             (string?)FindNamedElement(document, "GpuOutputQuickTitle").Attribute("Text"));
-        Assert.Equal("{Binding UiCopy.PerformanceAdjustmentTitle}",
+        Assert.Equal("{Binding UiCopy.PerformanceEntryTitle}",
             (string?)FindNamedElement(document, "PerformanceEntryTitle").Attribute("Text"));
 
         var language = FindNamedElement(document, "UiLanguageSelector");

@@ -8,4 +8,5 @@ public sealed record DeviceStatus(
     string Usage,
     string Temperature,
     string Power,
-    string Frequency);
+    string Frequency,
+    HardwareVendor Vendor = HardwareVendor.Unknown);
