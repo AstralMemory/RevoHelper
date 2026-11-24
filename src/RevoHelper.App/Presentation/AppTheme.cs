@@ -5,7 +5,7 @@ using System.Windows.Media;
 namespace RevoHelper.App.Presentation;
 
 /// <summary>
-/// Colors for neutral UI surfaces only. Mode colors, hardware colors and user-selected
+/// Colors for neutral UI surfaces, plus the red status pill. Mode colors, hardware colors and user-selected
 /// lighting colors are intentionally not rewritten when the theme changes.
 /// </summary>
 public static class AppTheme
@@ -36,7 +36,14 @@ public static class AppTheme
             // Pastel areas stay light in both themes, so their copy must stay dark.
             ["AccentSurfaceTextBrush"] = new("#17202D", "#17202D"),
             ["AccentSurfaceMutedBrush"] = new("#66758C", "#66758C"),
-            ["ProfileDescriptionBrush"] = new("#66758C", "#66758C")
+            // Except the subtitles under the mode names, which the user wanted lighter in V1.0.8
+            // Snapshot 9. MainWindow.xaml declares the same grey.
+            ["ProfileDescriptionBrush"] = new("#8592A5", "#8592A5"),
+            // The one status color here: a red pill for something running that can be stopped, such as
+            // the official console. A light pink pill would glare on the dark surface, so it darkens too.
+            ["DangerSurfaceBrush"] = new("#FDEDEE", "#3B2329"),
+            ["DangerBorderBrush"] = new("#F4C2C4", "#6D3139"),
+            ["DangerTextBrush"] = new("#C92F38", "#FF8A90")
         });
 
     /// <summary>

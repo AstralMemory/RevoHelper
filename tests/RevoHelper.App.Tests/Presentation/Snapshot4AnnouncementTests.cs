@@ -52,7 +52,7 @@ public sealed class Snapshot4AnnouncementTests
     {
         var copy = AnnouncementCopy.For(language, "V1.0.2");
         Assert.Equal("V1.0.2", copy.Version);
-        Assert.Equal("2026-11-20", copy.UpdatedDate);
+        Assert.Equal("2026-11-24", copy.UpdatedDate);
         Assert.Contains("MIT", copy.Release);
         Assert.Contains("GitHub Releases", copy.Release);
         Assert.DoesNotContain(language == "en-US" ? "has been publicly released" : "已正式发布", copy.Release);
@@ -233,8 +233,10 @@ public sealed class Snapshot4AnnouncementTests
                         (byte)Math.Round(ink.R * subtitle.Opacity + background.R * (1 - subtitle.Opacity)),
                         (byte)Math.Round(ink.G * subtitle.Opacity + background.G * (1 - subtitle.Opacity)),
                         (byte)Math.Round(ink.B * subtitle.Opacity + background.B * (1 - subtitle.Opacity)));
-                    Assert.True(Contrast(visibleInk, background) >= 3.25,
-                        $"{name}'s secondary subtitle must remain readable in {language}/{theme}/{percent}%.");
+                    // V1.0.8 Snapshot 9: the user asked for lighter subtitles. This floor only pins the grey
+                    // chosen then (#8592A5, about 2.3 to 2.6:1 on these cards); it is no readability guarantee.
+                    Assert.True(Contrast(visibleInk, background) >= 2.25,
+                        $"{name}'s secondary subtitle fell below the chosen grey's contrast in {language}/{theme}/{percent}%.");
                 }
 
                 var turbo = Assert.IsType<RadioButton>(window.FindName("TurboProfileRadio"));

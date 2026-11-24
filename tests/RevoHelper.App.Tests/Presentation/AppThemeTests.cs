@@ -36,6 +36,7 @@ public sealed class AppThemeTests
             var lightText = ReadColor(resources, "TextBrush");
             Assert.Equal(Colors.White, lightSurface);
             Assert.True(Contrast(lightText, lightSurface) >= 7);
+            Assert.True(Contrast(ReadColor(resources, "DangerTextBrush"), ReadColor(resources, "DangerSurfaceBrush")) >= 4.5);
 
             AppTheme.Apply(resources, AppTheme.Dark);
             Assert.NotEqual(lightSurface, ReadColor(resources, "SurfaceBrush"));
@@ -43,6 +44,7 @@ public sealed class AppThemeTests
             Assert.True(Contrast(ReadColor(resources, "MutedBrush"), ReadColor(resources, "RaisedBrush")) >= 4.5);
             Assert.True(Contrast(ReadColor(resources, "ChartAxisBrush"), ReadColor(resources, "ChartSurfaceBrush")) >= 4.5);
             Assert.True(Contrast(ReadColor(resources, "AccentSurfaceTextBrush"), pastel.Color) >= 7);
+            Assert.True(Contrast(ReadColor(resources, "DangerTextBrush"), ReadColor(resources, "DangerSurfaceBrush")) >= 4.5);
             Assert.Same(accent, resources["CpuBrush"]);
             Assert.Same(pastel, resources["OfficeCardBrush"]);
             Assert.Same(resources["TextBrush"], resources[SystemColors.WindowTextBrushKey]);
@@ -52,6 +54,22 @@ public sealed class AppThemeTests
             Assert.Equal(lightText, ReadColor(resources, "TextBrush"));
             Assert.Same(accent, resources["CpuBrush"]);
             Assert.Same(pastel, resources["OfficeCardBrush"]);
+        });
+    }
+
+    // Snapshot 9: the user asked for lighter mode subtitles. Both themes use the grey that
+    // MainWindow.xaml declares for them, since the mode cards stay pastel in either theme.
+    [Fact]
+    public void ModeSubtitles_UseTheLighterDeclaredGreyInBothThemes()
+    {
+        RunOnSta(() =>
+        {
+            var resources = new ResourceDictionary();
+            foreach (var theme in new[] { AppTheme.Light, AppTheme.Dark })
+            {
+                AppTheme.Apply(resources, theme);
+                Assert.Equal(Color.FromRgb(0x85, 0x92, 0xA5), ReadColor(resources, "ProfileDescriptionBrush"));
+            }
         });
     }
 
@@ -72,6 +90,40 @@ public sealed class AppThemeTests
             Assert.DoesNotContain("#EEDCFF", AppTheme.NeutralBrushKeys.Keys);
             Assert.DoesNotContain("#FFF0D8", AppTheme.NeutralBrushKeys.Keys);
             Assert.DoesNotContain("#FFFFFF00", AppTheme.NeutralBrushKeys.Keys);
+        });
+    }
+
+    [Fact]
+    public void AccentSurfaces_ShareFrozenBrushesAndRestoreEachElementsResources()
+    {
+        SolidColorBrush? firstSurface = null;
+        RunOnSta(() =>
+        {
+            var card = new Border();
+            var original = new SolidColorBrush(Color.FromArgb(100, 10, 20, 30));
+            card.Resources["SurfaceBrush"] = original;
+            card.Resources["OwnBrush"] = original;
+
+            ThemeScope.SetAccentSurface(card, true);
+            firstSurface = Assert.IsType<SolidColorBrush>(card.Resources["SurfaceBrush"]);
+            Assert.True(firstSurface.IsFrozen);
+            Assert.Equal(Colors.White, firstSurface.Color);
+            Assert.Equal(Color.FromRgb(0x17, 0x20, 0x2D), ReadColor(card.Resources, "TextBrush"));
+            Assert.Same(card.Resources["MutedBrush"], card.Resources[AppTheme.NeutralBrushKeys["#718095"]]);
+            Assert.Equal(Color.FromRgb(0xD7, 0xE0, 0xEB), ReadColor(card.Resources, AppTheme.NeutralBrushKeys["#D7E0EB"]));
+
+            ThemeScope.SetAccentSurface(card, false);
+            Assert.Equal(2, card.Resources.Count);
+            Assert.Same(original, card.Resources["SurfaceBrush"]);
+            Assert.Same(original, card.Resources["OwnBrush"]);
+        });
+        RunOnSta(() =>
+        {
+            var otherCard = new Border();
+            ThemeScope.SetAccentSurface(otherCard, true);
+            Assert.Same(firstSurface, otherCard.Resources["SurfaceBrush"]);
+            ThemeScope.SetAccentSurface(otherCard, false);
+            Assert.Empty(otherCard.Resources.Keys);
         });
     }
 

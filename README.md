@@ -2,7 +2,7 @@
 
 轻量、免费且开源的机械革命笔记本第三方控制台。在官方控制台的功能基础上拓展更多功能，且性能开销更低、启动更快。
 
-**当前最新版本：V1.0.7 正式版**
+**当前最新版本：V1.0.8 正式版**
 
 ## 产品预览
 
@@ -17,7 +17,7 @@
 
 ## 主要功能与改进（含独有功能）
 
-- **性能调度与功耗调整**：切换办公、平衡、狂暴和自定义模式；在机型允许的范围内，基于官方性能预设调整 CPU 功耗上限、限制 CPU 频率，以及修改 CPU 睿频（Boost）策略。
+- **性能调度与功耗调整**：切换办公、平衡、狂暴和自定义模式；在机型允许的范围内，基于官方性能预设调整 CPU 功耗上限、限制 CPU 频率（处理器有大小核时可分别限制 P 核与 E 核），以及修改 CPU 睿频（Boost）策略。
 - **性能监控横条**：通过可置顶的外置小横条显示 FPS，以及 CPU / GPU 的温度、使用率、功耗和频率；不向游戏或程序注入代码，也不限于在游戏中使用。
 - **显卡输出与屏幕设置**：优化显卡输出模式切换后的重启交互，并提供更多刷新率档位；具体选项取决于机型与屏幕支持情况。
 - **灯光与常用设置**：集中调整支持的键盘、灯带、LOGO 和水冷灯光，已开始制作面向自定义的设计（灯光这项还在开发）
@@ -26,6 +26,7 @@
 - **来电后自动连接水冷**：通电时，自动尝试连接已保存的水冷设备，不用再手动点连接；可在水冷页关闭自动连接。
 - **更低的性能开销**：本机观察中，启动时内存占用峰值约 200 MB，转入后台数小时后约为 90 MB；实际占用随运行状态而变化。
 - **诊断报告**：在“设置 → 故障排查”生成简短或完整的诊断报告，方便反馈问题。简短报告不超过 500 字，可以直接发 B 站私信或评论；报告不含用户名、电脑名、文件夹路径和网络地址，生成后先显示全文，复制或保存由你决定。
+- **退出官方控制台**：在“设置 → 常规”一键退出官方控制中心的窗口和托盘，也可以打开“长期退出”，每次启动时自动退出。只退出界面，后台服务保留，整机模式、风扇、灯光照常可用；不推荐卸载官方控制中心，这些功能需要它的后台服务。
 - **其他工具**：支持定时关机、动态节能（动态省电模式）等功能。
 
 ## 使用前请留意
@@ -45,7 +46,7 @@
 
 ## 快速开始：下载与运行
 
-1. 前往 [最新正式版](https://github.com/AstralMemory/RevoHelper/releases/latest)，下载运行包 `RevoHelper.v1.0.7.zip`，不要将 `Source Code` 源码包当作运行包。无法打开 GitHub 时，可在第三方加速站查看版本并下载：`https://gh-proxy.com/https://github.com/AstralMemory/RevoHelper`。
+1. 前往 [最新正式版](https://github.com/AstralMemory/RevoHelper/releases/latest)，下载运行包 `RevoHelper.v1.0.8.zip`，不要将 `Source Code` 源码包当作运行包。无法打开 GitHub 时，可在第三方加速站查看版本并下载：`https://gh-proxy.com/https://github.com/AstralMemory/RevoHelper`。
 2. 解压后运行 `RevoHelper.exe`，建议以管理员身份运行。**RevoHelper是绿色免安装的。**
 3. 系统需要 **Windows 11 64 位**和 [.NET 10 Desktop Runtime（桌面运行时）](https://dotnet.microsoft.com/zh-cn/download/dotnet/10.0)。若提示缺少运行库，请选择 **Desktop Runtime**，而不是普通 Runtime。
 
@@ -57,7 +58,7 @@
 
 本项目采用 **Vibe Coding** 开发方式：仅代码主要由Agent（ChatGPT/Claude）辅助编写，开发者则完全负责产品逻辑、方案与改动审批、UI 设计、实际测试和迭代维护。
 
-程序承诺永久免费使用。V1.0.7 应用源码已在本仓库公开，自有代码采用 [MIT 许可证](./LICENSE)，第三方组件遵循各自许可证，详见 [第三方声明](./THIRD_PARTY_NOTICES.md)。
+程序承诺永久免费使用。V1.0.8 应用源码已在本仓库公开，自有代码采用 [MIT 许可证](./LICENSE)，第三方组件遵循各自许可证，详见 [第三方声明](./THIRD_PARTY_NOTICES.md)。
 
 开发者可直接浏览 [应用源码](./src)，构建、测试与目录说明见 [BUILDING.md](./BUILDING.md)。
 
@@ -85,7 +86,7 @@
 
 RevoHelper is a lightweight, free and open-source third-party control panel for MECHREVO laptops. It extends the functionality of the official control panel, with lower overhead and faster startup.
 
-**Latest version: V1.0.7 — Stable Release**
+**Latest version: V1.0.8 — Stable Release**
 
 ### Product preview
 
@@ -100,7 +101,7 @@ The following images preview the application interface (The UI text in the image
 
 ### Main features and improvements (including exclusive features)
 
-- **Performance scheduling and power adjustments:** Switch between Office, Balanced, Turbo and Custom modes. Within the limits supported by the laptop, adjust CPU power limits, limit CPU frequency and change processor Boost policies based on the official performance presets.
+- **Performance scheduling and power adjustments:** Switch between Office, Balanced, Turbo and Custom modes. Within the limits supported by the laptop, adjust CPU power limits, limit CPU frequency (separately for P-cores and E-cores on processors that have both) and change processor Boost policies based on the official performance presets.
 - **Performance monitoring bar:** Display FPS and CPU / GPU temperatures, utilization, power and clock speeds in an external bar that can stay on top. It does not inject code into games or applications and is not limited to use in games.
 - **GPU output and display settings:** Improved restart handling after switching GPU output modes, with more refresh-rate options. Available options depend on the laptop and display.
 - **Lighting and common settings:** Adjust supported keyboard, light-bar, logo and liquid-cooler lighting in one place, without being limited to the official default presets.
@@ -109,6 +110,7 @@ The following images preview the application interface (The UI text in the image
 - **Automatic cooler connection when power returns:** When mains power is connected, RevoHelper tries to connect the saved liquid-cooling device automatically. This can be turned off on the liquid-cooling page.
 - **Lower overhead:** On the developer's system, memory usage peaks at nearly 200 MB during startup and drops to around 70 MB in the background. Actual usage varies with operating conditions.
 - **Diagnostic report:** Under Settings → Troubleshooting, generate a brief or full report for feedback. The brief report stays within 500 characters, so it fits in a Bilibili message or comment. Reports leave out user names, computer names, folder paths and network addresses; the full text is shown first, and copying or saving is up to you.
+- **Exiting the official control panel:** Under Settings → General, “Exit official console” closes the official Control Center's window and tray icon with one click; turn on “Always exit” to close them every time RevoHelper starts. Only the interface is closed: its background services keep running, so modes, fans and lighting still work. Uninstalling the official Control Center is not recommended, since these features rely on its background services.
 - **Other tools:** Scheduled shutdown, dynamic power saving and other features.
 
 ### Before you use RevoHelper
@@ -128,7 +130,7 @@ The following images preview the application interface (The UI text in the image
 
 ### Quick start: download and run
 
-1. Go to the [latest stable release](https://github.com/AstralMemory/RevoHelper/releases/latest) and download the application package, `RevoHelper.v1.0.7.zip`. Do not use the `Source Code` archive as the application package. If GitHub is unreachable, releases can also be viewed and downloaded through a third-party mirror: `https://gh-proxy.com/https://github.com/AstralMemory/RevoHelper`.
+1. Go to the [latest stable release](https://github.com/AstralMemory/RevoHelper/releases/latest) and download the application package, `RevoHelper.v1.0.8.zip`. Do not use the `Source Code` archive as the application package. If GitHub is unreachable, releases can also be viewed and downloaded through a third-party mirror: `https://gh-proxy.com/https://github.com/AstralMemory/RevoHelper`.
 2. Extract the archive and run `RevoHelper.exe`. Running as administrator is recommended. **RevoHelper is portable and requires no installation.**
 3. You need **64-bit Windows 11** and the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/en-us/download/dotnet/10.0). If prompted to install a missing runtime, choose **Desktop Runtime**, not the standard Runtime.
 
@@ -140,7 +142,7 @@ Developed and maintained by [Astral Memory](https://github.com/AstralMemory).
 
 The project uses a **Vibe Coding** development workflow: code is primarily written with assistance from agents (ChatGPT/Claude), while the developer takes full responsibility for product logic, proposals and change approval, UI design, hands-on testing and ongoing maintenance.
 
-The program is committed to remaining free permanently. The V1.0.7 application source code is available in this repository. The project's own code uses the [MIT License](./LICENSE); third-party components retain their respective licenses. See the [third-party notices](./THIRD_PARTY_NOTICES.md).
+The program is committed to remaining free permanently. The V1.0.8 application source code is available in this repository. The project's own code uses the [MIT License](./LICENSE); third-party components retain their respective licenses. See the [third-party notices](./THIRD_PARTY_NOTICES.md).
 
 Developers can browse the [application source](./src). See [BUILDING.md](./BUILDING.md) for build and test instructions and a guide to the directory structure.
 

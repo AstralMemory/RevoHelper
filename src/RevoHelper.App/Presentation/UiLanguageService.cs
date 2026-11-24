@@ -32,10 +32,33 @@ public sealed class UiTextExtension : MarkupExtension
     public Binding? Value { get; set; }
     public override object ProvideValue(IServiceProvider serviceProvider)
     {
-        var binding = new MultiBinding { Mode = BindingMode.OneWay, Converter = new UiTextConverter(Value?.StringFormat) };
-        binding.Bindings.Add(Value ?? new Binding { Source = Text });
-        binding.Bindings.Add(new Binding(nameof(UiLanguageService.Code)) { Source = UiLanguageService.Current });
+        var language = new Binding(nameof(UiLanguageService.Code)) { Source = UiLanguageService.Current, Mode = BindingMode.OneWay };
+        if (Value is null)
+        {
+            language.Converter = LiteralConverter.Instance;
+            language.ConverterParameter = Text;
+            return language.ProvideValue(serviceProvider);
+        }
+
+        var binding = new MultiBinding
+        {
+            Mode = BindingMode.OneWay,
+            Converter = Value.StringFormat is { Length: > 0 } format ? new UiTextConverter(format) : UiTextConverter.Instance
+        };
+        binding.Bindings.Add(Value);
+        binding.Bindings.Add(language);
         return binding.ProvideValue(serviceProvider);
+    }
+
+    private sealed class LiteralConverter : IValueConverter
+    {
+        public static LiteralConverter Instance { get; } = new();
+
+        public object Convert(object value, Type targetType, object parameter, CultureInfo culture) =>
+            UiTextCatalog.Translate(parameter as string ?? "", value as string);
+
+        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>
+            throw new NotSupportedException("UI translations are display-only.");
     }
 }
 

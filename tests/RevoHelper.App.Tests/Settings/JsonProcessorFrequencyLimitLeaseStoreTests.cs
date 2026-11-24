@@ -27,6 +27,34 @@ public sealed class JsonProcessorFrequencyLimitLeaseStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Save_WritesOnlyTheSixSchema1ValuesSoOlderBuildsCanRecover()
+    {
+        var path = Path.Combine(directory, "frequency-lease.json");
+        var store = new JsonProcessorFrequencyLimitLeaseStore(path);
+        await store.SaveAsync(new ProcessorFrequencyLimitLease(
+            1,
+            Guid.NewGuid(),
+            new ProcessorFrequencyLimitPolicy(0, 2100, 0, 2200, 0, 2300),
+            ProcessorFrequencyLimitPolicy.ForCoreTypes(3500, 2200, performanceClass: 1)), CancellationToken.None);
+
+        // V1.0.7 and earlier read this file with unmapped members disallowed.
+        using var journal = JsonDocument.Parse(await File.ReadAllTextAsync(path));
+        string[] expected =
+        [
+            "AcMaximumMhz", "DcMaximumMhz", "AcClass1MaximumMhz",
+            "DcClass1MaximumMhz", "AcClass2MaximumMhz", "DcClass2MaximumMhz"
+        ];
+        Assert.Equal(
+            new[] { "SchemaVersion", "Scheme", "Original", "Expected" },
+            journal.RootElement.EnumerateObject().Select(property => property.Name).ToArray());
+        foreach (var policy in new[] { "Original", "Expected" })
+        {
+            Assert.Equal(expected, journal.RootElement.GetProperty(policy).EnumerateObject()
+                .Select(property => property.Name).ToArray());
+        }
+    }
+
+    [Fact]
     public async Task Clear_RemovesLeaseAndTemporaryFile()
     {
         var path = Path.Combine(directory, "frequency-lease.json");

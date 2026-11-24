@@ -303,7 +303,7 @@ public sealed class HomeVisualMarkupTests
             element.Attributes().Any(attribute =>
                 attribute.Name.LocalName == "Key" && attribute.Value == "ProfileDescriptionBrush"));
 
-        Assert.Equal("#9AA4B2", (string?)descriptionBrush.Attribute("Color"));
+        Assert.Equal("#8592A5", (string?)descriptionBrush.Attribute("Color"));
     }
 
     [Fact]
@@ -660,6 +660,165 @@ public sealed class HomeVisualMarkupTests
         Assert.DoesNotContain(drawer.Descendants(), element =>
             (string?)element.Attribute(XamlNamespace + "Name") is "BatteryChargeLimitCard" or "BatteryChargeLimitSlider");
         AssertDrawerContentUsesSymmetricStretchLayout(FindNamedElement(document, "PowerControlsStack"));
+    }
+
+    // V1.0.8 Snapshot 6: the option is a row of the general card, the first thing settings shows.
+    // A section of its own pushed the window scale selector out of view.
+    // Snapshot 8, option B as the user chose it: a pill that is both the status and the one-time
+    // exit, red while the official window or tray runs, and the long-term switch as its own row.
+    [Fact]
+    public void SettingsDrawer_PutsTheOfficialConsoleExitInTheGeneralCard()
+    {
+        var document = LoadMainWindowXaml();
+        var children = FindNamedElement(document, "SettingsDrawerContent").Elements().Single().Elements().ToList();
+        var general = children.FindIndex(element => (string?)element.Attribute("Text") == "常规");
+        var row = FindNamedElement(document, "OfficialConsoleExitRow");
+        var longTerm = FindNamedElement(document, "LongTermOfficialConsoleExitRow");
+
+        Assert.Equal(0, general);
+        Assert.Contains(children[general + 1].Descendants(), element => element == row);
+        Assert.Contains(children[general + 1].Descendants(), element => element == longTerm);
+        Assert.Equal("界面与窗口", (string?)children[general + 2].Attribute("Text"));
+
+        var pill = FindNamedElement(row, "ExitOfficialConsoleButton");
+        Assert.Contains("OfficialConsoleExitButtonText", (string?)pill.Attribute("Content"), StringComparison.Ordinal);
+        Assert.Equal("ExitOfficialConsole_Click", (string?)pill.Attribute("Click"));
+        Assert.Equal("{Binding CanExitOfficialConsoleNow}", (string?)pill.Attribute("IsEnabled"));
+        var style = pill.Descendants().Single(element => element.Name.LocalName == "Style");
+        Assert.Equal("{StaticResource StatusPillButtonStyle}", (string?)style.Attribute("BasedOn"));
+        var running = style.Descendants().Single(element => element.Name.LocalName == "DataTrigger");
+        Assert.Equal("{Binding IsOfficialFrontendRunning}", (string?)running.Attribute("Binding"));
+        Assert.Equal("{DynamicResource DangerTextBrush}", (string?)running.Elements()
+            .Single(setter => (string?)setter.Attribute("Property") == "Foreground").Attribute("Value"));
+
+        var toggle = FindNamedElement(longTerm, "ExitOfficialConsoleToggle");
+        Assert.Equal("{Binding ExitOfficialConsole, Mode=TwoWay}", (string?)toggle.Attribute("IsChecked"));
+        // Its focus ring comes from the switch style, like every other settings switch.
+        Assert.Equal("{StaticResource SettingsToggleStyle}", (string?)toggle.Attribute("Style"));
+        Assert.Null(toggle.Attribute("FocusVisualStyle"));
+
+        // Snapshot 9: no line between the rows, and a grey title, since long-term exit belongs to the row above.
+        Assert.Same(longTerm, row.ElementsAfterSelf().First());
+        var longTermTitle = longTerm.Descendants().First(element => element.Name.LocalName == "TextBlock");
+        Assert.Equal("长期退出", (string?)longTermTitle.Attribute("Text"));
+        Assert.Equal("{DynamicResource MutedBrush}", (string?)longTermTitle.Attribute("Foreground"));
+        Assert.Null(longTermTitle.Attribute("FontWeight"));
+
+        // Both explain themselves on hovering a question mark, like the update check above them.
+        Assert.Contains("后台服务和 OSD 热键保留", HelpIconText(row, "OfficialConsoleExitHelpIcon"), StringComparison.Ordinal);
+        Assert.Contains("打开时也会马上退出一次", HelpIconText(longTerm, "LongTermOfficialConsoleExitHelpIcon"), StringComparison.Ordinal);
+    }
+
+    private static string HelpIconText(XElement scope, string name)
+    {
+        var icon = FindNamedElement(scope, name);
+        Assert.Equal(PresentationNamespace + "HelpMark", icon.Name);
+        return string.Join(" ", icon.Descendants().Select(element => (string?)element.Attribute("Text")).OfType<string>());
+    }
+
+    private static readonly XNamespace PresentationNamespace = "clr-namespace:RevoHelper.App.Presentation";
+
+    // Snapshot 9: without the dotted box, keyboard users saw no focus at all. The pill and every
+    // settings switch draw their own ring instead, and only when focus came from the keyboard.
+    [Theory]
+    [InlineData("StatusPillButtonStyle")]
+    [InlineData("SettingsToggleStyle")]
+    public void PillAndSwitches_ShowAFocusRingForTheKeyboardOnly(string key)
+    {
+        var style = FindStyle(LoadMainWindowXaml(), key);
+
+        Assert.Equal("{x:Null}", SetterValue(style, "FocusVisualStyle"));
+        Assert.Equal("True", SetterValue(style, "presentation:KeyboardFocusCue.IsEnabled"));
+        Assert.Equal("Collapsed", (string?)FindNamedElement(style, "FocusRing").Attribute("Visibility"));
+        var shown = style.Descendants().Single(element => element.Name.LocalName == "Trigger" &&
+            (string?)element.Attribute("Property") == "presentation:KeyboardFocusCue.IsShown");
+        Assert.Equal("True", (string?)shown.Attribute("Value"));
+        var reveal = Assert.Single(shown.Elements());
+        Assert.Equal("FocusRing", (string?)reveal.Attribute("TargetName"));
+        Assert.Equal("Visibility", (string?)reveal.Attribute("Property"));
+        Assert.Equal("Visible", (string?)reveal.Attribute("Value"));
+    }
+
+    // Snapshot 9: every question mark is centred by its ink, since its line box left it about a pixel
+    // low, and Tab stops on it, so its explanation opens from the keyboard as well as on hovering. Each
+    // is a HelpMark named for its row, so a screen reader reads more than "?". V1.0.8: the text fills
+    // its circle and centres its line, which lands to a fraction of a pixel; a centred box did not.
+    [Fact]
+    public void QuestionMarks_SitInTheMiddleAndOpenFromTheKeyboard()
+    {
+        var document = LoadMainWindowXaml();
+        var marks = document.Descendants().Where(element =>
+            element.Name.LocalName == "TextBlock" && (string?)element.Attribute("Text") == "?").ToList();
+
+        Assert.Equal(10, marks.Count);
+        foreach (var mark in marks)
+        {
+            Assert.Equal("True", (string?)mark.Attribute(PresentationNamespace + "InkCenter.IsEnabled"));
+            Assert.Equal("Center", (string?)mark.Attribute("TextAlignment"));
+            Assert.Null(mark.Attribute("HorizontalAlignment"));
+            var icon = mark.Parent!;
+            Assert.Equal(PresentationNamespace + "HelpMark", icon.Name);
+            Assert.Null(icon.Attribute("Style"));
+            Assert.False(string.IsNullOrWhiteSpace((string?)icon.Attribute("AutomationProperties.Name")));
+            Assert.True(icon.Attribute("ToolTip") is not null ||
+                        icon.Elements().Any(element => element.Name.LocalName == "Border.ToolTip"));
+        }
+        Assert.DoesNotContain(document.Descendants(), element =>
+            (string?)element.Attribute("Style") == "{StaticResource HelpIconStyle}");
+
+        var style = Assert.Single(document.Descendants(), element =>
+            element.Name.LocalName == "Style" && (string?)element.Attribute("TargetType") == "presentation:HelpMark");
+        Assert.Null(style.Attribute(XamlNamespace + "Key"));
+        Assert.Equal("Help", SetterValue(style, "Cursor"));
+        Assert.Equal("True", SetterValue(style, "Focusable"));
+        Assert.Equal("True", SetterValue(style, "ToolTipService.ShowsToolTipOnKeyboardFocus"));
+        Assert.Equal("{StaticResource HelpIconFocusVisualStyle}", SetterValue(style, "FocusVisualStyle"));
+        Assert.Contains(FindStyle(document, "HelpIconFocusVisualStyle").Descendants(),
+            element => element.Name.LocalName == "Ellipse");
+    }
+
+    private static XElement FindStyle(XDocument document, string key) =>
+        document.Descendants().Single(element =>
+            element.Name.LocalName == "Style" && (string?)element.Attribute(XamlNamespace + "Key") == key);
+
+    private static string? SetterValue(XElement style, string property) =>
+        (string?)style.Elements().SingleOrDefault(setter =>
+            setter.Name.LocalName == "Setter" && (string?)setter.Attribute("Property") == property)?.Attribute("Value");
+
+    // The user asked for the update check details to show only on hovering a question mark.
+    [Fact]
+    public void SettingsDrawer_ShowsTheUpdateCheckDetailsOnHoveringTheQuestionMark()
+    {
+        var document = LoadMainWindowXaml();
+        var icon = FindNamedElement(document, "AutomaticUpdateCheckHelpIcon");
+
+        var details = Assert.Single(document.Descendants(), element =>
+            (string?)element.Attribute("Text") == "{Binding UiCopy.AutomaticUpdateCheckDescription}");
+        Assert.Contains(details, icon.Descendants());
+        Assert.Equal(PresentationNamespace + "HelpMark", icon.Name);
+        // The tooltip binds to the window's data only once it opens, so the screen reader text is set here.
+        Assert.Equal("{Binding UiCopy.AutomaticUpdateCheckDescription}", (string?)icon.Attribute("AutomationProperties.HelpText"));
+    }
+
+    // Snapshot 9 review: the P/E switch waits for the overall frequency limit, but its question mark
+    // must stay reachable, so only the switch is disabled and the title greys meanwhile.
+    [Fact]
+    public void SeparateCoreLimit_DisablesOnlyItsSwitchUntilTheOverallLimitIsOn()
+    {
+        var row = FindNamedElement(LoadMainWindowXaml(), "SeparateCoreFrequencyLimitRow");
+        var toggle = FindNamedElement(row, "SeparateCoreFrequencyLimitToggle");
+
+        Assert.Null(row.Attribute("IsEnabled"));
+        Assert.Equal("{Binding IsProcessorFrequencyLimitEnabled}", (string?)toggle.Attribute("IsEnabled"));
+        Assert.Equal([toggle], row.Descendants().Where(element => element.Attribute("IsEnabled") is not null));
+        var title = row.Descendants().First(element =>
+            element.Name.LocalName == "TextBlock" && (string?)element.Attribute("Text") == "分别限制 P 核与 E 核");
+        Assert.Null(title.Attribute("Foreground"));
+        var dim = title.Descendants().Single(element => element.Name.LocalName == "DataTrigger");
+        Assert.Equal("{Binding IsProcessorFrequencyLimitEnabled}", (string?)dim.Attribute("Binding"));
+        Assert.Equal("False", (string?)dim.Attribute("Value"));
+        Assert.Equal("{DynamicResource MutedBrush}", (string?)dim.Elements().Single().Attribute("Value"));
+        Assert.Equal(PresentationNamespace + "HelpMark", title.ElementsAfterSelf().Single().Name);
     }
 
     [Fact]
@@ -1259,7 +1418,13 @@ public sealed class HomeVisualMarkupTests
 
         Assert.Equal("1000", (string?)slider.Attribute("Minimum"));
         Assert.Equal("6000", (string?)slider.Attribute("Maximum"));
-        Assert.Contains("5–10 秒", (string?)warning.Attribute("Text"), StringComparison.Ordinal);
+        // The delay note has its own line, away from the switch.
+        var lines = warning.Elements().Where(element => element.Name.LocalName == "Run")
+            .Select(element => (string?)element.Attribute("Text") ?? "").ToArray();
+        Assert.Equal(2, lines.Length);
+        Assert.DoesNotContain("5–10", lines[0], StringComparison.Ordinal);
+        Assert.Contains("5–10 秒", lines[1], StringComparison.Ordinal);
+        Assert.Contains(warning.Elements(), element => element.Name.LocalName == "LineBreak");
         Assert.Equal("#D9363E", (string?)warning.Attribute("Foreground"));
         Assert.True(double.Parse((string?)warning.Attribute("FontSize") ?? "99") < 9);
     }
@@ -1316,6 +1481,37 @@ public sealed class HomeVisualMarkupTests
 
         Assert.StartsWith("仅供大致参考。用户可在风扇曲线上微调", tooltip, StringComparison.Ordinal);
         Assert.Contains("tradeoff.Performance - 8", codeBehind, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("GpuOutputQuickIconTile", "GpuOutputDrawerHeaderIcon")]
+    [InlineData("LightingQuickIconTile", "LightingDrawerHeaderIcon")]
+    [InlineData("WaterCoolingQuickIconTile", "LiquidCoolingDrawerHeaderIcon")]
+    [InlineData("KeyboardQuickIconTile", "KeyboardDrawerHeaderIcon")]
+    [InlineData("BatteryQuickIconTile", "BatteryDrawerHeaderIcon")]
+    [InlineData("DisplayQuickIconTile", "DisplayDrawerHeaderIcon")]
+    [InlineData("OtherQuickIconTile", "OtherDrawerHeaderIcon")]
+    [InlineData("MonitorEntryIcon", "PerformanceMonitorDrawerHeaderIcon")]
+    [InlineData("PerformanceEntryIcon", "PerformanceDrawerHeaderIcon")]
+    [InlineData("FanEntryIcon", "FanDrawerHeaderIcon")]
+    public void DrawerHeaders_DrawTheSameIconAsTheEntryThatOpensThem(string entry, string header)
+    {
+        var document = LoadMainWindowXaml();
+        var entryElement = FindNamedElement(document, entry);
+        var headerElement = FindNamedElement(document, header);
+        static string[] Icons(XElement element) => element.Descendants()
+            .Select(child => (string?)child.Attribute("Data"))
+            .OfType<string>()
+            .Where(data => data.StartsWith("{StaticResource", StringComparison.Ordinal))
+            .ToArray();
+
+        Assert.NotEmpty(Icons(entryElement));
+        Assert.Equal(Icons(entryElement), Icons(headerElement));
+        if ((string?)entryElement.Attribute("Background") is { } tile)
+        {
+            Assert.Contains(headerElement.Descendants(), child =>
+                child.Name.LocalName == "Border" && (string?)child.Attribute("Background") == tile);
+        }
     }
 
     [Fact]

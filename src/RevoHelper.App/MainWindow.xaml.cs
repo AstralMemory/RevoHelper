@@ -69,6 +69,15 @@ public partial class MainWindow : Window
 
     private void CapabilityRecheck_Click(object sender, RoutedEventArgs e) => ViewModel.RequestCapabilityRecheck();
 
+    private void ExitOfficialConsole_Click(object sender, RoutedEventArgs e) => _ = ViewModel.ExitOfficialConsoleNowAsync();
+
+    // Coming back from the official console, the exit pill shows what runs now. An event, not a timer.
+    protected override void OnActivated(EventArgs e)
+    {
+        base.OnActivated(e);
+        ViewModel.RefreshOfficialConsoleStatusIfSettingsOpen();
+    }
+
     private void Window_Loaded(object sender, RoutedEventArgs e)
     {
         ApplyWindowGeometry();
@@ -674,6 +683,10 @@ public partial class MainWindow : Window
 
     private void PerformanceToggle_Click(object sender, RoutedEventArgs e) =>
         QueuePerformanceAutoApply(userRequestedFrequencyDisable: sender is CheckBox { IsChecked: false });
+
+    // Switching between one cap and separate P/E caps never counts as turning the cap off.
+    private void SeparateCoreFrequencyLimitToggle_Click(object sender, RoutedEventArgs e) =>
+        QueuePerformanceAutoApply();
 
     private void PerformanceSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {

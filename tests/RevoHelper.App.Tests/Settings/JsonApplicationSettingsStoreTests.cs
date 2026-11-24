@@ -100,6 +100,8 @@ public sealed class JsonApplicationSettingsStoreTests
 
             Assert.True(settings.AutoConnectLiquidCooling);
             Assert.Equal(100, settings.WindowScalePercent);
+            // Settings saved before V1.0.8 Snapshot 6 leave the official console alone.
+            Assert.False(settings.ExitOfficialConsole);
         }
         finally
         {

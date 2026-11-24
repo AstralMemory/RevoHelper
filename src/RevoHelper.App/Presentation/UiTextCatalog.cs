@@ -12,12 +12,11 @@ public static class UiTextCatalog
         if (LocalizedUiCopy.NormalizeLanguageCode(language) != "en-US" || string.IsNullOrEmpty(text)) return text;
         if (English.TryGetValue(text, out var translated)) return translated;
         if (text.Length > 8192 || !text.Any(character => character is >= '\u4e00' and <= '\u9fff')) return text;
-        foreach (var (pattern, format) in Templates)
+        foreach (var rule in Templates)
         {
             try
             {
-                var match = pattern.Match(text);
-                if (match.Success) return format(match);
+                if (rule.TryTranslate(text) is { } result) return result;
             }
             catch (RegexMatchTimeoutException) { return text; }
         }
@@ -56,11 +55,11 @@ public static class UiTextCatalog
     private static string Alternation(IEnumerable<string> endings) =>
         string.Join("|", endings.OrderByDescending(ending => ending.Length).Select(Regex.Escape));
 
-    private static readonly (Regex Pattern, Func<Match, string> Format)[] Templates =
+    private static readonly TranslationRule[] Templates =
     [
-        Rule(@"^电源暂停后的恢复未确认；不会自动重启限充。([\s\S]*)$", m => "Restoration after the power pause is not confirmed; charge limiting will not restart automatically. " + TranslateKnown(m.Groups[1].Value)),
-        Rule(@"^限充自动恢复未确认，保持关闭且不自动重试。([\s\S]*)$", m => "Automatic charge-limit resumption is not confirmed; remaining off without automatic retries. " + TranslateKnown(m.Groups[1].Value)),
-        Rule(@"^限充已安全停止，不自动重启。([\s\S]*)$", m => "Charge limiting stopped safely and will not restart automatically. " + TranslateKnown(m.Groups[1].Value)),
+        PrefixedRule("电源暂停后的恢复未确认；不会自动重启限充。", @"([\s\S]*)$", m => "Restoration after the power pause is not confirmed; charge limiting will not restart automatically. " + TranslateKnown(m.Groups[1].Value)),
+        PrefixedRule("限充自动恢复未确认，保持关闭且不自动重试。", @"([\s\S]*)$", m => "Automatic charge-limit resumption is not confirmed; remaining off without automatic retries. " + TranslateKnown(m.Groups[1].Value)),
+        PrefixedRule("限充已安全停止，不自动重启。", @"([\s\S]*)$", m => "Charge limiting stopped safely and will not restart automatically. " + TranslateKnown(m.Groups[1].Value)),
         Rule(@"^(限充操作失败|停止限充失败|恢复限充失败)：(.+)$", m => (m.Groups[1].Value switch
         {
             "限充操作失败" => "Charge-limit operation failed",
@@ -68,58 +67,61 @@ public static class UiTextCatalog
             _ => "Restoring charge limiting failed"
         }) + ": " + TranslateKnown(m.Groups[2].Value)),
         Rule(@"^(启用|停止|恢复)实验性限充失败：(.+)$", m => (m.Groups[1].Value switch { "启用" => "Enabling", "停止" => "Stopping", _ => "Restoring" }) + " experimental charge limiting failed: " + Translate(m.Groups[2].Value, "en-US")),
-        Rule(@"^实验性限充未完成：(.+)$", m => "Experimental charge limiting did not complete: " + Translate(m.Groups[1].Value, "en-US")),
-        Rule(@"^实验已停止，监护正在复核恢复：(.+)$", m => "The experiment stopped; the guardian is checking restoration: " + Translate(m.Groups[1].Value, "en-US")),
-        Rule(@"^限充未启用：(.+)$", m => "Charge limit not enabled: " + TranslateKnown(m.Groups[1].Value)),
-        Rule(@"^限充已停止，已恢复原值。(.*)$", m => "Charge limit stopped; original values restored. " + TranslateKnown(m.Groups[1].Value)),
-        Rule(@"^限充已停止，恢复未确认；固件会在约 30 分钟内自行恢复正常充电。(.*)$", m => "Charge limit stopped; restoration unconfirmed. The firmware returns to normal charging by itself within about 30 minutes. " + TranslateKnown(m.Groups[1].Value)),
-        Rule(@"^固件的保持计时已在使用（0x([0-9A-F]{4})）；不接管。$", m => "The firmware hold countdown is already in use (0x" + m.Groups[1].Value + "); it will not be taken over."),
-        Rule(@"^固件当前不执行保持功能（(.+)）。$", m => "The firmware is not running its hold feature right now (" + m.Groups[1].Value + ")."),
-        Rule(@"^原始状态0x([0-9A-F]{4})已改变（当前0x([0-9A-F]{2})）；不接管已有设置。$", m => "Original state 0x" + m.Groups[1].Value + " changed (now 0x" + m.Groups[2].Value + "); existing settings will not be taken over."),
-        Rule(@"^部分状态读取失败，已保留已确认状态：(.+)$", m => "Some statuses could not be read; confirmed values were preserved: " + TranslateStatusDetails(m.Groups[1].Value)),
-        Rule(@"^部分状态未读取：(.+)$", m => "Some statuses were not read: " + TranslateStatusDetails(m.Groups[1].Value)),
+        PrefixedRule("实验性限充未完成：", @"(.+)$", m => "Experimental charge limiting did not complete: " + Translate(m.Groups[1].Value, "en-US")),
+        PrefixedRule("实验已停止，监护正在复核恢复：", @"(.+)$", m => "The experiment stopped; the guardian is checking restoration: " + Translate(m.Groups[1].Value, "en-US")),
+        PrefixedRule("限充未启用：", @"(.+)$", m => "Charge limit not enabled: " + TranslateKnown(m.Groups[1].Value)),
+        PrefixedRule("限充已停止，已恢复原值。", @"(.*)$", m => "Charge limit stopped; original values restored. " + TranslateKnown(m.Groups[1].Value)),
+        PrefixedRule("限充已停止，恢复未确认；固件会在约 30 分钟内自行恢复正常充电。", @"(.*)$", m => "Charge limit stopped; restoration unconfirmed. The firmware returns to normal charging by itself within about 30 minutes. " + TranslateKnown(m.Groups[1].Value)),
+        PrefixedRule("固件的保持计时已在使用（0x", @"([0-9A-F]{4})）；不接管。$", m => "The firmware hold countdown is already in use (0x" + m.Groups[1].Value + "); it will not be taken over."),
+        PrefixedRule("固件当前不执行保持功能（", @"(.+)）。$", m => "The firmware is not running its hold feature right now (" + m.Groups[1].Value + ")."),
+        PrefixedRule("原始状态0x", @"([0-9A-F]{4})已改变（当前0x([0-9A-F]{2})）；不接管已有设置。$", m => "Original state 0x" + m.Groups[1].Value + " changed (now 0x" + m.Groups[2].Value + "); existing settings will not be taken over."),
+        PrefixedRule("部分状态读取失败，已保留已确认状态：", @"(.+)$", m => "Some statuses could not be read; confirmed values were preserved: " + TranslateStatusDetails(m.Groups[1].Value)),
+        PrefixedRule("部分状态未读取：", @"(.+)$", m => "Some statuses were not read: " + TranslateStatusDetails(m.Groups[1].Value)),
         Rule(@"^(按键与设备状态|电源与电池状态|按键状态|设备开关状态|键盘灯光状态|电池保护状态|电源设置状态|快捷设置状态|充电上限状态)读取失败：(.+)$", m => TranslateKnown(m.Groups[1].Value) + " could not be read: " + TranslateStatusDetails(m.Groups[2].Value)),
         Rule(@"^(按键状态|设备开关状态|键盘灯光状态|电池保护状态|电源设置状态|快捷设置状态|充电上限状态)未返回可识别状态。$", m => TranslateKnown(m.Groups[1].Value) + " did not return a recognized status."),
-        Rule(@"^未运行：(.+)\n启动后会自动匹配该程序。$", m => $"Not running: {m.Groups[1].Value}\nIt will be matched when it starts."),
-        Rule(@"^当前：([^\n]+)\n([\s\S]+)$", m => $"Current: {m.Groups[1].Value}\n{TranslateKnown(m.Groups[2].Value)}"),
-        Rule(@"^已设置为(.+)，尚未生效 · 请点“重启”，关机再开机可能不生效$", m => $"Set to {TranslateKnown(m.Groups[1].Value)}, not active yet · Choose Restart; shutting down and powering on may not apply it"),
-        Rule(@"^已写入并回读验证：(.+)；请点“重启”生效，关机再开机可能不生效。$", m => $"Saved and verified: {TranslateKnown(m.Groups[1].Value)}. Choose Restart to apply it; shutting down and powering on may not."),
-        Rule(@"^当前：(.+) · 更改后需要重启生效$", m => $"Current: {TranslateKnown(m.Groups[1].Value)} · Restart after changing"),
-        Rule(@"^当前：(.+)$", m => "Current: " + TranslateKnown(m.Groups[1].Value)),
-        Rule(@"^状态：(.+)$", m => "Status: " + TranslateKnown(m.Groups[1].Value)),
-        Rule(@"^添加：(.+)$", m => "Added: " + m.Groups[1].Value),
-        Rule(@"^上次选择：(.+)$", m => "Last selected: " + TranslateKnown(m.Groups[1].Value)),
+        PrefixedRule("未运行：", @"(.+)\n启动后会自动匹配该程序。$", m => $"Not running: {m.Groups[1].Value}\nIt will be matched when it starts."),
+        PrefixedRule("当前：", @"([^\n]+)\n([\s\S]+)$", m => $"Current: {m.Groups[1].Value}\n{TranslateKnown(m.Groups[2].Value)}"),
+        PrefixedRule("已设置为", @"(.+)，尚未生效 · 请点“重启”，关机再开机可能不生效$", m => $"Set to {TranslateKnown(m.Groups[1].Value)}, not active yet · Choose Restart; shutting down and powering on may not apply it"),
+        PrefixedRule("已写入并回读验证：", @"(.+)；请点“重启”生效，关机再开机可能不生效。$", m => $"Saved and verified: {TranslateKnown(m.Groups[1].Value)}. Choose Restart to apply it; shutting down and powering on may not."),
+        PrefixedRule("当前：", @"(.+) · 更改后需要重启生效$", m => $"Current: {TranslateKnown(m.Groups[1].Value)} · Restart after changing"),
+        PrefixedRule("当前：", @"(.+)$", m => "Current: " + TranslateKnown(m.Groups[1].Value)),
+        PrefixedRule("状态：", @"(.+)$", m => "Status: " + TranslateKnown(m.Groups[1].Value)),
+        PrefixedRule("添加：", @"(.+)$", m => "Added: " + m.Groups[1].Value),
+        PrefixedRule("上次选择：", @"(.+)$", m => "Last selected: " + TranslateKnown(m.Groups[1].Value)),
         Rule(@"^(\d+) 秒$", m => m.Groups[1].Value + " s"),
         Rule(@"^(\d+) 分钟$", m => m.Groups[1].Value + " min"),
         Rule(@"^(\d+) 小时$", m => m.Groups[1].Value + " h"),
         Rule(@"^(\d+) 核 · (\d+) 线程$", m => $"{m.Groups[1].Value} cores · {m.Groups[2].Value} threads"),
         Rule(@"^([\d.]+) (GB|MB) 显存$", m => $"{m.Groups[1].Value} {m.Groups[2].Value} VRAM"),
-        Rule(@"^固件：(.+) · 仪表(正常|异常)$", m => $"Firmware: {m.Groups[1].Value} · Meter {(m.Groups[2].Value == "正常" ? "normal" : "fault")}"),
+        PrefixedRule("固件：", @"(.+) · 仪表(正常|异常)$", m => $"Firmware: {m.Groups[1].Value} · Meter {(m.Groups[2].Value == "正常" ? "normal" : "fault")}"),
         Rule(@"^(CPU|GPU) 曲线最高温度：(\d+)℃$", m => $"{m.Groups[1].Value} curve maximum: {m.Groups[2].Value} °C"),
         Rule(@"^(.+) · 风扇曲线仅供参考$", m => $"{TranslateKnown(m.Groups[1].Value)} · Reference fan curve"),
-        Rule(@"^已载入 (.+)；确认参数后点击应用并回读。$", m => $"Loaded {m.Groups[1].Value}. Check the settings, then apply."),
-        Rule(@"^已导出 (.+)。$", m => $"Exported {m.Groups[1].Value}."),
-        Rule(@"^已恢复 (.+)；打开灯光页后可显式应用。$", m => $"Restored {m.Groups[1].Value}. Open Lighting to apply it."),
-        Rule(@"^观察窗口：(.+) / 600 秒 · 空闲 (.+)%$", m => $"Observation: {m.Groups[1].Value} / 600 s · Idle {m.Groups[2].Value}%"),
-        Rule(@"^已保存 (.+)%；当前屏幕空间不足，暂按 (.+)% 显示。$", m => $"Saved {m.Groups[1].Value}%; using {m.Groups[2].Value}% to fit this screen."),
-        Rule(@"^自定义模式 (\d+)$", m => "Custom " + m.Groups[1].Value),
-        Rule(@"^只读传感器 · 更新于 (.+)$", m => "Read-only sensors · Updated " + m.Groups[1].Value),
-        Rule(@"^自定义方案 (\d+) 已切换 · 当前仅本地编辑$", m => $"Custom preset {m.Groups[1].Value} selected · Local draft only"),
-        Rule(@"^已只读加载 (\d+) 个 OEM 功耗档案$", m => $"Read {m.Groups[1].Value} OEM power profiles"),
+        PrefixedRule("已载入 ", @"(.+)；确认参数后点击应用并回读。$", m => $"Loaded {m.Groups[1].Value}. Check the settings, then apply."),
+        PrefixedRule("已导出 ", @"(.+)。$", m => $"Exported {m.Groups[1].Value}."),
+        PrefixedRule("已恢复 ", @"(.+)；打开灯光页后可显式应用。$", m => $"Restored {m.Groups[1].Value}. Open Lighting to apply it."),
+        PrefixedRule("观察窗口：", @"(.+) / 600 秒 · 空闲 (.+)%$", m => $"Observation: {m.Groups[1].Value} / 600 s · Idle {m.Groups[2].Value}%"),
+        PrefixedRule("已保存 ", @"(.+)%；当前屏幕空间不足，暂按 (.+)% 显示。$", m => $"Saved {m.Groups[1].Value}%; using {m.Groups[2].Value}% to fit this screen."),
+        PrefixedRule("自定义模式 ", @"(\d+)$", m => "Custom " + m.Groups[1].Value),
+        PrefixedRule("只读传感器 · 更新于 ", @"(.+)$", m => "Read-only sensors · Updated " + m.Groups[1].Value),
+        PrefixedRule("自定义方案 ", @"(\d+) 已切换 · 当前仅本地编辑$", m => $"Custom preset {m.Groups[1].Value} selected · Local draft only"),
+        PrefixedRule("已只读加载 ", @"(\d+) 个 OEM 功耗档案$", m => $"Read {m.Groups[1].Value} OEM power profiles"),
         Rule(@"^(键盘背光|海岸灯带|LOGO 灯|水冷灯)：调整后自动应用，仅控制当前分区。$", m => TranslateKnown(m.Groups[1].Value) + ": Changes apply to this zone only."),
         Rule(@"^(键盘背光|海岸灯带|LOGO 灯|水冷灯)已通过 GCU 状态事件同步。$", m => TranslateKnown(m.Groups[1].Value) + " synchronized through GCU."),
         Rule(@"^(键盘背光|海岸灯带|LOGO 灯|水冷灯)灯效已确认；([亮度速方向颜色、]+)未回读确认，请以实际灯光为准。$", m =>
             $"{TranslateKnown(m.Groups[1].Value)} effect confirmed. {m.Groups[2].Value.Replace("亮度", "brightness").Replace("速度", "speed").Replace("方向", "direction").Replace("颜色", "color").Replace("、", ", ")} not confirmed by readback; check the actual light."),
-        Rule(@"^已发现 (\d+) 个灯光分区；调整后自动应用。$", m => $"Found {m.Groups[1].Value} lighting zones. Changes apply automatically."),
-        Rule(@"^发现 (\d+) 个兼容水冷设备，请选择后连接。$", m => $"Found {m.Groups[1].Value} compatible coolers. Select one to connect."),
-        Rule(@"^GCU 配置回读 · PL1 (.+) W · PL2 (.+) W · Boost (.+)$", m => $"GCU readback · PL1 {m.Groups[1].Value} W · PL2 {m.Groups[2].Value} W · Boost {m.Groups[3].Value}"),
-        Rule(@"^GCU 配置回读 · (.+) · PL1 (.+) W（(启用|未启用)） · PL2 (.+) W（(启用|未启用)）$", m => $"GCU readback · {m.Groups[1].Value} · PL1 {m.Groups[2].Value} W ({TranslateKnown(m.Groups[3].Value)}) · PL2 {m.Groups[4].Value} W ({TranslateKnown(m.Groups[5].Value)})"),
-        Rule(@"^OEM 固件预设 · GCU 配置回显 PL1 (.+) W（(启用|未启用)） / PL2 (.+) W（(启用|未启用)）· 非实际硬件 PL$", m => $"OEM preset · Reported PL1 {m.Groups[1].Value} W ({TranslateKnown(m.Groups[2].Value)}) / PL2 {m.Groups[3].Value} W ({TranslateKnown(m.Groups[4].Value)}) · Not measured hardware limits"),
-        Rule(@"^频率回读 · C0 (.+) · C1 (.+) · C2 (.+) MHz$", m => $"Frequency readback · C0 {m.Groups[1].Value} · C1 {m.Groups[2].Value} · C2 {m.Groups[3].Value} MHz"),
-        Rule(@"^已应用并回读 · PL1 (.+) W / PL2 (.+) W · (.+)$", m => $"Applied and verified · PL1 {m.Groups[1].Value} W / PL2 {m.Groups[2].Value} W · {m.Groups[3].Value}"),
-        Rule(@"^已应用并回读 Boost · (.+)；OEM 预设 PL 未改动$", m => $"Boost applied and verified · {m.Groups[1].Value}; OEM power limits unchanged"),
-        Rule(@"^GPU 频率偏移已回读确认：核心 (.+) MHz，显存 (.+) MHz。$", m => $"GPU offsets verified: core {m.Groups[1].Value} MHz, memory {m.Groups[2].Value} MHz."),
-        Rule(@"^可尝试范围：核心 (.+)～(.+) MHz；显存 (.+)～(.+) MHz。(.*)$", m => $"Available offsets: core {m.Groups[1].Value} to {m.Groups[2].Value} MHz; memory {m.Groups[3].Value} to {m.Groups[4].Value} MHz. {TranslateKnown(m.Groups[5].Value)}"),
+        PrefixedRule("已发现 ", @"(\d+) 个灯光分区；调整后自动应用。$", m => $"Found {m.Groups[1].Value} lighting zones. Changes apply automatically."),
+        PrefixedRule("发现 ", @"(\d+) 个兼容水冷设备，请选择后连接。$", m => $"Found {m.Groups[1].Value} compatible coolers. Select one to connect."),
+        PrefixedRule("GCU 配置回读 · PL1 ", @"(.+) W · PL2 (.+) W · Boost (.+)$", m => $"GCU readback · PL1 {m.Groups[1].Value} W · PL2 {m.Groups[2].Value} W · Boost {m.Groups[3].Value}"),
+        PrefixedRule("GCU 配置回读 · ", @"(.+) · PL1 (.+) W（(启用|未启用)） · PL2 (.+) W（(启用|未启用)）$", m => $"GCU readback · {m.Groups[1].Value} · PL1 {m.Groups[2].Value} W ({TranslateKnown(m.Groups[3].Value)}) · PL2 {m.Groups[4].Value} W ({TranslateKnown(m.Groups[5].Value)})"),
+        PrefixedRule("OEM 固件预设 · GCU 配置回显 PL1 ", @"(.+) W（(启用|未启用)） / PL2 (.+) W（(启用|未启用)）· 非实际硬件 PL$", m => $"OEM preset · Reported PL1 {m.Groups[1].Value} W ({TranslateKnown(m.Groups[2].Value)}) / PL2 {m.Groups[3].Value} W ({TranslateKnown(m.Groups[4].Value)}) · Not measured hardware limits"),
+        PrefixedRule("频率回读 · C0 ", @"(.+) · C1 (.+) · C2 (.+) MHz$", m => $"Frequency readback · C0 {m.Groups[1].Value} · C1 {m.Groups[2].Value} · C2 {m.Groups[3].Value} MHz"),
+        PrefixedRule("频率回读 · P 核 ", @"(.+) · E 核 (.+)$", m => $"Frequency readback · P-cores {m.Groups[1].Value.Replace("不限", "no limit")} · E-cores {m.Groups[2].Value.Replace("不限", "no limit")}"),
+        PrefixedRule("频率回读 · ", @"(\d+ MHz|不限)$", m => $"Frequency readback · {m.Groups[1].Value.Replace("不限", "no limit")}"),
+        PrefixedRule("频率回读 · 接电 C0 ", @"(.+) · C1 (.+) · C2 (.+) MHz · 电池 C0 (.+) · C1 (.+) · C2 (.+) MHz$", m => $"Frequency readback · AC C0 {m.Groups[1].Value} · C1 {m.Groups[2].Value} · C2 {m.Groups[3].Value} MHz · Battery C0 {m.Groups[4].Value} · C1 {m.Groups[5].Value} · C2 {m.Groups[6].Value} MHz"),
+        PrefixedRule("已应用并回读 · PL1 ", @"(.+) W / PL2 (.+) W · (.+)$", m => $"Applied and verified · PL1 {m.Groups[1].Value} W / PL2 {m.Groups[2].Value} W · {m.Groups[3].Value}"),
+        PrefixedRule("已应用并回读 Boost · ", @"(.+)；OEM 预设 PL 未改动$", m => $"Boost applied and verified · {m.Groups[1].Value}; OEM power limits unchanged"),
+        PrefixedRule("GPU 频率偏移已回读确认：核心 ", @"(.+) MHz，显存 (.+) MHz。$", m => $"GPU offsets verified: core {m.Groups[1].Value} MHz, memory {m.Groups[2].Value} MHz."),
+        PrefixedRule("可尝试范围：核心 ", @"(.+)～(.+) MHz；显存 (.+)～(.+) MHz。(.*)$", m => $"Available offsets: core {m.Groups[1].Value} to {m.Groups[2].Value} MHz; memory {m.Groups[3].Value} to {m.Groups[4].Value} MHz. {TranslateKnown(m.Groups[5].Value)}"),
         Rule(@"^(.+) · 高级参数只读$", m => TranslateKnown(m.Groups[1].Value) + " · Advanced settings (read-only)"),
         // V1.0.5: runtime status lines of the lighting, power, display and cooler pages.
         Rule($@"^{Zone}({Alternation(ZoneEndings.Keys)})$", m => TranslateKnown(m.Groups[1].Value) + ZoneEndings[m.Groups[2].Value]),
@@ -131,26 +133,26 @@ public static class UiTextCatalog
         Rule($@"^切换{Zone}失败：([\s\S]+)$", m => $"Switching {TranslateKnown(m.Groups[1].Value)} failed: {Translate(m.Groups[2].Value, "en-US")}"),
         Rule(@"^(.+)键盘方案已应用并回读。$", m => $"{TranslateKnown(m.Groups[1].Value)} keyboard preset applied and verified."),
         Rule(@"^(.+)没有可应用的已发现分区。$", m => $"{TranslateKnown(m.Groups[1].Value)}: no discovered zone can use it."),
-        Rule(@"^键盘与灯带自动熄灯档位 (.+) 已回读确认。$", m => $"Keyboard and light-bar sleep timer set to {Translate(m.Groups[1].Value, "en-US")} and verified."),
-        Rule(@"^休眠命令已发送，但官方状态仍为 (\d+)，未确认生效。$", m => $"Sleep timer sent, but the OEM status still reads {m.Groups[1].Value}; not confirmed."),
-        Rule(@"^电源与电池状态已读取 · 当前电量 (\d+)%$", m => $"Power and battery status read · Battery {m.Groups[1].Value}%"),
-        Rule(@"^深度睡眠已开启（(\d+) 分钟）并回读确认。$", m => $"Deep sleep on ({m.Groups[1].Value} min) and verified."),
-        Rule(@"^充电上限已设为 (\d+)% 并从 OEM 状态回读确认。$", m => $"Charge limit set to {m.Groups[1].Value}% and verified through OEM status."),
-        Rule(@"^充电上限写入后回读为 (\d+)%，未达到 (\d+)%。$", m => $"The charge limit reads {m.Groups[1].Value}% after writing, not {m.Groups[2].Value}%."),
-        Rule(@"^色彩管理已开启，(.+) 色域已回读确认。$", m => $"Color management on; {TranslateKnown(m.Groups[1].Value)} preset verified."),
-        Rule(@"^色彩管理与 (.+) 色域命令已提交，官方 ICC 校准流程仍在处理。$", m => $"Color management and {TranslateKnown(m.Groups[1].Value)} preset sent; the OEM ICC calibration is still running."),
-        Rule(@"^色彩管理应用失败：(.+)。$", m => $"Color management failed: {m.Groups[1].Value}."),
+        PrefixedRule("键盘与灯带自动熄灯档位 ", @"(.+) 已回读确认。$", m => $"Keyboard and light-bar sleep timer set to {Translate(m.Groups[1].Value, "en-US")} and verified."),
+        PrefixedRule("休眠命令已发送，但官方状态仍为 ", @"(\d+)，未确认生效。$", m => $"Sleep timer sent, but the OEM status still reads {m.Groups[1].Value}; not confirmed."),
+        PrefixedRule("电源与电池状态已读取 · 当前电量 ", @"(\d+)%$", m => $"Power and battery status read · Battery {m.Groups[1].Value}%"),
+        PrefixedRule("深度睡眠已开启（", @"(\d+) 分钟）并回读确认。$", m => $"Deep sleep on ({m.Groups[1].Value} min) and verified."),
+        PrefixedRule("充电上限已设为 ", @"(\d+)% 并从 OEM 状态回读确认。$", m => $"Charge limit set to {m.Groups[1].Value}% and verified through OEM status."),
+        PrefixedRule("充电上限写入后回读为 ", @"(\d+)%，未达到 (\d+)%。$", m => $"The charge limit reads {m.Groups[1].Value}% after writing, not {m.Groups[2].Value}%."),
+        PrefixedRule("色彩管理已开启，", @"(.+) 色域已回读确认。$", m => $"Color management on; {TranslateKnown(m.Groups[1].Value)} preset verified."),
+        PrefixedRule("色彩管理与 ", @"(.+) 色域命令已提交，官方 ICC 校准流程仍在处理。$", m => $"Color management and {TranslateKnown(m.Groups[1].Value)} preset sent; the OEM ICC calibration is still running."),
+        PrefixedRule("色彩管理应用失败：", @"(.+)。$", m => $"Color management failed: {m.Groups[1].Value}."),
         Rule(@"^(.+) 色域已应用并回读确认。$", m => $"{TranslateKnown(m.Groups[1].Value)} color preset applied and verified."),
         Rule(@"^(.+) 色域命令已提交，官方 ICC 校准流程仍在处理。$", m => $"{TranslateKnown(m.Groups[1].Value)} color preset sent; the OEM ICC calibration is still running."),
         Rule(@"^(.+) 色域应用失败：(.+)。$", m => $"{TranslateKnown(m.Groups[1].Value)} color preset failed: {m.Groups[2].Value}."),
-        Rule(@"^正在写入并回读：(.+)$", m => "Applying and verifying: " + TranslateKnown(m.Groups[1].Value)),
-        Rule(@"^当前已经是 (\d+) Hz。$", m => $"Already at {m.Groups[1].Value} Hz."),
-        Rule(@"^当前显示路径未提供 (\d+) Hz，未更改显示设置。$", m => $"This display path does not offer {m.Groups[1].Value} Hz; display settings were not changed."),
-        Rule(@"^当前机型未确认支持(.+)，没有写入硬件。$", m => $"{TranslateKnown(m.Groups[1].Value)} is not confirmed for this model; nothing was written."),
-        Rule(@"^当前已经是(.+)。$", m => $"{TranslateKnown(m.Groups[1].Value)} is already active."),
-        Rule(@"^已应用并回读：PL1 (.+) W / PL2 (.+) W。$", m => $"Applied and verified: PL1 {m.Groups[1].Value} W / PL2 {m.Groups[2].Value} W."),
+        PrefixedRule("正在写入并回读：", @"(.+)$", m => "Applying and verifying: " + TranslateKnown(m.Groups[1].Value)),
+        PrefixedRule("当前已经是 ", @"(\d+) Hz。$", m => $"Already at {m.Groups[1].Value} Hz."),
+        PrefixedRule("当前显示路径未提供 ", @"(\d+) Hz，未更改显示设置。$", m => $"This display path does not offer {m.Groups[1].Value} Hz; display settings were not changed."),
+        PrefixedRule("当前机型未确认支持", @"(.+)，没有写入硬件。$", m => $"{TranslateKnown(m.Groups[1].Value)} is not confirmed for this model; nothing was written."),
+        PrefixedRule("当前已经是", @"(.+)。$", m => $"{TranslateKnown(m.Groups[1].Value)} is already active."),
+        PrefixedRule("已应用并回读：PL1 ", @"(.+) W / PL2 (.+) W。$", m => $"Applied and verified: PL1 {m.Groups[1].Value} W / PL2 {m.Groups[2].Value} W."),
         Rule(@"^(设置定时关机失败|取消定时关机失败)（退出码 (-?\d+)）([\s\S]*)$", m => $"{TranslateKnown(m.Groups[1].Value)} (exit code {m.Groups[2].Value}){m.Groups[3].Value}"),
-        Rule(@"^驱动生效上限 ([\d.]+) W，显卡最大 ([\d.]+) W。$", m => $"Driver limit in effect: {m.Groups[1].Value} W; GPU maximum: {m.Groups[2].Value} W."),
+        PrefixedRule("驱动生效上限 ", @"([\d.]+) W，显卡最大 ([\d.]+) W。$", m => $"Driver limit in effect: {m.Groups[1].Value} W; GPU maximum: {m.Groups[2].Value} W."),
         Rule(@"^(简短|完整)报告 · (\d+) 字$", m => $"{(m.Groups[1].Value == "简短" ? "Brief" : "Full")} report · {m.Groups[2].Value} characters"),
         Rule(@"^([\s\S]+) 部分状态未读取：([\s\S]+)$", m => Translate(m.Groups[1].Value, "en-US") + " Some statuses were not read: " + TranslateStatusDetails(m.Groups[2].Value)),
         Rule($@"^(.+)({Alternation(LabelEndings.Keys)})$", m => TranslateKnown(m.Groups[1].Value) + LabelEndings[m.Groups[2].Value]),
@@ -173,8 +175,24 @@ public static class UiTextCatalog
     private static string TranslateStatusDetails(string text) =>
         string.Join("; ", text.Split('；').Select(part => Translate(part, "en-US")));
 
-    private static (Regex, Func<Match, string>) Rule(string pattern, Func<Match, string> format) =>
-        (new Regex(pattern, RegexOptions.CultureInvariant | RegexOptions.NonBacktracking, TimeSpan.FromMilliseconds(100)), format);
+    private static TranslationRule Rule(string pattern, Func<Match, string> format) => new("", pattern, format);
+
+    private static TranslationRule PrefixedRule(string prefix, string suffixPattern, Func<Match, string> format) =>
+        new(prefix, "^" + Regex.Escape(prefix) + suffixPattern, format);
+
+    private sealed class TranslationRule(string prefix, string pattern, Func<Match, string> format)
+    {
+        // A matcher can retain substantial tables. Build it only for text that can use this rule.
+        private readonly Lazy<Regex> matcher = new(() =>
+            new Regex(pattern, RegexOptions.CultureInvariant | RegexOptions.NonBacktracking, TimeSpan.FromMilliseconds(100)));
+
+        public string? TryTranslate(string text)
+        {
+            if (!text.StartsWith(prefix, StringComparison.Ordinal)) return null;
+            var match = matcher.Value.Match(text);
+            return match.Success ? format(match) : null;
+        }
+    }
 
     private static IReadOnlyDictionary<string, string> BuildCatalog()
     {
@@ -272,7 +290,8 @@ public static class UiTextCatalog
 保存为我的方案	Save my preset
 背景不透明度	Background opacity
 冰海呼吸	Ice breathing
-不区分 P / E 核；同时写入当前电源方案 AC / DC 的处理器 Class 0、Class 1 与 Class 2。仅在本次 RevoHelper 会话持有，退出或异常恢复时还原；部分固件仍可能忽略。	Applies to all processor classes on AC and battery. Held only for this session and restored on exit. Some firmware may ignore it.
+默认对所有核心使用同一个上限，同时写入当前电源方案 AC / DC 的处理器 Class 0、Class 1 与 Class 2。处理器有大小核时，可以打开“分别限制 P 核与 E 核”分开设置。仅在本次 RevoHelper 会话持有，退出或异常恢复时还原；部分固件仍可能忽略。	Uses one cap for all cores by default, written to processor classes 0, 1 and 2 on AC and battery in the current power plan. On processors with P- and E-cores, turn on “Separate P-core and E-core limits” to set them apart. Held only for this session and restored on exit. Some firmware may ignore it.
+仅在处理器同时有性能核（P 核）和能效核（E 核）时显示，核心类型以 Windows 报告为准。打开后两类核心各用一个上限，比如只压低 P 核来换取更低的温度和噪音；关闭后恢复为同一个上限。这个选择随当前档位保存。	Shown only when the processor has performance cores (P-cores) and efficiency cores (E-cores), as reported by Windows. When on, each type gets its own cap, for example a lower P-core cap for less heat and noise; when off, one cap covers all cores again. This choice is saved with the current profile.
 橙色 #FF7000	Orange #FF7000
 持续负载的主要功耗上限	Power limit for sustained workloads
 触摸板开关	Touchpad switch
@@ -297,6 +316,7 @@ public static class UiTextCatalog
 定时关机	Scheduled shutdown
 动态节能	Dynamic power saving
 动态节能说明	About dynamic power saving
+说明	Help
 可同时降低 CPU 功耗和温度	May also reduce CPU power use and temperature
 独立	Discrete
 独立监控小窗 · 不注入游戏	Floating monitor · No game injection
@@ -351,7 +371,8 @@ public static class UiTextCatalog
 从上到下	Top to bottom
 接入电源适配器后自动启动设备	Start the laptop when AC power is connected
 解锁后可直接拖动小窗。	Unlock to drag the monitor window.
-仅本次会话持有；退出自动恢复。生效可能延迟约 5–10 秒	Session only; restored on exit. Applying may take 5–10 seconds.
+仅本次会话持有；退出自动恢复。	Session only; restored on exit.
+生效可能延迟约 5–10 秒	Applying may take 5–10 seconds.
 仅供大致参考。用户可在风扇曲线上微调想要的噪音表现，改进温度控制。笔记本的低噪音、高性能与低温度几乎构成不可能三角。使用水冷（设备支持时）、空调冷气环境或风压式散热器等辅助散热手段，通常可以提升整机解热能力，并同时改善噪音控制、性能释放与温度表现。	A rough guide, not a benchmark. Noise, performance and temperature are a trade-off. A custom fan curve or better external cooling may improve the balance.
 仅记录主动添加的程序及操作时间，保存在本机。	Only programs you add and their selection times are saved locally.
 仅在自定义模式可调整。	Editable only in Custom mode.
@@ -519,6 +540,9 @@ Windows 处理器 Boost 策略	Windows CPU boost policy
 Windows 电源模式跟随	Follow Windows power mode
 Windows 通用功能	Windows controls
 Windows 通用最高处理器频率	Windows maximum CPU frequency
+分别限制 P 核与 E 核	Separate P-core and E-core limits
+P 核	P-cores
+E 核	E-cores
 XtuService、dptftcs 与 ipfsvc 属于 Intel 平台服务，不是机械革命控制台。	XtuService, dptftcs and ipfsvc are Intel platform services, not the MECHREVO console.
 监控字号	Monitor font size
 锁定监控小窗位置	Lock monitor position
@@ -1010,6 +1034,11 @@ GPU 实时状态未获确认；未继续写入	GPU live status not confirmed; wr
 动态节能未完成	Dynamic power saving did not complete
 恢复未完成	Restoration did not complete
 频率恢复未完成	Frequency restoration did not complete
+上次的频率恢复仍在进行，暂不读取频率设置。	The previous frequency restoration is still running; frequency settings are not read yet.
+上次的频率恢复仍在进行，暂不写入新的频率限制。	The previous frequency restoration is still running; no new frequency limit is written yet.
+RevoHelper 正在退出，不再写入新的频率限制。	RevoHelper is exiting; no new frequency limit is written.
+已同步当前 OEM 档位；动态节能正在管理频率，未追加写入。	OEM profile synchronized; dynamic power saving is managing the frequency, so nothing more was written.
+动态频率恢复未完成，暂不同步 Windows 频率策略。	Dynamic frequency restoration did not finish; the Windows frequency policy is not synced yet.
 遥测处理异常	Telemetry error
 水冷任务操作失败	Cooler task operation failed
 FPS 采集暂不可用	FPS capture unavailable
@@ -1044,5 +1073,23 @@ Windows 显示控制器未接入。	Windows display control is not connected.
 已取消生成。	Report cancelled.
 没有读到 NVIDIA 驱动的功耗上限。	No NVIDIA driver power limit was read.
 休眠	Asleep
+退出官方控制台	Exit official console
+只退出官方控制中心的窗口和托盘这一次；手动打开或重新登录后会恢复。后台服务和 OSD 热键保留，整机模式、风扇、灯光照常可用。	Closes the official window and tray this once; they return when you open the app or sign in again. Its background services and OSD hotkeys keep running, so modes, fans and lighting still work.
+正在运行 · 退出	Running · Exit
+正在退出…	Exiting…
+已退出	Exited
+状态未知 · 重查	Unknown · Recheck
+已刷新官方控制台状态	Console status refreshed
+未能确认官方控制台状态	Console status unknown
+官方控制台仍在运行	Console still running
+长期退出	Always exit
+打开后，每次 RevoHelper 启动时都会退出官方控制中心的窗口和托盘，打开时也会马上退出一次。随 Windows 启动时官方托盘会稍后出现，所以会在 3 分钟内每 10 秒检查一次。	When on, RevoHelper closes the official window and tray every time it starts, and once right away. When it starts with Windows, the official tray appears later, so it checks every 10 seconds for 3 minutes.
+长期退出已关闭	Always exit is off
+没能退出官方控制台，可以再试一次	Exit failed. Try again.
+已退出官方控制台，后台服务保留	Exited. Services kept.
+官方控制台没有在运行	Official console is not running
+长期退出已打开，但这次没能退出	Always exit is on, but this exit failed
+长期退出已打开，官方控制台已退出	Always exit on. Console exited.
+长期退出已打开	Always exit is on
 """;
 }

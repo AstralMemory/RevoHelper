@@ -17,6 +17,14 @@ public sealed class DiagnosticReportTests : IDisposable
     public void Dispose() => Directory.Delete(folder, true);
 
     [Fact]
+    public void ReportsShowUnknownWhenTheOfficialConsoleCouldNotBeChecked()
+    {
+        var app = App() with { OfficialConsoleRunning = null };
+        Assert.Contains("控制台状态未知", DiagnosticReportFormatter.Brief(app, Facts(), At, NoNames));
+        Assert.Contains("官方控制台：状态未知", DiagnosticReportFormatter.Full(app, Facts(), At, NoNames));
+    }
+
+    [Fact]
     public void Brief_HasTheMachineTheGpuAndTheStateInOneShortText()
     {
         var text = DiagnosticReportFormatter.Brief(App(), Facts(), At, NoNames);

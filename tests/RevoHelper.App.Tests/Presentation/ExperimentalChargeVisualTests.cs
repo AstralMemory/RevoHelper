@@ -52,7 +52,7 @@ public sealed class ExperimentalChargeVisualTests
                 scroll.ScrollToEnd();
                 Layout();
                 var card = Assert.IsType<Border>(window.FindName("ExperimentalChargeCard"));
-                var help = Assert.IsType<Border>(window.FindName("ExperimentalChargeHelpIcon"));
+                var help = Assert.IsType<HelpMark>(window.FindName("ExperimentalChargeHelpIcon"));
                 var tooltip = Assert.IsType<ToolTip>(help.ToolTip);
                 tooltip.PlacementTarget = help;
                 Layout();
@@ -75,7 +75,7 @@ public sealed class ExperimentalChargeVisualTests
                 Assert.True(delay.ActualHeight > 0);
                 Assert.Equal(Color.FromRgb(0xD9, 0x36, 0x3E), Assert.IsType<SolidColorBrush>(delay.Foreground).Color);
                 Assert.Equal(Color.FromRgb(0x17, 0x20, 0x2D), Assert.IsType<SolidColorBrush>(risk.Foreground).Color);
-                var powerHelp = Assert.IsType<Border>(window.FindName("PowerModeFollowHelpIcon"));
+                var powerHelp = Assert.IsType<HelpMark>(window.FindName("PowerModeFollowHelpIcon"));
                 var powerTooltip = Assert.IsType<ToolTip>(powerHelp.ToolTip);
                 powerTooltip.PlacementTarget = powerHelp;
                 Layout();

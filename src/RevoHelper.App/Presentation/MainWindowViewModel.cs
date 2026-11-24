@@ -32,6 +32,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
     private readonly IPlatformModeController? platformModeController;
     private readonly IGpuOutputModeController? gpuOutputModeController;
     private readonly IProcessorFrequencyLimitController? frequencyLimitController;
+    private readonly ProcessorCoreClasses? processorCoreClasses;
     private readonly IConflictServiceManager? conflictServiceManager;
     private readonly IQuickControlsController? quickControlsController;
     private readonly ILightingProfileStore lightingProfileStore;
@@ -64,6 +65,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
         ["custom:3"] = ProcessorBoostMode.Aggressive
     };
     private readonly Dictionary<string, int> frequencyDraftsByProfile = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, int> efficiencyFrequencyDraftsByProfile = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, bool> frequencyConfiguredByProfile = new(StringComparer.OrdinalIgnoreCase);
     private string statusMessage = "正在初始化设备状态…";
     private string telemetryStatusMessage = "正在初始化设备状态…";
@@ -91,10 +93,19 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
     private CancellationTokenSource newerPlatformRequest = new();
     private PlatformModeSelection? confirmedPlatformSelection;
     private readonly SemaphoreSlim performanceTransitionGate = new(1, 1);
+    // Set once exit has taken the gate above; it is never released again.
+    private bool exitHoldsPerformanceGate;
     private volatile bool isShuttingDown;
     private PlatformModeSelection? pendingFrequencyObservation;
     private long pendingFrequencyObservationRevision;
+    // A start-up or resume resync merged into the pending observation of the same mode.
+    private bool pendingFrequencyObservationResync;
+    // The pending observation's outcome, awaited by a resync merged into it.
+    private TaskCompletionSource<bool>? pendingFrequencyObservationResult;
     private PlatformModeSelection? modeOnlyPlatformSelection;
+    // A mode-only switch whose frequency sync the start-up recovery deferred: the next report
+    // of that mode, or the start-up resync, still does it once.
+    private PlatformModeSelection? modeOnlyFrequencySyncOwed;
     private long platformObservationRevision;
     private LocalizedUiCopy localizedUiCopy;
     private GpuOutputMode selectedGpuOutputMode = GpuOutputMode.Hybrid;
@@ -103,11 +114,13 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
     private string gpuOutputStatusText = "等待读取当前显卡输出模式";
     private bool isProcessorFrequencyLimitEnabled;
     private int selectedMaximumProcessorFrequencyMhz = 3100;
+    private int selectedMaximumEfficiencyCoreFrequencyMhz = 3100;
+    private bool isSeparateCoreFrequencyLimitEnabled;
     private string processorFrequencyLimitStatusText = "等待读取当前 Windows 频率上限";
     private RuntimeCapabilitySnapshot? runtimeCapabilities;
     private bool isManagingConflictServices;
     private string conflictServiceOperationStatusText = "选择服务后可临时停止或恢复运行。";
-    private bool isOfficialConsoleRunning;
+    private bool? isOfficialConsoleRunning;
     private bool isWinKeyEnabled;
     private bool isFnKeyEnabled;
     private bool isOsdEnabled;
@@ -214,10 +227,14 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
         IShutdownScheduler? shutdownScheduler = null,
         Action<string, string>? diagnostic = null,
         ILatestReleaseSource? latestReleaseSource = null,
-        IDiagnosticReportSource? diagnosticReport = null)
+        IDiagnosticReportSource? diagnosticReport = null,
+        ProcessorCoreClasses? processorCoreClasses = null,
+        OfficialFrontendExit? officialFrontendExit = null)
     {
+        this.officialFrontendExit = officialFrontendExit;
         this.latestReleaseSource = latestReleaseSource;
         this.diagnosticReport = diagnosticReport;
+        this.processorCoreClasses = processorCoreClasses;
         Experiments = experiments ?? new();
         Dashboard = dashboard;
         deviceSampleTimes.Clear();
@@ -361,7 +378,7 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
         }
     }
 
-    public bool IsOfficialConsoleRunning
+    public bool? IsOfficialConsoleRunning
     {
         get => isOfficialConsoleRunning;
         private set
@@ -374,7 +391,10 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
         }
     }
 
-    public string OfficialConsoleStatusText => IsOfficialConsoleRunning ? "正在运行" : "未运行";
+    public string OfficialConsoleStatusText => IsOfficialConsoleRunning switch
+    {
+        true => "正在运行", false => "未运行", null => "状态未知"
+    };
     public string OfficialConsoleInstructionText =>
         "RevoHelper可以与官方控制台共存，不会停用或禁用它们";
 
@@ -403,8 +423,17 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
 
     private void RefreshOfficialConsoleStatus()
     {
+        // The official tray counts too: it is what stays running after the window is closed.
+        if (officialFrontendExit is { } exit)
+        {
+            var snapshot = exit.Inspect();
+            bool? running = snapshot.Targets.Count > 0 ? true : snapshot.HasUnknown ? null : false;
+            SetOfficialFrontendRunning(running);
+            IsOfficialConsoleRunning = snapshot.LegacyRunning ? true : running;
+            return;
+        }
         try { IsOfficialConsoleRunning = officialConsoleRunningProbe(); }
-        catch { IsOfficialConsoleRunning = false; }
+        catch { IsOfficialConsoleRunning = null; }
     }
 
     public async Task RefreshConflictServicesAsync(CancellationToken cancellationToken)
@@ -767,9 +796,9 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
     public bool IsPlatformSwitchPending => isApplyingPlatformMode &&
         Volatile.Read(ref platformCommandRevision) == Volatile.Read(ref platformRequestRevision);
 
-    public string ReleaseVersionText => "V1.0.7";
+    public string ReleaseVersionText => "V1.0.8";
 
-    public string ReleaseBadgeText => "V1.0.7";
+    public string ReleaseBadgeText => "V1.0.8";
 
     public string AppVersionText => $"RevoHelper {ReleaseVersionText} · {UiCopy.OpenSourceAndFree}";
 
@@ -1846,10 +1875,13 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
             frequencyDraftsByProfile[CurrentPowerLimitKey] = value
                 ? selectedMaximumProcessorFrequencyMhz
                 : 0;
+            // The profile keeps its separate-caps choice and E-core value; the P-core value is not
+            // kept while the cap is off.
             OnPropertyChanged();
         }
     }
 
+    /// <summary>The cap for all cores, or for the P-cores when <see cref="IsSeparateCoreFrequencyLimitEnabled"/>.</summary>
     public int SelectedMaximumProcessorFrequencyMhz
     {
         get => selectedMaximumProcessorFrequencyMhz;
@@ -1862,6 +1894,54 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
             {
                 frequencyDraftsByProfile[CurrentPowerLimitKey] = clamped;
             }
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>The E-core cap; only used when <see cref="IsSeparateCoreFrequencyLimitEnabled"/>.</summary>
+    public int SelectedMaximumEfficiencyCoreFrequencyMhz
+    {
+        get => selectedMaximumEfficiencyCoreFrequencyMhz;
+        set
+        {
+            var clamped = Math.Clamp(value, 1000, 6000);
+            if (selectedMaximumEfficiencyCoreFrequencyMhz == clamped) return;
+            selectedMaximumEfficiencyCoreFrequencyMhz = clamped;
+            if (IsProcessorFrequencyLimitEnabled && isSeparateCoreFrequencyLimitEnabled)
+            {
+                efficiencyFrequencyDraftsByProfile[CurrentPowerLimitKey] = clamped;
+            }
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>
+    /// Windows reports P-cores and E-cores, so the user may give each type its own cap.
+    /// Otherwise, or when the core types could not be read, one cap covers every core.
+    /// </summary>
+    public bool CanSeparateCoreFrequencyLimits => processorCoreClasses?.CanLimitSeparately == true;
+
+    /// <summary>
+    /// Off by default: one cap covers every core, as before V1.0.8. Kept per profile as the
+    /// E-core value, which is 0 while the profile uses one cap.
+    /// </summary>
+    public bool IsSeparateCoreFrequencyLimitEnabled
+    {
+        get => isSeparateCoreFrequencyLimitEnabled;
+        set
+        {
+            var enabled = value && CanSeparateCoreFrequencyLimits;
+            if (isSeparateCoreFrequencyLimitEnabled == enabled) return;
+            isSeparateCoreFrequencyLimitEnabled = enabled;
+            if (enabled)
+            {
+                // Start from the current cap, so turning this on changes nothing until a slider moves.
+                selectedMaximumEfficiencyCoreFrequencyMhz = selectedMaximumProcessorFrequencyMhz;
+                OnPropertyChanged(nameof(SelectedMaximumEfficiencyCoreFrequencyMhz));
+            }
+            efficiencyFrequencyDraftsByProfile[CurrentPowerLimitKey] = enabled
+                ? selectedMaximumEfficiencyCoreFrequencyMhz
+                : 0;
             OnPropertyChanged();
         }
     }
@@ -4199,10 +4279,41 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
     public void BeginShutdown()
     {
         isShuttingDown = true;
+        StopOfficialConsoleWatch();
+        officialConsoleCloseCancellation?.Cancel();
         CancelLiquidCoolingRecovery();
         liquidCoolingLifetime.Cancel();
         CancelDiagnosticReport();
         OnPropertyChanged(nameof(CanRecheckCapabilities));
+    }
+
+    /// <summary>
+    /// Normal exit from the tray: no new performance change starts, and the one under way
+    /// (mode switch, applied settings or their rollback) finishes before App.OnExit restores
+    /// frequency, PL and Boost. Awaited on the UI thread, where the gate's holder releases it.
+    /// The gate is kept, so nothing can start again afterwards.
+    /// </summary>
+    public async Task<bool> PrepareForExitAsync(TimeSpan timeout)
+    {
+        BeginShutdown();
+        if (!exitHoldsPerformanceGate)
+        {
+            exitHoldsPerformanceGate = await performanceTransitionGate.WaitAsync(timeout);
+        }
+        return exitHoldsPerformanceGate;
+    }
+
+    /// <summary>
+    /// For App.OnExit, which must not wait: true when no performance change can still be
+    /// writing, so the exit restores cannot race one. Takes the gate if it is free and keeps it.
+    /// </summary>
+    public bool TryClaimForExitRecovery()
+    {
+        if (!exitHoldsPerformanceGate)
+        {
+            exitHoldsPerformanceGate = performanceTransitionGate.Wait(0);
+        }
+        return exitHoldsPerformanceGate;
     }
 
     private string CurrentPowerLimitKey => SelectedProfileId switch
@@ -4234,8 +4345,15 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
         {
             selectedMaximumProcessorFrequencyMhz = value;
         }
+        var efficiency = efficiencyFrequencyDraftsByProfile.GetValueOrDefault(CurrentPowerLimitKey);
+        isSeparateCoreFrequencyLimitEnabled = CanSeparateCoreFrequencyLimits && efficiency is >= 1000 and <= 6000;
+        selectedMaximumEfficiencyCoreFrequencyMhz = isSeparateCoreFrequencyLimitEnabled
+            ? efficiency
+            : selectedMaximumProcessorFrequencyMhz;
         OnPropertyChanged(nameof(IsProcessorFrequencyLimitEnabled));
         OnPropertyChanged(nameof(SelectedMaximumProcessorFrequencyMhz));
+        OnPropertyChanged(nameof(IsSeparateCoreFrequencyLimitEnabled));
+        OnPropertyChanged(nameof(SelectedMaximumEfficiencyCoreFrequencyMhz));
     }
 
     private async Task<string> VerifyPerformancePolicyStabilityAsync(
@@ -4262,8 +4380,38 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
             : "整套性能策略已应用、回读，并在 1 秒复查后保持不变。";
     }
 
-    private static string FormatFrequencyReadback(ProcessorFrequencyLimitPolicy frequency) =>
-        $"频率回读 · C0 {frequency.AcMaximumMhz} · C1 {frequency.AcClass1MaximumMhz} · C2 {frequency.AcClass2MaximumMhz} MHz";
+    /// <summary>
+    /// A P/E summary only when it is unambiguous: Windows' classes map onto P- and E-cores,
+    /// the E-core classes agree, and AC equals battery. Anything else shows the raw values.
+    /// </summary>
+    private string FormatFrequencyReadback(ProcessorFrequencyLimitPolicy frequency)
+    {
+        var raw = $"频率回读 · C0 {frequency.AcMaximumMhz} · C1 {frequency.AcClass1MaximumMhz} · C2 {frequency.AcClass2MaximumMhz} MHz";
+        if (!frequency.AcMatchesDc())
+        {
+            return $"频率回读 · 接电 C0 {frequency.AcMaximumMhz} · C1 {frequency.AcClass1MaximumMhz} · C2 {frequency.AcClass2MaximumMhz} MHz · " +
+                   $"电池 C0 {frequency.DcMaximumMhz} · C1 {frequency.DcClass1MaximumMhz} · C2 {frequency.DcClass2MaximumMhz} MHz";
+        }
+
+        if (processorCoreClasses is not { CanLimitSeparately: true } classes)
+        {
+            return raw;
+        }
+
+        var efficiencyValues = classes.EfficiencyClasses.Select(frequency.AcMaximumMhzForClass).Distinct().ToArray();
+        if (efficiencyValues.Length != 1)
+        {
+            return raw;
+        }
+
+        var performance = frequency.AcMaximumMhzForClass(classes.PerformanceClass);
+        var efficiency = efficiencyValues[0];
+        return performance == efficiency
+            ? $"频率回读 · {FrequencyCapText(performance)}"
+            : $"频率回读 · P 核 {FrequencyCapText(performance)} · E 核 {FrequencyCapText(efficiency)}";
+    }
+
+    private static string FrequencyCapText(uint mhz) => mhz == 0 ? "不限" : $"{mhz} MHz";
 
     private void LoadSavedPerformanceProfiles(
         IReadOnlyDictionary<string, PerformanceProfileSettings>? profiles)
@@ -4284,6 +4432,10 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
             frequencyDraftsByProfile[key] = profile.MaximumProcessorFrequencyConfigured
                 ? Math.Max(0, profile.MaximumProcessorFrequencyMhz)
                 : 0;
+            efficiencyFrequencyDraftsByProfile[key] = profile.MaximumProcessorFrequencyConfigured &&
+                profile.EfficiencyCoreMaximumFrequencyMhz is >= 1000 and <= 6000
+                    ? profile.EfficiencyCoreMaximumFrequencyMhz
+                    : 0;
         }
     }
 
@@ -4303,7 +4455,10 @@ public sealed partial class MainWindowViewModel : INotifyPropertyChanged
             draft.Pl2Watts,
             boost,
             Math.Max(0, frequencyDraftsByProfile.GetValueOrDefault(key)),
-            frequencyConfiguredByProfile.GetValueOrDefault(key));
+            frequencyConfiguredByProfile.GetValueOrDefault(key),
+            // Kept even when the core types could not be read this time, so one failed read
+            // does not erase separate P/E caps saved earlier.
+            Math.Max(0, efficiencyFrequencyDraftsByProfile.GetValueOrDefault(key)));
         TrySaveSettings(applicationSettings with { PerformanceProfiles = profiles });
     }
 

@@ -102,6 +102,52 @@ public sealed class MainWindowViewModelTests
         Assert.Empty(frequency.AppliedPolicies);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ModeOnlySwitchDeferredByTheStartupRecovery_SyncsItsConfiguredCapOnceAfterwards(bool echoFirst)
+    {
+        // An unobserved target takes the mode-only route; its saved cap cannot be written while
+        // the start-up frequency recovery overruns the gate's wait.
+        var inner = new RecordingFrequencyLimitController(ProcessorFrequencyLimitPolicy.Uniform(0));
+        var startup = new TaskCompletionSource();
+        var gate = new FrequencyWriteGate(inner, startup.Task, TimeSpan.FromMilliseconds(50));
+        var platform = new RecordingPlatformModeController(new(PlatformMode.Balanced));
+        var settings = new ApplicationSettings(PerformanceProfiles: new Dictionary<string, PerformanceProfileSettings>
+        {
+            ["office:1"] = new(45, 55, ProcessorBoostMode.EfficientEnabled, 3200, MaximumProcessorFrequencyConfigured: true)
+        });
+        var vm = CreateViewModel(platformModeController: platform,
+            cpuPolicyController: new RecordingCpuPolicyController(new(45, 65, null)),
+            boostController: new RecordingBoostController(new(ProcessorBoostMode.Aggressive, ProcessorBoostMode.Aggressive)),
+            frequencyLimitController: gate,
+            verificationDelay: (_, _) => Task.CompletedTask,
+            settings: settings);
+        vm.ApplyRuntimeCapabilities(new(vm.Dashboard.Identity,
+            new Dictionary<HardwareFeature, HardwareFeatureCapability>(),
+            new HashSet<PlatformMode> { PlatformMode.Balanced }, []));
+
+        Assert.False(await vm.ApplyPlatformProfileAsync("office", default));
+        Assert.Equal(PlatformMode.Office, platform.LastApplied?.Mode);
+        Assert.Empty(inner.AppliedPolicies);
+
+        // Still deferred: an echo tries, fails, and keeps the sync owed.
+        Assert.False(await vm.ObservePlatformModeAsync(new(PlatformMode.Office), default));
+        Assert.Empty(inner.AppliedPolicies);
+
+        startup.SetResult();
+        Assert.True(echoFirst
+            ? await vm.ObservePlatformModeAsync(new(PlatformMode.Office), default)
+            : await vm.SynchronizeControlSessionAsync(default));
+        Assert.Equal([ProcessorFrequencyLimitPolicy.Uniform(3200)], inner.AppliedPolicies);
+
+        // Done once; later reports are echoes of the mode-only switch again.
+        Assert.True(echoFirst
+            ? await vm.SynchronizeControlSessionAsync(default)
+            : await vm.ObservePlatformModeAsync(new(PlatformMode.Office), default));
+        Assert.Single(inner.AppliedPolicies);
+    }
+
     [Fact]
     public async Task MissingTargetEvidenceDoesNotMakeModeSwitchDependOnUnrelatedWindowsPolicyReads()
     {
@@ -510,6 +556,272 @@ public sealed class MainWindowViewModelTests
         Assert.False(viewModel.IsOfficialConsoleRunning);
     }
 
+    // V1.0.8 Snapshot 7: the exit closes the official window and tray once; the long-term switch
+    // stays as it was. Snapshot 8: the red pill is the exit, and turns grey and disabled after it.
+    [Fact]
+    public async Task ExitButton_ClosesTheOfficialWindowAndTrayOnce()
+    {
+        var store = new RecordingSettingsStore();
+        var tray = new OfficialFrontendProcess(20336, "SystrayComponent");
+        var frontends = new FakeOfficialFrontends(tray);
+        var viewModel = CreateViewModel(store: store,
+            officialFrontendExit: new OfficialFrontendExit(frontends, (_, _) => Task.CompletedTask));
+        viewModel.OpenSettings();
+        Assert.True(viewModel.IsOfficialFrontendRunning);
+        Assert.Equal("正在运行 · 退出", viewModel.OfficialConsoleExitButtonText);
+        Assert.True(viewModel.CanExitOfficialConsoleNow);
+        Assert.True(viewModel.IsOfficialConsoleRunning);
+
+        await viewModel.ExitOfficialConsoleNowAsync();
+
+        Assert.Equal(new[] { tray }, frontends.Closed);
+        Assert.False(viewModel.IsOfficialFrontendRunning);
+        Assert.Equal("已退出", viewModel.OfficialConsoleExitButtonText);
+        Assert.False(viewModel.CanExitOfficialConsoleNow);
+        Assert.False(viewModel.IsOfficialConsoleRunning);
+        Assert.Equal("已退出官方控制台，后台服务保留", viewModel.StatusMessage);
+        Assert.False(viewModel.ExitOfficialConsole);
+        Assert.NotEqual(true, store.LastSaved?.ExitOfficialConsole);
+    }
+
+    [Fact]
+    public async Task ExitButton_SaysExitingAndCannotBeClickedAgainMeanwhile()
+    {
+        using var gate = new ManualResetEventSlim();
+        var frontends = new FakeOfficialFrontends(new OfficialFrontendProcess(20336, "SystrayComponent")) { CloseGate = gate };
+        var viewModel = CreateViewModel(
+            officialFrontendExit: new OfficialFrontendExit(frontends, (_, _) => Task.CompletedTask));
+        viewModel.OpenSettings();
+
+        var exiting = viewModel.ExitOfficialConsoleNowAsync();
+        Assert.Equal("正在退出…", viewModel.OfficialConsoleExitButtonText);
+        Assert.False(viewModel.CanExitOfficialConsoleNow);
+        gate.Set();
+        await exiting.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal("已退出", viewModel.OfficialConsoleExitButtonText);
+    }
+
+    [Fact]
+    public async Task ExitButton_WhenStatusIsUnknown_RechecksBeforeClosingAnyProcess()
+    {
+        var tray = new OfficialFrontendProcess(7, "SystrayComponent");
+        var frontends = new FakeOfficialFrontends { HasUnknown = true };
+        var viewModel = CreateViewModel(officialFrontendExit: new OfficialFrontendExit(frontends));
+        viewModel.OpenSettings();
+        Assert.Equal("状态未知 · 重查", viewModel.OfficialConsoleExitButtonText);
+        Assert.True(viewModel.CanExitOfficialConsoleNow);
+        Assert.Null(viewModel.IsOfficialConsoleRunning);
+
+        frontends.HasUnknown = false;
+        frontends.Start(tray);
+        await viewModel.ExitOfficialConsoleNowAsync();
+
+        Assert.Empty(frontends.Closed);
+        Assert.Equal("正在运行 · 退出", viewModel.OfficialConsoleExitButtonText);
+        Assert.True(viewModel.CanExitOfficialConsoleNow);
+        await viewModel.ExitOfficialConsoleNowAsync();
+        Assert.Equal(new[] { tray }, frontends.Closed);
+        Assert.Equal("已退出", viewModel.OfficialConsoleExitButtonText);
+    }
+
+    [Fact]
+    public async Task ExitButton_WhenWindowsRefuses_LeavesTheRunningConsoleAvailableForRetry()
+    {
+        var tray = new OfficialFrontendProcess(7, "SystrayComponent");
+        var frontends = new FakeOfficialFrontends(tray) { RefuseClose = true };
+        var viewModel = CreateViewModel(officialFrontendExit: new OfficialFrontendExit(frontends));
+        viewModel.OpenSettings();
+        await viewModel.ExitOfficialConsoleNowAsync();
+        Assert.Equal("没能退出官方控制台，可以再试一次", viewModel.StatusMessage);
+        Assert.True(viewModel.IsOfficialFrontendRunning);
+        Assert.True(viewModel.CanExitOfficialConsoleNow);
+        frontends.RefuseClose = false;
+        await viewModel.ExitOfficialConsoleNowAsync();
+        Assert.Equal(new[] { tray }, frontends.Closed);
+        Assert.Equal("已退出", viewModel.OfficialConsoleExitButtonText);
+    }
+
+    [Fact]
+    public void OpeningSettings_UsesOneSnapshotForLegacyStatusAndKeepsExitDisabled()
+    {
+        var frontends = new FakeOfficialFrontends { LegacyRunning = true };
+        var fallbackProbes = 0;
+        var viewModel = CreateViewModel(officialFrontendExit: new OfficialFrontendExit(frontends),
+            officialConsoleRunningProbe: () => { fallbackProbes++; return false; });
+        var finds = frontends.Finds;
+        var probes = fallbackProbes;
+
+        viewModel.OpenSettings();
+
+        Assert.Equal(finds + 1, frontends.Finds);
+        Assert.Equal(probes, fallbackProbes);
+        Assert.True(viewModel.IsOfficialConsoleRunning);
+        Assert.False(viewModel.CanExitOfficialConsoleNow);
+        Assert.Empty(frontends.Closed);
+    }
+
+    // Snapshot 8: someone who opens the official console while settings show the grey pill finds
+    // it red again on coming back to the window. With settings closed nothing is checked.
+    [Fact]
+    public void ComingBackToTheWindow_ChecksTheOfficialConsoleOnlyWhileSettingsAreOpen()
+    {
+        var frontends = new FakeOfficialFrontends();
+        var viewModel = CreateViewModel(
+            officialFrontendExit: new OfficialFrontendExit(frontends, (_, _) => Task.CompletedTask));
+        viewModel.OpenSettings();
+        Assert.Equal("已退出", viewModel.OfficialConsoleExitButtonText);
+        Assert.False(viewModel.CanExitOfficialConsoleNow);
+
+        frontends.Start(new OfficialFrontendProcess(7, "SystrayComponent"));
+        viewModel.RefreshOfficialConsoleStatusIfSettingsOpen();
+        Assert.Equal("正在运行 · 退出", viewModel.OfficialConsoleExitButtonText);
+        Assert.True(viewModel.CanExitOfficialConsoleNow);
+
+        viewModel.CloseDrawer();
+        var finds = frontends.Finds;
+        viewModel.RefreshOfficialConsoleStatusIfSettingsOpen();
+        Assert.Equal(finds, frontends.Finds);
+    }
+
+    [Fact]
+    public async Task ExitButton_SaysWhenTheOfficialConsoleIsNotRunning()
+    {
+        var viewModel = CreateViewModel(
+            officialFrontendExit: new OfficialFrontendExit(new FakeOfficialFrontends(), (_, _) => Task.CompletedTask));
+
+        await viewModel.ExitOfficialConsoleNowAsync();
+
+        Assert.Equal("官方控制台没有在运行", viewModel.StatusMessage);
+        Assert.Equal("已退出", viewModel.OfficialConsoleExitButtonText);
+    }
+
+    [Fact]
+    public void TurningOnLongTermExit_SavesTheOptionAndExitsNow()
+    {
+        var store = new RecordingSettingsStore();
+        var tray = new OfficialFrontendProcess(20336, "SystrayComponent");
+        var frontends = new FakeOfficialFrontends(tray);
+        var viewModel = CreateViewModel(store: store,
+            officialFrontendExit: new OfficialFrontendExit(frontends, (_, _) => Task.CompletedTask));
+
+        viewModel.ExitOfficialConsole = true;
+
+        Assert.True(store.LastSaved?.ExitOfficialConsole);
+        Assert.True(SpinWait.SpinUntil(() => viewModel.StatusMessage == "长期退出已打开，官方控制台已退出", TimeSpan.FromSeconds(10)));
+        Assert.Equal(new[] { tray }, frontends.Closed);
+        Assert.False(viewModel.IsOfficialFrontendRunning);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ChangingLongTermExit_DuringAnExit_HonorsTheLatestChoice(bool enableAgain)
+    {
+        using var gate = new ManualResetEventSlim();
+        var tray = new OfficialFrontendProcess(7, "SystrayComponent");
+        var frontends = new FakeOfficialFrontends(tray) { CloseGate = gate };
+        var viewModel = CreateViewModel(officialFrontendExit: new OfficialFrontendExit(frontends));
+        viewModel.OpenSettings();
+        var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        viewModel.ExitOfficialConsole = true;
+        try
+        {
+            await frontends.CloseStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            viewModel.ExitOfficialConsole = false;
+            if (enableAgain) viewModel.ExitOfficialConsole = true;
+            viewModel.PropertyChanged += (_, args) =>
+            {
+                if (args.PropertyName == nameof(viewModel.OfficialConsoleExitButtonText) &&
+                    viewModel.OfficialConsoleExitButtonText != "正在退出…")
+                    finished.TrySetResult();
+            };
+        }
+        finally
+        {
+            gate.Set();
+        }
+        await finished.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(enableAgain, viewModel.ExitOfficialConsole);
+        if (enableAgain)
+        {
+            Assert.Equal(new[] { tray }, frontends.Closed);
+            Assert.Equal("长期退出已打开，官方控制台已退出", viewModel.StatusMessage);
+        }
+        else
+        {
+            Assert.Empty(frontends.Closed);
+            Assert.Equal("长期退出已关闭", viewModel.StatusMessage);
+        }
+    }
+
+    // With long-term exit on and RevoHelper started with Windows, the official tray appears later.
+    [Fact]
+    public void StartOfficialConsoleWatch_ClosesATrayThatStartsAfterSignIn()
+    {
+        var frontends = new FakeOfficialFrontends();
+        var delays = 0;
+        var exit = new OfficialFrontendExit(frontends, (_, _) =>
+        {
+            if (Interlocked.Increment(ref delays) == 2) frontends.Start(new OfficialFrontendProcess(7, "SystrayComponent"));
+            return Task.CompletedTask;
+        });
+        var viewModel = CreateViewModel(settings: new ApplicationSettings(ExitOfficialConsole: true), officialFrontendExit: exit);
+
+        viewModel.StartOfficialConsoleWatch();
+
+        Assert.True(SpinWait.SpinUntil(() => frontends.Closed.Count == 1, TimeSpan.FromSeconds(10)));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TurningOffLongTermExit_OrBeginningShutdown_StopsTheStartupWatch(bool beginShutdown)
+    {
+        var store = new RecordingSettingsStore();
+        var frontends = new FakeOfficialFrontends();
+        var waiting = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var exit = new OfficialFrontendExit(frontends, async (_, token) =>
+        {
+            waiting.TrySetResult(token);
+            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+        });
+        var viewModel = CreateViewModel(store: store, settings: new ApplicationSettings(ExitOfficialConsole: true),
+            officialFrontendExit: exit);
+        viewModel.StartOfficialConsoleWatch();
+        var watchToken = await waiting.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        frontends.Start(new OfficialFrontendProcess(9, "SystrayComponent"));
+        if (beginShutdown)
+            viewModel.BeginShutdown();
+        else
+            viewModel.ExitOfficialConsole = false;
+
+        Assert.True(watchToken.IsCancellationRequested);
+        if (beginShutdown)
+            Assert.True(viewModel.ExitOfficialConsole);
+        else
+        {
+            Assert.False(store.LastSaved?.ExitOfficialConsole);
+            Assert.Equal("长期退出已关闭", viewModel.StatusMessage);
+        }
+        Assert.Empty(frontends.Closed);
+    }
+
+    [Fact]
+    public void StartOfficialConsoleWatch_LeavesTheOfficialConsoleAloneWhileLongTermExitIsOff()
+    {
+        var frontends = new FakeOfficialFrontends(new OfficialFrontendProcess(1, "SystrayComponent"));
+        var viewModel = CreateViewModel(officialFrontendExit: new OfficialFrontendExit(frontends, (_, _) => Task.CompletedTask));
+
+        viewModel.StartOfficialConsoleWatch();
+
+        Assert.False(viewModel.ExitOfficialConsole);
+        Assert.Empty(frontends.Closed);
+    }
+
     [Fact]
     public void UpdateConflictServices_ReplacesPreviousDetectionSnapshot()
     {
@@ -788,9 +1100,9 @@ public sealed class MainWindowViewModelTests
     {
         var viewModel = new MainWindowViewModel(CreateDashboard());
 
-        Assert.Equal("V1.0.7", viewModel.ReleaseVersionText);
-        Assert.Equal("V1.0.7", viewModel.ReleaseBadgeText);
-        Assert.Equal("RevoHelper V1.0.7 · 免费使用", viewModel.AppVersionText);
+        Assert.Equal("V1.0.8", viewModel.ReleaseVersionText);
+        Assert.Equal("V1.0.8", viewModel.ReleaseBadgeText);
+        Assert.Equal("RevoHelper V1.0.8 · 免费使用", viewModel.AppVersionText);
     }
 
     [Fact]
@@ -808,7 +1120,7 @@ public sealed class MainWindowViewModelTests
         Assert.Equal("Laptop performance profiles", viewModel.UiCopy.HomeTitle);
         Assert.Equal("Performance", viewModel.DrawerTitle);
         Assert.Equal("Tuning", viewModel.UiCopy.PerformanceEntryTitle);   // the home button is too narrow for "Performance"
-        Assert.Equal("RevoHelper V1.0.7 · Free to use", viewModel.AppVersionText);
+        Assert.Equal("RevoHelper V1.0.8 · Free to use", viewModel.AppVersionText);
     }
 
     [Fact]
@@ -2380,6 +2692,244 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public async Task ApplyPerformancePolicy_OnHybridProcessor_UsesOneCapUntilSeparateLimitsAreOn()
+    {
+        var store = new RecordingSettingsStore();
+        var frequency = new RecordingFrequencyLimitController(ProcessorFrequencyLimitPolicy.Uniform(0));
+        var viewModel = await CreateHybridPerformanceViewModelAsync(store, frequency);
+        viewModel.IsProcessorFrequencyLimitEnabled = true;
+        viewModel.SelectedMaximumProcessorFrequencyMhz = 4000;
+
+        await viewModel.ApplyPerformancePolicyAsync(CancellationToken.None);
+
+        Assert.True(viewModel.CanSeparateCoreFrequencyLimits);
+        Assert.False(viewModel.IsSeparateCoreFrequencyLimitEnabled);
+        Assert.Equal(ProcessorFrequencyLimitPolicy.Uniform(4000), frequency.LastApplied);
+        Assert.Equal("频率回读 · 4000 MHz", viewModel.ProcessorFrequencyLimitStatusText);
+        var saved = Assert.IsType<ApplicationSettings>(store.LastSaved).PerformanceProfiles!["office:1"];
+        Assert.Equal(4000, saved.MaximumProcessorFrequencyMhz);
+        Assert.Equal(0, saved.EfficiencyCoreMaximumFrequencyMhz);
+    }
+
+    [Fact]
+    public async Task ApplyPerformancePolicy_WithSeparateLimits_WritesPAndECoreCapsAndCanGoBack()
+    {
+        var store = new RecordingSettingsStore();
+        var frequency = new RecordingFrequencyLimitController(ProcessorFrequencyLimitPolicy.Uniform(0));
+        var viewModel = await CreateHybridPerformanceViewModelAsync(store, frequency);
+        viewModel.IsProcessorFrequencyLimitEnabled = true;
+        viewModel.SelectedMaximumProcessorFrequencyMhz = 4000;
+
+        viewModel.IsSeparateCoreFrequencyLimitEnabled = true;
+        Assert.Equal(4000, viewModel.SelectedMaximumEfficiencyCoreFrequencyMhz);
+        viewModel.SelectedMaximumEfficiencyCoreFrequencyMhz = 3000;
+        await viewModel.ApplyPerformancePolicyAsync(CancellationToken.None);
+
+        // The base Windows setting covers class 0 (E-cores); Class 1 and Class 2 get the P-core cap.
+        Assert.Equal(new ProcessorFrequencyLimitPolicy(3000, 3000, 4000, 4000, 4000, 4000), frequency.LastApplied);
+        Assert.Equal("频率回读 · P 核 4000 MHz · E 核 3000 MHz", viewModel.ProcessorFrequencyLimitStatusText);
+        Assert.Equal(3000, Assert.IsType<ApplicationSettings>(store.LastSaved)
+            .PerformanceProfiles!["office:1"].EfficiencyCoreMaximumFrequencyMhz);
+
+        viewModel.IsSeparateCoreFrequencyLimitEnabled = false;
+        await viewModel.ApplyPerformancePolicyAsync(CancellationToken.None);
+
+        Assert.Equal(ProcessorFrequencyLimitPolicy.Uniform(4000), frequency.LastApplied);
+        Assert.Equal(0, Assert.IsType<ApplicationSettings>(store.LastSaved)
+            .PerformanceProfiles!["office:1"].EfficiencyCoreMaximumFrequencyMhz);
+    }
+
+    [Fact]
+    public async Task SeparateLimitsWithEqualValues_StaySeparate()
+    {
+        var store = new RecordingSettingsStore();
+        var frequency = new RecordingFrequencyLimitController(ProcessorFrequencyLimitPolicy.Uniform(0));
+        var viewModel = await CreateHybridPerformanceViewModelAsync(store, frequency);
+        viewModel.IsProcessorFrequencyLimitEnabled = true;
+        viewModel.SelectedMaximumProcessorFrequencyMhz = 3500;
+        viewModel.IsSeparateCoreFrequencyLimitEnabled = true;
+
+        await viewModel.ApplyPerformancePolicyAsync(CancellationToken.None);
+
+        // The switch follows the user's choice, never whether the two values happen to match.
+        Assert.True(viewModel.IsSeparateCoreFrequencyLimitEnabled);
+        Assert.Equal(3500, Assert.IsType<ApplicationSettings>(store.LastSaved)
+            .PerformanceProfiles!["office:1"].EfficiencyCoreMaximumFrequencyMhz);
+    }
+
+    [Fact]
+    public async Task SeparateLimits_StayWithTheirProfileWhenSwitchingProfiles()
+    {
+        var store = new RecordingSettingsStore();
+        var frequency = new RecordingFrequencyLimitController(ProcessorFrequencyLimitPolicy.Uniform(0));
+        var viewModel = await CreateHybridPerformanceViewModelAsync(store, frequency);
+        viewModel.SelectCustomProfile(1);
+        viewModel.IsProcessorFrequencyLimitEnabled = true;
+        viewModel.SelectedMaximumProcessorFrequencyMhz = 3500;
+        viewModel.IsSeparateCoreFrequencyLimitEnabled = true;
+        viewModel.SelectedMaximumEfficiencyCoreFrequencyMhz = 2200;
+
+        viewModel.SelectCustomProfile(2);
+
+        Assert.False(viewModel.IsProcessorFrequencyLimitEnabled);
+        Assert.False(viewModel.IsSeparateCoreFrequencyLimitEnabled);
+
+        viewModel.SelectCustomProfile(1);
+
+        Assert.True(viewModel.IsProcessorFrequencyLimitEnabled);
+        Assert.True(viewModel.IsSeparateCoreFrequencyLimitEnabled);
+        Assert.Equal(3500, viewModel.SelectedMaximumProcessorFrequencyMhz);
+        Assert.Equal(2200, viewModel.SelectedMaximumEfficiencyCoreFrequencyMhz);
+    }
+
+    [Fact]
+    public async Task ApplyPerformancePolicy_WithOneCoreType_OffersNoSeparateLimits()
+    {
+        var store = new RecordingSettingsStore();
+        var frequency = new RecordingFrequencyLimitController(ProcessorFrequencyLimitPolicy.Uniform(0));
+        var viewModel = await CreateHybridPerformanceViewModelAsync(store, frequency,
+            new ProcessorCoreClasses(PerformanceClass: 0, PerformanceCores: 8, EfficiencyCores: 0, EfficiencyClassMask: 0));
+        viewModel.IsProcessorFrequencyLimitEnabled = true;
+        viewModel.SelectedMaximumProcessorFrequencyMhz = 4000;
+        viewModel.IsSeparateCoreFrequencyLimitEnabled = true;
+        viewModel.SelectedMaximumEfficiencyCoreFrequencyMhz = 3000;
+
+        await viewModel.ApplyPerformancePolicyAsync(CancellationToken.None);
+
+        Assert.False(viewModel.CanSeparateCoreFrequencyLimits);
+        Assert.False(viewModel.IsSeparateCoreFrequencyLimitEnabled);
+        Assert.Equal(ProcessorFrequencyLimitPolicy.Uniform(4000), frequency.LastApplied);
+        Assert.Equal(0, Assert.IsType<ApplicationSettings>(store.LastSaved)
+            .PerformanceProfiles!["office:1"].EfficiencyCoreMaximumFrequencyMhz);
+    }
+
+    [Fact]
+    public async Task ACoreClassWithoutAWindowsSetting_OffersNoSeparateLimits()
+    {
+        var frequency = new RecordingFrequencyLimitController(ProcessorFrequencyLimitPolicy.Uniform(0));
+        var viewModel = await CreateHybridPerformanceViewModelAsync(new RecordingSettingsStore(), frequency,
+            new ProcessorCoreClasses(PerformanceClass: 3, PerformanceCores: 4, EfficiencyCores: 8));
+        viewModel.IsProcessorFrequencyLimitEnabled = true;
+        viewModel.SelectedMaximumProcessorFrequencyMhz = 4000;
+        viewModel.IsSeparateCoreFrequencyLimitEnabled = true;
+
+        await viewModel.ApplyPerformancePolicyAsync(CancellationToken.None);
+
+        Assert.False(viewModel.CanSeparateCoreFrequencyLimits);
+        Assert.Equal(ProcessorFrequencyLimitPolicy.Uniform(4000), frequency.LastApplied);
+    }
+
+    [Fact]
+    public async Task SavedFrequencyWithoutECoreValue_KeepsOneCap()
+    {
+        var viewModel = await CreateSavedFrequencyViewModelAsync(
+            new(45, 65, ProcessorBoostMode.Aggressive, 3100, MaximumProcessorFrequencyConfigured: true),
+            ProcessorFrequencyLimitPolicy.ForCoreTypes(4200, 0, performanceClass: 1));
+
+        Assert.True(viewModel.IsProcessorFrequencyLimitEnabled);
+        Assert.False(viewModel.IsSeparateCoreFrequencyLimitEnabled);
+        Assert.Equal(3100, viewModel.SelectedMaximumProcessorFrequencyMhz);
+        Assert.Equal(3100, viewModel.SelectedMaximumEfficiencyCoreFrequencyMhz);
+        // A live value written elsewhere still shows both core types.
+        Assert.Equal("频率回读 · P 核 4200 MHz · E 核 不限", viewModel.ProcessorFrequencyLimitStatusText);
+    }
+
+    [Fact]
+    public async Task SavedECoreValue_RestoresSeparateLimitsForThatProfile()
+    {
+        var viewModel = await CreateSavedFrequencyViewModelAsync(
+            new(45, 65, ProcessorBoostMode.Aggressive, 3500, MaximumProcessorFrequencyConfigured: true,
+                EfficiencyCoreMaximumFrequencyMhz: 2200),
+            ProcessorFrequencyLimitPolicy.ForCoreTypes(3500, 2200, performanceClass: 1));
+
+        Assert.True(viewModel.IsSeparateCoreFrequencyLimitEnabled);
+        Assert.Equal(3500, viewModel.SelectedMaximumProcessorFrequencyMhz);
+        Assert.Equal(2200, viewModel.SelectedMaximumEfficiencyCoreFrequencyMhz);
+        Assert.Equal("频率回读 · P 核 3500 MHz · E 核 2200 MHz", viewModel.ProcessorFrequencyLimitStatusText);
+    }
+
+    [Fact]
+    public async Task UnreadableCoreTypes_UseOneCapButKeepTheSavedECoreValue()
+    {
+        var store = new RecordingSettingsStore();
+        var settings = new ApplicationSettings(PerformanceProfiles:
+            new Dictionary<string, PerformanceProfileSettings>
+            {
+                ["office:1"] = new(45, 55, ProcessorBoostMode.EfficientEnabled, 3500,
+                    MaximumProcessorFrequencyConfigured: true, EfficiencyCoreMaximumFrequencyMhz: 2200)
+            });
+        var frequency = new RecordingFrequencyLimitController(ProcessorFrequencyLimitPolicy.Uniform(0));
+        var viewModel = CreateViewModel(store,
+            cpuPolicyController: new RecordingCpuPolicyController(new(45, 55, null)),
+            boostController: new RecordingBoostController(
+                new(ProcessorBoostMode.EfficientEnabled, ProcessorBoostMode.EfficientEnabled)),
+            platformModeController: new RecordingPlatformModeController(new(PlatformMode.Office)),
+            frequencyLimitController: frequency,
+            verificationDelay: (_, _) => Task.CompletedTask,
+            settings: settings);
+        await viewModel.InitializePlatformModeAsync(CancellationToken.None);
+        await viewModel.InitializePerformancePolicyAsync(CancellationToken.None);
+
+        await viewModel.ApplyPerformancePolicyAsync(CancellationToken.None);
+
+        Assert.False(viewModel.IsSeparateCoreFrequencyLimitEnabled);
+        Assert.Equal(ProcessorFrequencyLimitPolicy.Uniform(3500), frequency.LastApplied);
+        Assert.Equal(2200, Assert.IsType<ApplicationSettings>(store.LastSaved)
+            .PerformanceProfiles!["office:1"].EfficiencyCoreMaximumFrequencyMhz);
+    }
+
+    [Theory]
+    [InlineData(1, 0b1, 1000u, 1000u, 2200u, 2200u, 3500u, 3500u, "频率回读 · P 核 2200 MHz · E 核 1000 MHz")]
+    [InlineData(2, 0b10, 1000u, 1000u, 2200u, 2200u, 3500u, 3500u, "频率回读 · P 核 3500 MHz · E 核 2200 MHz")]
+    [InlineData(2, 0b11, 2000u, 2000u, 3000u, 3000u, 4000u, 4000u, "频率回读 · C0 2000 · C1 3000 · C2 4000 MHz")]
+    [InlineData(1, 0b1, 3000u, 2000u, 3000u, 2000u, 3000u, 2000u,
+        "频率回读 · 接电 C0 3000 · C1 3000 · C2 3000 MHz · 电池 C0 2000 · C1 2000 · C2 2000 MHz")]
+    public async Task FrequencyReadback_SummarizesOnlyWhenUnambiguous(
+        int performanceClass, int efficiencyClassMask,
+        uint ac0, uint dc0, uint ac1, uint dc1, uint ac2, uint dc2, string expected)
+    {
+        var frequency = new RecordingFrequencyLimitController(new(ac0, dc0, ac1, dc1, ac2, dc2));
+        var viewModel = await CreateHybridPerformanceViewModelAsync(new RecordingSettingsStore(), frequency,
+            new ProcessorCoreClasses(performanceClass, 4, 8, efficiencyClassMask));
+
+        Assert.Equal(expected, viewModel.ProcessorFrequencyLimitStatusText);
+    }
+
+    private static async Task<MainWindowViewModel> CreateHybridPerformanceViewModelAsync(
+        RecordingSettingsStore store,
+        RecordingFrequencyLimitController frequency,
+        ProcessorCoreClasses? classes = null)
+    {
+        var viewModel = CreateViewModel(store,
+            cpuPolicyController: new RecordingCpuPolicyController(new(45, 55, null)),
+            boostController: new RecordingBoostController(
+                new(ProcessorBoostMode.EfficientEnabled, ProcessorBoostMode.EfficientEnabled)),
+            platformModeController: new RecordingPlatformModeController(new(PlatformMode.Office)),
+            frequencyLimitController: frequency,
+            verificationDelay: (_, _) => Task.CompletedTask,
+            processorCoreClasses: classes ?? new ProcessorCoreClasses(PerformanceClass: 1, PerformanceCores: 8, EfficiencyCores: 16));
+        await viewModel.InitializePlatformModeAsync(CancellationToken.None);
+        await viewModel.InitializePerformancePolicyAsync(CancellationToken.None);
+        return viewModel;
+    }
+
+    private static async Task<MainWindowViewModel> CreateSavedFrequencyViewModelAsync(
+        PerformanceProfileSettings balanced,
+        ProcessorFrequencyLimitPolicy live)
+    {
+        var settings = new ApplicationSettings(PerformanceProfiles:
+            new Dictionary<string, PerformanceProfileSettings> { ["balanced:1"] = balanced });
+        var viewModel = new MainWindowViewModel(
+            CreateDashboard(), settings, new RecordingSettingsStore(), new RecordingStartupRegistration(),
+            new RecordingCpuPolicyController(new(45, 65, null)),
+            new RecordingBoostController(new(ProcessorBoostMode.Aggressive, ProcessorBoostMode.Aggressive)),
+            frequencyLimitController: new RecordingFrequencyLimitController(live),
+            processorCoreClasses: new ProcessorCoreClasses(1, 8, 16));
+        await viewModel.InitializePerformancePolicyAsync(CancellationToken.None);
+        return viewModel;
+    }
+
+    [Fact]
     public void LegacySavedFrequencyWithoutExplicitIntent_IsMigratedToUnlimited()
     {
         var settings = new ApplicationSettings(PerformanceProfiles:
@@ -3896,6 +4446,413 @@ public sealed class MainWindowViewModelTests
         Assert.Contains("设置保存失败", viewModel.StatusMessage);
     }
 
+    [Fact]
+    public async Task ObservedEchoOfTheShownMode_LeavesTheDynamicCapAndItsWindowAlone()
+    {
+        var dynamic = new FakeDynamicPower();
+        var frequency = new RecordingFrequencyLimitController(ProcessorFrequencyLimitPolicy.Uniform(3000));
+        var viewModel = await CreateDynamicSyncViewModelAsync(dynamic, frequency);
+
+        Assert.True(await viewModel.ObservePlatformModeAsync(new(PlatformMode.Office), CancellationToken.None));
+
+        // 3000 is the dynamic cap, not a value to overwrite with the Office cap of 3100.
+        Assert.Equal(0, dynamic.Prepares);
+        Assert.Null(frequency.LastApplied);
+    }
+
+    [Fact]
+    public async Task ObservedModeChange_RestoresTheDynamicCapBeforeWritingTheProfileCap()
+    {
+        var order = new List<string>();
+        var dynamic = new FakeDynamicPower { Order = order };
+        var frequency = new RecordingFrequencyLimitController(ProcessorFrequencyLimitPolicy.Uniform(3000))
+        {
+            BeforeApply = _ => { order.Add("apply"); return Task.CompletedTask; }
+        };
+        var viewModel = await CreateDynamicSyncViewModelAsync(dynamic, frequency);
+
+        Assert.True(await viewModel.ObservePlatformModeAsync(new(PlatformMode.Balanced), CancellationToken.None));
+
+        Assert.Equal(new[] { "prepare", "apply" }, order);
+        Assert.Equal(ProcessorFrequencyLimitPolicy.Uniform(4000), frequency.LastApplied);
+    }
+
+    [Fact]
+    public async Task ObservedModeChange_WhileTheDynamicRestoreIsOwed_WritesNothing()
+    {
+        var dynamic = new FakeDynamicPower { LeaveRecoveryPending = true };
+        var frequency = new RecordingFrequencyLimitController(ProcessorFrequencyLimitPolicy.Uniform(3000));
+        var viewModel = await CreateDynamicSyncViewModelAsync(dynamic, frequency);
+
+        Assert.False(await viewModel.ObservePlatformModeAsync(new(PlatformMode.Balanced), CancellationToken.None));
+
+        Assert.Equal(1, dynamic.Prepares);
+        Assert.Null(frequency.LastApplied);
+        Assert.Contains("动态频率恢复未完成", viewModel.StatusMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StartupResync_OfTheShownMode_RestoresTheDynamicCapAndThenSyncs()
+    {
+        var dynamic = new FakeDynamicPower();
+        var frequency = new RecordingFrequencyLimitController(ProcessorFrequencyLimitPolicy.Uniform(3000));
+        var viewModel = await CreateDynamicSyncViewModelAsync(dynamic, frequency);
+
+        Assert.True(await viewModel.SynchronizeControlSessionAsync(CancellationToken.None));
+
+        Assert.Equal(1, dynamic.Prepares);
+        Assert.Equal(ProcessorFrequencyLimitPolicy.Uniform(3100), frequency.LastApplied);
+    }
+
+    [Fact]
+    public async Task PrepareForExit_WaitsForTheChangeUnderWayAndThenLetsNothingStart()
+    {
+        var release = new TaskCompletionSource();
+        var cpu = new BlockingCpuPolicyController(new CpuPolicy(75, 85, null), release.Task);
+        var frequency = new RecordingFrequencyLimitController(ProcessorFrequencyLimitPolicy.Uniform(0));
+        var viewModel = await CreateCustomFrequencyViewModelAsync(cpu, frequency);
+
+        var applying = viewModel.ApplyPerformancePolicyAsync(CancellationToken.None);
+        await cpu.Entered;
+        Assert.False(viewModel.TryClaimForExitRecovery());
+        var exit = viewModel.PrepareForExitAsync(Timeout.InfiniteTimeSpan);
+        await Task.Delay(100);
+        Assert.False(exit.IsCompleted);
+
+        release.SetResult();
+        await applying;
+
+        Assert.True(await exit);
+        Assert.True(viewModel.TryClaimForExitRecovery());
+        Assert.Equal(ProcessorFrequencyLimitPolicy.Uniform(3100), frequency.LastApplied);
+        var applied = frequency.AppliedPolicies.Count;
+        using var refused = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => viewModel.ApplyPerformancePolicyAsync(refused.Token));
+        Assert.Equal(applied, frequency.AppliedPolicies.Count);
+    }
+
+    [Fact]
+    public async Task PrepareForExit_WhenTheChangeOverrunsTheWait_ReportsItSoExitSkipsTheRestores()
+    {
+        var release = new TaskCompletionSource();
+        var cpu = new BlockingCpuPolicyController(new CpuPolicy(75, 85, null), release.Task);
+        var viewModel = await CreateCustomFrequencyViewModelAsync(
+            cpu, new RecordingFrequencyLimitController(ProcessorFrequencyLimitPolicy.Uniform(0)));
+
+        var applying = viewModel.ApplyPerformancePolicyAsync(CancellationToken.None);
+        await cpu.Entered;
+
+        Assert.False(await viewModel.PrepareForExitAsync(TimeSpan.FromMilliseconds(100)));
+        Assert.False(viewModel.TryClaimForExitRecovery());
+
+        release.SetResult();
+        await applying;
+    }
+
+    [Fact]
+    public async Task PrepareForExit_WhenTheChangeNeverEnds_KeepsWaitingAndAForcedExitSkipsTheRestores()
+    {
+        // A hardware call that never returns: the tray keeps waiting, and the forced exit it then
+        // offers ends in App.OnExit, which must not claim the gate the change still holds.
+        var cpu = new BlockingCpuPolicyController(new CpuPolicy(75, 85, null), new TaskCompletionSource().Task);
+        var frequency = new RecordingFrequencyLimitController(ProcessorFrequencyLimitPolicy.Uniform(0));
+        var viewModel = await CreateCustomFrequencyViewModelAsync(cpu, frequency);
+
+        _ = viewModel.ApplyPerformancePolicyAsync(CancellationToken.None);
+        await cpu.Entered;
+
+        var exit = viewModel.PrepareForExitAsync(Timeout.InfiniteTimeSpan);
+        await Task.Delay(200);
+        Assert.False(exit.IsCompleted);
+
+        Assert.False(viewModel.TryClaimForExitRecovery());
+        // Nothing new starts meanwhile.
+        Assert.False(await viewModel.ObservePlatformModeAsync(new(PlatformMode.Office), CancellationToken.None));
+        Assert.Null(frequency.LastApplied);
+    }
+
+    [Fact]
+    public async Task ExitAfterAChangeUnderWay_RestoresAllSixWindowsValuesToTheBaseline()
+    {
+        var api = new MemoryFrequencyApi();
+        var original = new ProcessorFrequencyLimitPolicy(0, 2100, 0, 2200, 0, 2300);
+        api.Set(original);
+        var windows = new RevoHelper.Hardware.Windows.PowerPolicy.WindowsProcessorFrequencyLimitController(
+            api, new MemoryFrequencyLeaseStore());
+        var gate = new FrequencyWriteGate(windows);
+        var release = new TaskCompletionSource();
+        var cpu = new BlockingCpuPolicyController(new CpuPolicy(75, 85, null), release.Task);
+        var viewModel = await CreateCustomFrequencyViewModelAsync(cpu, gate);
+
+        var applying = viewModel.ApplyPerformancePolicyAsync(CancellationToken.None);
+        await cpu.Entered;
+        var exit = viewModel.PrepareForExitAsync(TimeSpan.FromSeconds(30));
+        release.SetResult();
+        await applying;
+        Assert.True(await exit);
+        Assert.Equal(ProcessorFrequencyLimitPolicy.Uniform(3100), await windows.ReadAsync(CancellationToken.None));
+
+        // What App.OnExit does once the change has ended.
+        gate.BeginShutdown();
+        Assert.True(viewModel.TryClaimForExitRecovery());
+        Assert.True((await windows.RecoverAsync(CancellationToken.None)).Succeeded);
+
+        Assert.Equal(original, await windows.ReadAsync(CancellationToken.None));
+        Assert.False((await gate.ApplyAsync(ProcessorFrequencyLimitPolicy.Uniform(2500), CancellationToken.None)).Succeeded);
+        Assert.Equal(original, await windows.ReadAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task UncheckedDynamicRecord_EchoWritesNothingButAResyncChecksItFirst()
+    {
+        // Dynamic power is off, but the start-up check timed out before reading its record.
+        var dynamic = new FakeDynamicPower { Status = new(false, "off", 0, IsLimited: false, HasRecoveryPending: false) };
+        var frequency = new RecordingFrequencyLimitController(ProcessorFrequencyLimitPolicy.Uniform(3000));
+        var viewModel = await CreateDynamicSyncViewModelAsync(dynamic, frequency, dynamicStartupCheck: Task.FromResult(false));
+
+        Assert.True(await viewModel.ObservePlatformModeAsync(new(PlatformMode.Office), CancellationToken.None));
+        Assert.Equal(0, dynamic.Prepares);
+        Assert.Null(frequency.LastApplied);
+
+        Assert.True(await viewModel.SynchronizeControlSessionAsync(CancellationToken.None));
+        Assert.Equal(1, dynamic.Prepares);
+        Assert.Equal(ProcessorFrequencyLimitPolicy.Uniform(3100), frequency.LastApplied);
+
+        // Checked now: an echo goes back to the ordinary recheck without touching the dynamic layer.
+        Assert.True(await viewModel.ObservePlatformModeAsync(new(PlatformMode.Office), CancellationToken.None));
+        Assert.Equal(1, dynamic.Prepares);
+    }
+
+    [Fact]
+    public async Task ResyncMergedIntoAPendingObservation_ReportsThatObservationsRealOutcome()
+    {
+        var dynamic = new FakeDynamicPower { LeaveRecoveryPending = true };
+        var frequency = new RecordingFrequencyLimitController(ProcessorFrequencyLimitPolicy.Uniform(3000));
+        var hold = new TaskCompletionSource();
+        var delays = 0;
+        var viewModel = await CreateDynamicSyncViewModelAsync(dynamic, frequency,
+            verificationDelay: (_, _) => Interlocked.Increment(ref delays) == 1 ? hold.Task : Task.CompletedTask);
+
+        // An echo is pending in its settle wait when the start-up resync for the same mode arrives.
+        var echo = viewModel.ObservePlatformModeAsync(new(PlatformMode.Office), CancellationToken.None);
+        var resync = viewModel.SynchronizeControlSessionAsync(CancellationToken.None);
+        Assert.False(resync.IsCompleted);
+        hold.SetResult();
+
+        // The merged resync made the pending one restore the dynamic layer, which failed.
+        Assert.False(await resync);
+        Assert.False(await echo);
+        Assert.Equal(1, dynamic.Prepares);
+        Assert.Null(frequency.LastApplied);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LeftoverDynamicCapAfterAStartupTimeout_NeverBecomesTheManualOriginal(bool dynamicRestoreFails)
+    {
+        // Codex's reproduction: an abnormal exit left the dynamic cap (3000 on AC over no cap) and
+        // its record; at the next start a slow Boost restore used up the budget before the
+        // dynamic record was read; then the automatic sync wants the Office cap of 3400.
+        var api = new MemoryFrequencyApi();
+        api.Set(ProcessorFrequencyLimitPolicy.Uniform(0));
+        api.SetAc(3000);
+        var dynamicStore = new MemoryDynamicLeaseStore
+        {
+            Lease = new(1, new(api.Scheme, true), new(0, 0, 0), new(3000, 3000, 3000))
+        };
+        var dynamicController = new DynamicPowerController(
+            new RevoHelper.Hardware.Windows.PowerPolicy.WindowsDynamicFrequencyBackend(api, () => true), dynamicStore);
+        var manual = new RevoHelper.Hardware.Windows.PowerPolicy.WindowsProcessorFrequencyLimitController(
+            api, new MemoryFrequencyLeaseStore());
+        var gate = new FrequencyWriteGate(manual);
+        var experiments = new ExperimentalControlsViewModel(dynamicController, dynamicStartupCheck: Task.FromResult(false));
+        var settings = new ApplicationSettings(PerformanceProfiles:
+            new Dictionary<string, PerformanceProfileSettings>
+            {
+                ["office:1"] = new(45, 55, ProcessorBoostMode.EfficientEnabled, 3400, MaximumProcessorFrequencyConfigured: true)
+            });
+        var viewModel = CreateViewModel(new RecordingSettingsStore(),
+            cpuPolicyController: new RecordingCpuPolicyController(new(45, 55, null)),
+            boostController: new RecordingBoostController(
+                new(ProcessorBoostMode.EfficientEnabled, ProcessorBoostMode.EfficientEnabled)),
+            platformModeController: new RecordingPlatformModeController(new(PlatformMode.Office)),
+            frequencyLimitController: gate,
+            verificationDelay: (_, _) => Task.CompletedTask,
+            settings: settings,
+            experiments: experiments);
+        await viewModel.InitializePlatformModeAsync(CancellationToken.None);
+        api.FailNextAcWrite = dynamicRestoreFails;
+
+        var synced = await viewModel.SynchronizeControlSessionAsync(CancellationToken.None);
+
+        if (dynamicRestoreFails)
+        {
+            // Nothing manual was written over the dynamic cap; its record waits for a retry.
+            Assert.False(synced);
+            Assert.Equal(new ProcessorFrequencyLimitPolicy(3000, 0, 3000, 0, 3000, 0), await manual.ReadAsync(CancellationToken.None));
+            Assert.NotNull(dynamicStore.Lease);
+            return;
+        }
+
+        Assert.True(synced);
+        Assert.Equal(ProcessorFrequencyLimitPolicy.Uniform(3400), await manual.ReadAsync(CancellationToken.None));
+
+        // What App.OnExit does: the dynamic layer first, then the manual record.
+        gate.BeginShutdown();
+        Assert.True(viewModel.TryClaimForExitRecovery());
+        Assert.True(await LayeredFrequencyRecovery.RunAsync(
+            experiments.ShutdownAsync,
+            async token => (await manual.RecoverAsync(token)).Succeeded,
+            CancellationToken.None));
+
+        Assert.Equal(ProcessorFrequencyLimitPolicy.Uniform(0), await manual.ReadAsync(CancellationToken.None));
+    }
+
+    private static async Task<MainWindowViewModel> CreateDynamicSyncViewModelAsync(
+        FakeDynamicPower dynamic,
+        RecordingFrequencyLimitController frequency,
+        Task<bool>? dynamicStartupCheck = null,
+        Func<TimeSpan, CancellationToken, Task>? verificationDelay = null)
+    {
+        var settings = new ApplicationSettings(PerformanceProfiles:
+            new Dictionary<string, PerformanceProfileSettings>
+            {
+                ["office:1"] = new(45, 55, ProcessorBoostMode.EfficientEnabled, 3100, MaximumProcessorFrequencyConfigured: true),
+                ["balanced:1"] = new(45, 55, ProcessorBoostMode.EfficientEnabled, 4000, MaximumProcessorFrequencyConfigured: true)
+            });
+        var viewModel = CreateViewModel(new RecordingSettingsStore(),
+            cpuPolicyController: new RecordingCpuPolicyController(new(45, 55, null)),
+            boostController: new RecordingBoostController(
+                new(ProcessorBoostMode.EfficientEnabled, ProcessorBoostMode.EfficientEnabled)),
+            platformModeController: new RecordingPlatformModeController(new(PlatformMode.Office)),
+            frequencyLimitController: frequency,
+            verificationDelay: verificationDelay ?? ((_, _) => Task.CompletedTask),
+            settings: settings,
+            experiments: new ExperimentalControlsViewModel(dynamic, dynamicStartupCheck: dynamicStartupCheck));
+        await viewModel.InitializePlatformModeAsync(CancellationToken.None);
+        return viewModel;
+    }
+
+    private static async Task<MainWindowViewModel> CreateCustomFrequencyViewModelAsync(
+        ICpuPolicyController cpu,
+        IProcessorFrequencyLimitController frequency)
+    {
+        var viewModel = CreateViewModel(new RecordingSettingsStore(),
+            cpuPolicyController: cpu,
+            boostController: new RecordingBoostController(
+                new(ProcessorBoostMode.EfficientEnabled, ProcessorBoostMode.EfficientEnabled)),
+            platformModeController: new RecordingPlatformModeController(new(PlatformMode.Office)),
+            frequencyLimitController: frequency,
+            verificationDelay: (_, _) => Task.CompletedTask);
+        await viewModel.InitializePlatformModeAsync(CancellationToken.None);
+        await viewModel.InitializePerformancePolicyAsync(CancellationToken.None);
+        viewModel.SelectCustomProfile(1);
+        viewModel.SelectedPl1Watts = 35;
+        viewModel.SelectedPl2Watts = 35;
+        viewModel.IsProcessorFrequencyLimitEnabled = true;
+        viewModel.SelectedMaximumProcessorFrequencyMhz = 3100;
+        return viewModel;
+    }
+
+    private sealed class FakeDynamicPower : IDynamicPowerController
+    {
+        public DynamicPowerStatus Status { get; set; } = new(true, "on", 0, IsLimited: true, HasRecoveryPending: false);
+        public int Prepares { get; private set; }
+        public bool LeaveRecoveryPending { get; init; }
+        public List<string>? Order { get; init; }
+        public Task SetEnabledAsync(bool enabled, CancellationToken token) => Task.CompletedTask;
+        public Task ObserveAsync(HardwareTelemetrySnapshot sample, CancellationToken token) => Task.CompletedTask;
+        public Task RecoverAsync(CancellationToken token) => Task.CompletedTask;
+        public Task PauseAsync(string reason, CancellationToken token) => Task.CompletedTask;
+        public Task PrepareForExternalChangeAsync(string reason, CancellationToken token)
+        {
+            Prepares++;
+            Order?.Add("prepare");
+            Status = Status with { IsLimited = false, HasRecoveryPending = LeaveRecoveryPending };
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class BlockingCpuPolicyController(CpuPolicy current, Task release) : ICpuPolicyController
+    {
+        private readonly TaskCompletionSource entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private CpuPolicy current = current;
+        public Task Entered => entered.Task;
+        public ValueTask<CpuPolicy?> ReadCpuPolicyAsync(CancellationToken cancellationToken) =>
+            ValueTask.FromResult<CpuPolicy?>(current);
+        public async ValueTask<ControlResult> ApplyCpuPolicyAsync(CpuPolicy policy, CancellationToken cancellationToken)
+        {
+            entered.TrySetResult();
+            await release;
+            current = policy;
+            return new ControlResult(true, "ok");
+        }
+    }
+
+    private sealed class MemoryFrequencyApi : RevoHelper.Hardware.Windows.PowerPolicy.IPowerProfileApi
+    {
+        private readonly Dictionary<(bool Ac, Guid Setting), uint> values = [];
+        public Guid Scheme { get; } = Guid.Parse("5b6a1f0e-58a4-4c9b-9f0e-2c8d7a6b5c4d");
+        public bool FailNextAcWrite { get; set; }
+
+        public void SetAc(uint mhz)
+        {
+            values[(true, RevoHelper.Hardware.Windows.PowerPolicy.WindowsProcessorFrequencyLimitController.MaximumFrequencySetting)] = mhz;
+            values[(true, RevoHelper.Hardware.Windows.PowerPolicy.WindowsProcessorFrequencyLimitController.MaximumFrequencyClass1Setting)] = mhz;
+            values[(true, RevoHelper.Hardware.Windows.PowerPolicy.WindowsProcessorFrequencyLimitController.MaximumFrequencyClass2Setting)] = mhz;
+        }
+
+        public void Set(ProcessorFrequencyLimitPolicy policy)
+        {
+            values[(true, RevoHelper.Hardware.Windows.PowerPolicy.WindowsProcessorFrequencyLimitController.MaximumFrequencySetting)] = policy.AcMaximumMhz;
+            values[(false, RevoHelper.Hardware.Windows.PowerPolicy.WindowsProcessorFrequencyLimitController.MaximumFrequencySetting)] = policy.DcMaximumMhz;
+            values[(true, RevoHelper.Hardware.Windows.PowerPolicy.WindowsProcessorFrequencyLimitController.MaximumFrequencyClass1Setting)] = policy.AcClass1MaximumMhz;
+            values[(false, RevoHelper.Hardware.Windows.PowerPolicy.WindowsProcessorFrequencyLimitController.MaximumFrequencyClass1Setting)] = policy.DcClass1MaximumMhz;
+            values[(true, RevoHelper.Hardware.Windows.PowerPolicy.WindowsProcessorFrequencyLimitController.MaximumFrequencyClass2Setting)] = policy.AcClass2MaximumMhz;
+            values[(false, RevoHelper.Hardware.Windows.PowerPolicy.WindowsProcessorFrequencyLimitController.MaximumFrequencyClass2Setting)] = policy.DcClass2MaximumMhz;
+        }
+
+        public Guid GetActiveScheme() => Scheme;
+        public uint ReadAcValue(Guid scheme, Guid subgroup, Guid setting) => values.GetValueOrDefault((true, setting));
+        public uint ReadDcValue(Guid scheme, Guid subgroup, Guid setting) => values.GetValueOrDefault((false, setting));
+        public void WriteAcValue(Guid scheme, Guid subgroup, Guid setting, uint value)
+        {
+            if (FailNextAcWrite)
+            {
+                FailNextAcWrite = false;
+                throw new IOException("Injected failure restoring the dynamic cap.");
+            }
+            values[(true, setting)] = value;
+        }
+        public void WriteDcValue(Guid scheme, Guid subgroup, Guid setting, uint value) => values[(false, setting)] = value;
+        public void SetActiveScheme(Guid scheme) { }
+    }
+
+    private sealed class MemoryDynamicLeaseStore : IDynamicPowerLeaseStore
+    {
+        public DynamicPowerLease? Lease { get; set; }
+        public Task<DynamicPowerLease?> LoadAsync(CancellationToken token) => Task.FromResult(Lease);
+        public Task SaveAsync(DynamicPowerLease lease, CancellationToken token) { Lease = lease; return Task.CompletedTask; }
+        public Task ClearAsync(CancellationToken token) { Lease = null; return Task.CompletedTask; }
+    }
+
+    private sealed class MemoryFrequencyLeaseStore : IProcessorFrequencyLimitLeaseStore
+    {
+        private ProcessorFrequencyLimitLease? lease;
+        public ValueTask<ProcessorFrequencyLimitLease?> LoadAsync(CancellationToken cancellationToken) => ValueTask.FromResult(lease);
+        public ValueTask SaveAsync(ProcessorFrequencyLimitLease value, CancellationToken cancellationToken)
+        {
+            lease = value;
+            return ValueTask.CompletedTask;
+        }
+        public ValueTask ClearAsync(CancellationToken cancellationToken)
+        {
+            lease = null;
+            return ValueTask.CompletedTask;
+        }
+    }
+
     private static MainWindowViewModel CreateViewModel(
         IApplicationSettingsStore? store = null,
         IStartupRegistration? startup = null,
@@ -3915,7 +4872,9 @@ public sealed class MainWindowViewModelTests
         Func<DateTimeOffset>? utcNow = null,
         ApplicationSettings? settings = null,
         ExperimentalControlsViewModel? experiments = null,
-        Action<string, string>? diagnostic = null) =>
+        Action<string, string>? diagnostic = null,
+        ProcessorCoreClasses? processorCoreClasses = null,
+        OfficialFrontendExit? officialFrontendExit = null) =>
         new(
             CreateDashboard(),
             settings ?? new ApplicationSettings(),
@@ -3936,7 +4895,58 @@ public sealed class MainWindowViewModelTests
             fanController: fanController,
             utcNow: utcNow,
             experiments: experiments,
-            diagnostic: diagnostic);
+            diagnostic: diagnostic,
+            processorCoreClasses: processorCoreClasses,
+            officialFrontendExit: officialFrontendExit);
+
+    private sealed class FakeOfficialFrontends(params OfficialFrontendProcess[] initial) : IOfficialFrontendProcesses
+    {
+        private readonly List<OfficialFrontendProcess> running = [.. initial];
+        private readonly List<OfficialFrontendProcess> closed = [];
+
+        public IReadOnlyList<OfficialFrontendProcess> Closed
+        {
+            get { lock (running) return closed.ToArray(); }
+        }
+
+        public int Finds { get; private set; }
+        public bool HasUnknown { get; set; }
+        public bool RefuseClose { get; set; }
+        public bool LegacyRunning { get; init; }
+        public TaskCompletionSource CloseStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>Holds a close until set, to see the pill while it exits.</summary>
+        public ManualResetEventSlim? CloseGate { get; init; }
+
+        public void Start(OfficialFrontendProcess process)
+        {
+            lock (running) running.Add(process);
+        }
+
+        public OfficialFrontendSnapshot Find()
+        {
+            lock (running)
+            {
+                Finds++;
+                return new([.. running], HasUnknown, LegacyRunning);
+            }
+        }
+
+        public OfficialFrontendCloseOutcome Close(OfficialFrontendProcess process, Func<bool> mayClose)
+        {
+            CloseStarted.TrySetResult();
+            if (CloseGate is { } gate && !gate.Wait(TimeSpan.FromSeconds(10)))
+                throw new TimeoutException("Test did not release the close gate.");
+            lock (running)
+            {
+                if (!mayClose()) return OfficialFrontendCloseOutcome.Skipped;
+                if (RefuseClose) return OfficialFrontendCloseOutcome.Failed;
+                if (!running.Remove(process)) return OfficialFrontendCloseOutcome.Gone;
+                closed.Add(process);
+                return OfficialFrontendCloseOutcome.Closed;
+            }
+        }
+    }
 
     private static HomeDashboard CreateDashboard() =>
         HomeDashboardFactory.Create(

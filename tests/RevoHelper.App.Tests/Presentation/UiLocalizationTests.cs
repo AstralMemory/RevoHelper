@@ -55,6 +55,10 @@ public sealed class UiLocalizationTests
     [InlineData("24 核 · 24 线程", "24 cores · 24 threads")]
     [InlineData("24 GB 显存", "24 GB VRAM")]
     [InlineData("512 MB 显存", "512 MB VRAM")]
+    [InlineData("频率回读 · P 核 4000 MHz · E 核 不限", "Frequency readback · P-cores 4000 MHz · E-cores no limit")]
+    [InlineData("频率回读 · 4000 MHz", "Frequency readback · 4000 MHz")]
+    [InlineData("频率回读 · 不限", "Frequency readback · no limit")]
+    [InlineData("频率回读 · 接电 C0 3000 · C1 3000 · C2 3000 MHz · 电池 C0 2000 · C1 2000 · C2 2000 MHz", "Frequency readback · AC C0 3000 · C1 3000 · C2 3000 MHz · Battery C0 2000 · C1 2000 · C2 2000 MHz")]
     public void NormalDynamicText_TranslatesWithoutChangingValues(string chinese, string english)
     {
         Assert.Equal(english, UiTextCatalog.Translate(chinese, "en-US"));

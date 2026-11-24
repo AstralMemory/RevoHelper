@@ -51,7 +51,7 @@ public sealed record DiagnosticAppState(
     int? BatteryPercent,
     string ChargeLimit,
     string ChargeLimitDetail,
-    bool OfficialConsoleRunning,
+    bool? OfficialConsoleRunning,
     string OemConnection,
     bool CapabilitiesDetected,
     IReadOnlyList<DiagnosticFeature> Features,
@@ -59,7 +59,13 @@ public sealed record DiagnosticAppState(
     IReadOnlyList<DeviceStatus> Devices,
     IReadOnlyList<string> Services,
     int CpuCores,
-    int CpuThreads);
+    int CpuThreads)
+{
+    public string OfficialConsoleStateText => OfficialConsoleRunning switch
+    {
+        true => "运行中", false => "未运行", null => "状态未知"
+    };
+}
 
 public interface IDiagnosticReportSource
 {

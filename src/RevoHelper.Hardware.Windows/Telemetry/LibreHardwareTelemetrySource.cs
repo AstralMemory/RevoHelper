@@ -282,6 +282,10 @@ public sealed class LibreHardwareTelemetrySource : IHardwareTelemetrySource
     {
         foreach (var sensor in hardware.Sensors)
         {
+            // The dashboard and diagnostic catalog only read live values. Configuring each
+            // sensor here also covers ones that become active after startup.
+            if (sensor.ValuesTimeWindow != TimeSpan.Zero)
+                sensor.ValuesTimeWindow = TimeSpan.Zero;
             yield return sensor;
         }
 

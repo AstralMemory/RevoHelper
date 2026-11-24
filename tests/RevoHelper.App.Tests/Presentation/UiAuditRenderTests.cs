@@ -8,6 +8,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using RevoHelper.App.Diagnostics;
+using RevoHelper.App.Lifecycle;
 using RevoHelper.App.Presentation;
 using RevoHelper.App.Settings;
 using RevoHelper.App.SystemControl;
@@ -39,6 +40,13 @@ public sealed class UiAuditRenderTests
         var pages = new (string Name, string Scroll, Action<MainWindowViewModel> Open)[]
         {
             ("performance", "PerformanceDrawerContent", vm => vm.OpenPerformance()),
+            ("performance-separate", "PerformanceDrawerContent", vm =>
+            {
+                vm.OpenPerformance();
+                vm.IsProcessorFrequencyLimitEnabled = true;
+                vm.IsSeparateCoreFrequencyLimitEnabled = true;
+                vm.SelectedMaximumEfficiencyCoreFrequencyMhz = 2200;
+            }),
             ("fan", "FanDrawerContent", vm => vm.OpenFanCurve()),
             ("gpu", "GpuOutputDrawerContent", vm => Wait(vm.OpenGpuOutputAsync(default))),
             ("lighting-keyboard", "LightingDrawerContent", vm => Wait(vm.OpenLightingAsync(default))),
@@ -52,6 +60,8 @@ public sealed class UiAuditRenderTests
             ("display-refresh", "DisplayColorDrawerContent", vm => { Wait(vm.OpenDisplayAsync(default)); vm.SelectDisplaySettingsPage(DisplaySettingsPage.RefreshRate); }),
             ("other", "OtherDrawerContent", vm => Wait(vm.OpenOtherAsync(default))),
             ("settings", "SettingsDrawerContent", vm => vm.OpenSettings()),
+            // The official tray runs, so the exit pill shows its red state.
+            ("settings-official-running", "SettingsDrawerContent", vm => vm.OpenSettings()),
             ("settings-report", "SettingsDrawerContent", vm => { vm.OpenSettings(); Wait(vm.GenerateDiagnosticReportAsync(DiagnosticReportDetail.Brief, default)); }),
             ("more-profiles", "MoreProfilesDrawerContent", vm => vm.OpenMoreProfiles()),
             ("monitor", "PerformanceMonitorDrawerContent", vm => vm.OpenPerformanceMonitor()),
@@ -65,8 +75,15 @@ public sealed class UiAuditRenderTests
                 new ApplicationSettings { UiLanguageCode = language, UiThemeCode = theme },
                 new Settings(), new Startup(),
                 quickControlsController: new GcuQuickControlsController(new FakeChannel(), (_, _) => Task.CompletedTask),
+                // Enabled GPU output cards with the discrete card selected, as on the 275HX.
+                gpuOutputModeController: new AuditGpuOutput(),
                 verificationDelay: (_, _) => Task.CompletedTask,
-                diagnosticReport: new SampleReportSource());
+                diagnosticReport: new SampleReportSource(),
+                // The 275HX reports 8 P-cores in class 1 and 16 E-cores in class 0.
+                processorCoreClasses: new ProcessorCoreClasses(1, 8, 16),
+                officialFrontendExit: page.Name == "settings-official-running"
+                    ? new OfficialFrontendExit(new RunningOfficialTray(), (_, _) => Task.CompletedTask)
+                    : null);
             var window = new MainWindow(vm) { AllowApplicationClose = true };
             try
             {
@@ -217,6 +234,16 @@ public sealed class UiAuditRenderTests
     }
 
     // Made-up readings so the report box and its buttons show in the settings render.
+    private sealed class AuditGpuOutput : IGpuOutputModeController
+    {
+        public ValueTask<GpuOutputModeState?> ReadStateAsync(CancellationToken cancellationToken) =>
+            ValueTask.FromResult<GpuOutputModeState?>(
+                new(GpuOutputMode.Discrete, new(true, true, true), PanelOnDiscreteGpu: true));
+
+        public ValueTask<ControlResult> SetModeAsync(GpuOutputMode mode, CancellationToken cancellationToken) =>
+            ValueTask.FromResult(new ControlResult(true, "audit"));
+    }
+
     private sealed class SampleReportSource : IDiagnosticReportSource
     {
         public Task<DiagnosticSystemFacts> ReadAsync(DiagnosticReportDetail detail, CancellationToken cancellationToken) =>
@@ -224,6 +251,13 @@ public sealed class UiAuditRenderTests
                 new("MECHREVO", "YAOSHI16 Ultra", "YAOSHI", "MRO24", "N.1.08MRO24", "1.8", "Intel(R) Core(TM) Ultra 9 275HX", "10.0.26300.0"),
                 "平衡", true, [new("NVIDIA GeForce RTX 5090 Laptop GPU", "621.14", "150", "95", "175")], null,
                 ["2026-11-19T10:00:00+08:00 gcu-connection: 连接失败"], DiagnosticLogState.Read, [], null));
+    }
+
+    // Only listed, never closed: the audit does not click the pill.
+    private sealed class RunningOfficialTray : IOfficialFrontendProcesses
+    {
+        public OfficialFrontendSnapshot Find() => new([new(20336, "SystrayComponent")]);
+        public OfficialFrontendCloseOutcome Close(OfficialFrontendProcess process, Func<bool> mayClose) => OfficialFrontendCloseOutcome.Failed;
     }
 
     private sealed class Startup : IStartupRegistration

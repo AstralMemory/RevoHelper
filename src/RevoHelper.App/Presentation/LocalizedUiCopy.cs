@@ -177,7 +177,7 @@ public sealed class LocalizedUiCopy
         DisplayTitle = "Display", DisplaySubtitle = "Color / screen", OtherTitle = "Other", OtherSubtitle = "Fans / shutdown", MonitorTitle = "Performance monitor (floating bar)", MonitorEntryTitle = "Monitor",
         PerformanceAdjustmentTitle = "Performance", PerformanceEntryTitle = "Tuning", FanAdjustmentTitle = "Fan control", SettingsTitle = "Settings",
         UpdateSectionTitle = "Updates", AutomaticUpdateCheckTitle = "Check for updates automatically",
-        AutomaticUpdateCheckDescription = "Checks 2 minutes after launch, then once a day, retrying after 3 hours if it fails. Only reads the latest version number from GitHub and sends no device information. When off, the app does not go online on its own.",
+        AutomaticUpdateCheckDescription = "Checks 2 minutes after launch, then daily, retrying in 3 hours if it fails. Reads only the latest version from GitHub and sends no device data. When off, it never goes online by itself.",
         CheckForUpdatesButton = "Check now", UpdateChecking = "Checking…", UpdateUpToDate = "Up to date",
         UpdateCheckFailed = "Check failed. Try later.", UpdateNotChecked = "Not checked yet",
         UpdateAvailableFormat = "New version {0}", UpdateBadgeTooltip = "See download options, including mirrors",

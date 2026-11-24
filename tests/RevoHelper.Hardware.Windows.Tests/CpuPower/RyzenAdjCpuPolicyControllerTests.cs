@@ -82,10 +82,85 @@ public sealed class RyzenAdjCpuPolicyControllerTests
         var controller = new PlatformAwareCpuPolicyController(new FakePlatformController(), new FakeOemCpuController(), direct);
         Assert.True((await controller.ApplyCpuPolicyAsync(new(35, 55, null), CancellationToken.None)).Succeeded);
 
-        var restored = await controller.RestoreActivePresetBaselineAsync(CancellationToken.None);
+        var restored = await controller.RestoreDirectOverrideAsync(CancellationToken.None);
 
         Assert.True(restored.Succeeded, restored.Reason);
         Assert.Equal(original, client.Current);
+    }
+
+    [Fact]
+    public async Task ExitRestore_AfterTwoWrites_RestoresTheLimitsFromBeforeTheFirst()
+    {
+        var original = new RyzenAdjPowerLimits(45.125m, 42.750m, 65.500m);
+        var client = new FakeRyzenAdjClient(original);
+        var controller = new RyzenAdjCpuPolicyController(client);
+        Assert.True((await controller.ApplyCpuPolicyAsync(new(35, 55, null), CancellationToken.None)).Succeeded);
+        Assert.True((await controller.ApplyCpuPolicyAsync(new(40, 60, null), CancellationToken.None)).Succeeded);
+
+        var restored = await controller.RestoreSessionRootAsync(CancellationToken.None);
+
+        Assert.True(restored.Succeeded, restored.Reason);
+        Assert.Equal(original, client.Current);
+    }
+
+    [Fact]
+    public async Task ExitRestore_AfterAnExternalStapmChange_KeepsTheCurrentLimits()
+    {
+        var client = new FakeRyzenAdjClient(new(50, 50, 70));
+        var controller = new RyzenAdjCpuPolicyController(client);
+        Assert.True((await controller.ApplyCpuPolicyAsync(new(45, 65, null), CancellationToken.None)).Succeeded);
+        // Still reads as 45/65 in the two-value policy.
+        var external = new RyzenAdjPowerLimits(60, 45, 65);
+        client.SetExternal(external);
+        var applies = client.ApplyCount;
+
+        Assert.False((await controller.RestoreSessionRootAsync(CancellationToken.None)).Succeeded);
+        Assert.Equal(external, client.Current);
+        Assert.Equal(applies, client.ApplyCount);
+    }
+
+    [Fact]
+    public async Task RestorePoint_AfterAnExternalStapmChange_KeepsTheCurrentLimits()
+    {
+        var client = new FakeRyzenAdjClient(new(50, 50, 70));
+        var controller = new RyzenAdjCpuPolicyController(client);
+        var baseline = await CpuPolicyRestorePoint.CaptureAsync(controller, CancellationToken.None);
+        Assert.True((await controller.ApplyCpuPolicyAsync(new(45, 65, null), CancellationToken.None)).Succeeded);
+        var external = new RyzenAdjPowerLimits(60, 45, 65);
+        client.SetExternal(external);
+        var applies = client.ApplyCount;
+
+        Assert.False((await baseline!.RestoreAsync(CancellationToken.None)).Succeeded);
+        Assert.Equal(external, client.Current);
+        Assert.Equal(applies, client.ApplyCount);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Apply_WhenAnotherWriterLandsDuringTheWrite_EndsTheOwnership(bool commandRejected)
+    {
+        var client = new FakeRyzenAdjClient(new(50, 50, 70));
+        var controller = new RyzenAdjCpuPolicyController(client);
+        Assert.True((await controller.ApplyCpuPolicyAsync(new(45, 65, null), CancellationToken.None)).Succeeded);
+
+        // Firmware's own limits land instead. A rejected command leaves them to a fresh read.
+        var firmware = new RyzenAdjPowerLimits(60, 60, 80);
+        client.LandsAs = _ =>
+        {
+            client.LandsAs = null;
+            return firmware;
+        };
+        client.RejectAfterNextWrite = commandRejected;
+        var applies = client.ApplyCount;
+        Assert.False((await controller.ApplyCpuPolicyAsync(new(55, 75, null), CancellationToken.None)).Succeeded);
+        // Not written over with the previous limits.
+        Assert.Equal(applies + 1, client.ApplyCount);
+        Assert.Equal(firmware, client.Current);
+
+        Assert.True((await controller.ApplyCpuPolicyAsync(new(40, 60, null), CancellationToken.None)).Succeeded);
+        Assert.True((await controller.RestoreSessionRootAsync(CancellationToken.None)).Succeeded);
+        Assert.Equal(firmware, client.Current);
     }
 
     [Fact]
@@ -158,7 +233,9 @@ public sealed class RyzenAdjCpuPolicyControllerTests
         public bool IsAvailable { get; set; } = true;
         public string AvailabilityReason => IsAvailable ? "available" : "unavailable";
         public RyzenAdjPowerLimits Current { get; private set; } = current;
+        public void SetExternal(RyzenAdjPowerLimits limits) => Current = limits;
         public bool IgnoreNextApply { get; set; }
+        public Func<RyzenAdjPowerLimits, RyzenAdjPowerLimits>? LandsAs { get; set; }
         public int ApplyCount { get; private set; }
         public bool RejectAfterNextWrite { get; set; }
         public bool RejectFollowingWrites { get; set; }
@@ -178,7 +255,7 @@ public sealed class RyzenAdjCpuPolicyControllerTests
             }
             else
             {
-                Current = limits;
+                Current = LandsAs?.Invoke(limits) ?? limits;
             }
 
             if (RejectAfterNextWrite)

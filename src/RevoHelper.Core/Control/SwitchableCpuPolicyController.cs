@@ -4,7 +4,8 @@ namespace RevoHelper.Core.Control;
 /// Lets startup remain fast while a hardware-specific direct backend is probed off the UI thread.
 /// Until a verified controller is installed, writes are explicitly rejected.
 /// </summary>
-public sealed class SwitchableCpuPolicyController : ICpuPolicyController, ICpuPolicyRestorePointProvider, IDisposable
+public sealed class SwitchableCpuPolicyController
+    : ICpuPolicyController, ICpuPolicyRestorePointProvider, ICpuPolicySessionRoot, IDisposable
 {
     private ICpuPolicyController? controller;
     private bool disposed;
@@ -48,6 +49,11 @@ public sealed class SwitchableCpuPolicyController : ICpuPolicyController, ICpuPo
         return current is null ? ValueTask.FromResult<CpuPolicyRestorePoint?>(null)
             : CpuPolicyRestorePoint.CaptureAsync(current, cancellationToken);
     }
+
+    public ValueTask<ControlResult> RestoreSessionRootAsync(CancellationToken cancellationToken) =>
+        Volatile.Read(ref controller) is ICpuPolicySessionRoot session
+            ? session.RestoreSessionRootAsync(cancellationToken)
+            : ValueTask.FromResult(new ControlResult(true, "没有记录本次写入的 CPU 功耗直连后端，无需恢复。"));
 
     public void Dispose()
     {

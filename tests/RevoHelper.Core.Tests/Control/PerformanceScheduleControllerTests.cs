@@ -112,6 +112,28 @@ public sealed class PerformanceScheduleControllerTests
     }
 
     [Fact]
+    public async Task ApplyAsync_FrequencyBaselineUnreadableWhileStartupRecoveryRuns_WritesNothing()
+    {
+        // The start-up frequency recovery overran its wait, so the gate refuses the baseline
+        // read; every baseline is read before the first write, so nothing is written.
+        var calls = new List<string>();
+        var platform = new FakePlatformController(new(PlatformMode.Balanced), calls);
+        var boost = new FakeBoostController(new(ProcessorBoostMode.EfficientEnabled, ProcessorBoostMode.EfficientEnabled), calls);
+        var cpu = new FakeCpuController(new(45, 65, null), calls);
+        var frequency = new FrequencyWriteGate(
+            new FakeFrequencyController(ProcessorFrequencyLimitPolicy.Uniform(3000), calls),
+            new TaskCompletionSource().Task,
+            TimeSpan.FromMilliseconds(50));
+        var target = new PerformanceSchedule(new(PlatformMode.TurboHigh), new(60, 90, null),
+            new(ProcessorBoostMode.Aggressive, ProcessorBoostMode.Aggressive), ProcessorFrequencyLimitPolicy.Uniform(3100));
+
+        await Assert.ThrowsAsync<TimeoutException>(() => new PerformanceScheduleController(platform, cpu, boost, frequency)
+            .ApplyAsync(target, false, CancellationToken.None).AsTask());
+
+        Assert.Equal(["read-platform", "read-boost", "read-cpu"], calls);
+    }
+
+    [Fact]
     public async Task ApplyAsync_BasicTurboConfirmedHighClearsPreviousFrequencyCapWithoutReapplyingStrategy()
     {
         var calls = new List<string>();

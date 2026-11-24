@@ -83,40 +83,57 @@ public sealed class PlatformAwareCpuPolicyControllerTests
         Assert.Equal(new CpuPolicy(75, 85, null), await controller.ReadCpuPolicyAsync(CancellationToken.None));
     }
 
-    [Fact]
-    public async Task RestoreActivePresetBaseline_RestoresTheHardwareValueCapturedBeforeFirstOverride()
+    [Theory]
+    [InlineData(PlatformMode.Balanced)]
+    [InlineData(PlatformMode.Custom)]
+    public async Task RestoreDirectOverride_HandsTheExitRestoreToTheDirectBackendInAnyMode(PlatformMode mode)
     {
-        var platform = new FakePlatformController(new(PlatformMode.Balanced));
-        var direct = new FakeCpuController(new(85, 95, null));
+        var direct = new FakeSessionCpuController(new(85, 95, null));
         var controller = new PlatformAwareCpuPolicyController(
-            platform,
+            new FakePlatformController(new(mode, mode == PlatformMode.Custom ? 1 : 0)),
             new FakeCpuController(new(75, 85, null)),
             direct);
 
-        Assert.True((await controller.ApplyCpuPolicyAsync(new(35, 45, null), CancellationToken.None)).Succeeded);
-        Assert.True((await controller.ApplyCpuPolicyAsync(new(40, 50, null), CancellationToken.None)).Succeeded);
-
-        var restore = await controller.RestoreActivePresetBaselineAsync(CancellationToken.None);
+        var restore = await controller.RestoreDirectOverrideAsync(CancellationToken.None);
 
         Assert.True(restore.Succeeded, restore.Reason);
-        Assert.Equal(new CpuPolicy(85, 95, null), await direct.ReadCpuPolicyAsync(CancellationToken.None));
-        Assert.Equal(3, direct.ApplyCount);
+        Assert.Equal(1, direct.SessionRestores);
     }
 
     [Fact]
-    public async Task RestoreActivePresetBaseline_DoesNotWriteInCustomMode()
+    public async Task RestoreDirectOverride_WithoutABackendThatTracksItsWrites_WritesNothing()
     {
-        var platform = new FakePlatformController(new(PlatformMode.Custom, 1));
         var direct = new FakeCpuController(new(85, 95, null));
         var controller = new PlatformAwareCpuPolicyController(
-            platform,
+            new FakePlatformController(new(PlatformMode.Balanced)),
             new FakeCpuController(new(75, 85, null)),
             direct);
+        Assert.True((await controller.ApplyCpuPolicyAsync(new(35, 45, null), CancellationToken.None)).Succeeded);
 
-        var restore = await controller.RestoreActivePresetBaselineAsync(CancellationToken.None);
+        var restore = await controller.RestoreDirectOverrideAsync(CancellationToken.None);
 
         Assert.True(restore.Succeeded, restore.Reason);
-        Assert.Equal(0, direct.ApplyCount);
+        Assert.Equal(1, direct.ApplyCount);
+    }
+
+    private sealed class FakeSessionCpuController(CpuPolicy current) : ICpuPolicyController, ICpuPolicySessionRoot
+    {
+        public int SessionRestores { get; private set; }
+
+        public ValueTask<CpuPolicy?> ReadCpuPolicyAsync(CancellationToken cancellationToken) =>
+            ValueTask.FromResult<CpuPolicy?>(current);
+
+        public ValueTask<ControlResult> ApplyCpuPolicyAsync(CpuPolicy policy, CancellationToken cancellationToken)
+        {
+            current = policy;
+            return ValueTask.FromResult(new ControlResult(true, "ok"));
+        }
+
+        public ValueTask<ControlResult> RestoreSessionRootAsync(CancellationToken cancellationToken)
+        {
+            SessionRestores++;
+            return ValueTask.FromResult(new ControlResult(true, "restored"));
+        }
     }
 
     private sealed class FakePlatformController(PlatformModeSelection current) : IPlatformModeController

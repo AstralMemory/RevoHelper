@@ -59,6 +59,8 @@ public partial class App : Application
     private HoldChargeController? holdCharge;
     private volatile bool chargeResumeWaitingForPower;
     private WindowsProcessorFrequencyLimitController? processorFrequencyLimitController;
+    // The view model's only way to write the manual frequency limit.
+    private FrequencyWriteGate? frequencyWriteGate;
     private WindowsProcessorBoostController? processorBoostController;
     private PerformanceMonitorController? performanceMonitor;
     private bool previewOnly;
@@ -142,6 +144,16 @@ public partial class App : Application
             return;
         }
 
+        var officialFrontendExit = new OfficialFrontendExit(new WindowsOfficialFrontendProcesses(),
+            log: message => RuntimeDiagnosticLog.Write("official-exit", message));
+        // With the option on, the official window and tray close before the conflict check, so the
+        // user is not warned about a console RevoHelper is about to exit.
+        OfficialFrontendStartupWatch? startupFrontendWatch = null;
+        if (settings.ExitOfficialConsole)
+        {
+            if (launchedFromWindowsStartup) startupFrontendWatch = officialFrontendExit.StartStartupWatch();
+            else officialFrontendExit.CloseNow();
+        }
         var controlConflictDetector = new ControlConflictDetector();
         var controlConflicts = controlConflictDetector.Detect();
         if (controlConflicts.Count > 0 && !launchedFromWindowsStartup && manualChargeLimit is null)
@@ -208,29 +220,47 @@ public partial class App : Application
 
         // Recover both frequency writers before any profile initialization can read or
         // reapply stale state. The durable journals remain intact if recovery times out.
-        using (var recoveryTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(3)))
+        // Each layer has its own time budget: a slow Boost restore must not cancel the dynamic
+        // check before it has even read its record. The wait below is bounded, but the work can
+        // outlive it, so the view model's frequency reads and writes go through a gate that
+        // waits for this task, and dynamicStartupCheck says whether the dynamic record was read.
+        var dynamicStartupCheck = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var startupFrequencyRecovery = Task.Run(async () =>
         {
-            BoundedShutdown.Run(async () =>
+            try
             {
-                await processorBoostController.RecoverAsync(recoveryTimeout.Token).ConfigureAwait(false);
-                await dynamicPowerController.RecoverAsync(recoveryTimeout.Token).ConfigureAwait(false);
-                if (dynamicPowerController.Status.HasRecoveryPending)
+                await RecoverWithinAsync("boost", token => processorBoostController.RecoverAsync(token).AsTask())
+                    .ConfigureAwait(false);
+                var dynamicChecked = await RecoverWithinAsync("dynamic", dynamicPowerController.RecoverAsync)
+                    .ConfigureAwait(false) && !dynamicPowerController.Status.HasRecoveryPending;
+                dynamicStartupCheck.TrySetResult(dynamicChecked);
+                if (!dynamicChecked)
                 {
+                    // An unread or unrestored dynamic cap would become the manual layer's original.
                     return;
                 }
 
+                using var manualTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
                 var recovered = await processorFrequencyLimitController
-                    .RecoverAsync(recoveryTimeout.Token).ConfigureAwait(false);
-                if (recovered.Succeeded)
-                {
-                    await LegacyFrequencyLimitMigration.RunAsync(
-                        settingsStore,
-                        processorFrequencyLimitController,
-                        recoveryTimeout.Token).ConfigureAwait(false);
-                }
-            }, TimeSpan.FromSeconds(3));
-        }
-        settings = settingsStore.Load();
+                    .RecoverAsync(manualTimeout.Token).ConfigureAwait(false);
+                if (!recovered.Succeeded) RuntimeDiagnosticLog.Write("frequency-startup-recovery", recovered.Reason);
+            }
+            finally
+            {
+                dynamicStartupCheck.TrySetResult(false);
+            }
+        });
+        _ = startupFrequencyRecovery.ContinueWith(task =>
+        {
+            if (task.Exception is { } exception)
+                RuntimeDiagnosticLog.Write("frequency-startup-recovery", exception.GetBaseException().Message);
+        }, TaskScheduler.Default);
+        try { startupFrequencyRecovery.Wait(TimeSpan.FromSeconds(3)); }
+        catch (AggregateException) { }
+        frequencyWriteGate = new FrequencyWriteGate(processorFrequencyLimitController, startupFrequencyRecovery);
+        // Settings only, and done before the view model reads them: Windows is not touched.
+        settings = LegacyFrequencyLimitMigration.Run(settingsStore,
+            failure => RuntimeDiagnosticLog.Write("frequency-migration", failure));
         try
         {
             settings = settings with
@@ -254,7 +284,14 @@ public partial class App : Application
             new BootWaterTaskManager(new WindowsBootWaterTaskPlatform(), WindowsBootWaterTaskPlatform.InstalledPath),
             action => { if (!Dispatcher.HasShutdownStarted) Dispatcher.BeginInvoke(
                 System.Windows.Threading.DispatcherPriority.Background, action); },
-            chargeController: sessionCharge);
+            chargeController: sessionCharge,
+            dynamicStartupCheck: dynamicStartupCheck.Task);
+        // Core types as Windows reports them; null keeps one frequency cap for every core.
+        var processorCoreClasses = WindowsProcessorCoreClassReader.TryRead();
+        RuntimeDiagnosticLog.Write("cpu-core-classes", processorCoreClasses is null
+            ? "unavailable"
+            : $"P class {processorCoreClasses.PerformanceClass}: {processorCoreClasses.PerformanceCores} cores; " +
+              $"lower classes: {processorCoreClasses.EfficiencyCores} cores");
         var viewModel = new MainWindowViewModel(
             dashboard,
             settings,
@@ -264,7 +301,7 @@ public partial class App : Application
             processorBoostController,
             platformModeController,
             gpuOutputController,
-            processorFrequencyLimitController,
+            frequencyWriteGate,
             conflictServiceManager: new WindowsConflictServiceManager(),
             quickControlsController: new GcuQuickControlsController(gcuStatusSource),
             displayController: displayController,
@@ -289,9 +326,14 @@ public partial class App : Application
                     platformModeController.ReadPlatformModeAsync,
                     gcuStatusSource.ReadCustomPerformanceStatusAsync),
                 RuntimeDiagnosticLog.DirectoryPath,
-                ChargeSessionFiles.Root));
+                ChargeSessionFiles.Root),
+            processorCoreClasses: processorCoreClasses,
+            officialFrontendExit: officialFrontendExit);
         var window = new MainWindow(viewModel);
         mainViewModel = viewModel;
+        // After sign-in the official service starts its tray later than RevoHelper. A manual start
+        // only closes what ran before the conflict check, to keep RevoHelper light.
+        if (startupFrontendWatch is not null) viewModel.StartOfficialConsoleWatch(startupFrontendWatch);
 
         MainWindow = window;
         performanceMonitor = new PerformanceMonitorController(Path.Combine(settingsDirectory, "performance-monitor.json"), viewModel.Monitor);
@@ -377,6 +419,23 @@ public partial class App : Application
     private void StartConflictServiceDetection(MainWindowViewModel viewModel)
     {
         _ = viewModel.RefreshConflictServicesAsync(CancellationToken.None);
+    }
+
+    // One start-up recovery layer with its own three-second budget. False if it failed or ran
+    // out of time; the layer's own record stays for a later attempt.
+    private static async Task<bool> RecoverWithinAsync(string layer, Func<CancellationToken, Task> recover)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        try
+        {
+            await recover(timeout.Token).ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception exception)
+        {
+            RuntimeDiagnosticLog.Write("frequency-startup-recovery", $"{layer}: {exception.GetType().Name}: {exception.Message}");
+            return false;
+        }
     }
 
     private static Task ApplyAutomaticRefreshRateForCurrentPowerSourceAsync(
@@ -517,6 +576,18 @@ public partial class App : Application
         directBackendProbe?.Dispose();
         performanceMonitor?.CloseWindows();
         mainViewModel?.BeginShutdown();
+        // A tray exit has already waited, for as long as it took, for the performance change
+        // under way (see SystemTrayController). Other exits (Windows shutting down or signing
+        // out) cannot wait here: the change's holder needs this UI thread to finish. If one is
+        // still running, the restores below would race it and are skipped. Frequency and Boost
+        // keep their records for the next start. What a direct PL write replaced is kept only in
+        // memory and is lost, so that override stays until a restart: an OEM mode change does
+        // not reprogram the register on every device.
+        var performanceQuiet = mainViewModel?.TryClaimForExitRecovery() ?? true;
+        frequencyWriteGate?.BeginShutdown();
+        if (!performanceQuiet)
+            RuntimeDiagnosticLog.Write("exit-recovery",
+                "A performance change was still running at exit: frequency and Boost restores skipped with their records kept for the next start; the direct PL override was not undone.");
         systemTrayController?.Dispose();
         SystemEvents.PowerModeChanged -= SystemEvents_PowerModeChanged;
         using (var displayTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(3)))
@@ -524,8 +595,9 @@ public partial class App : Application
                 TimeSpan.FromSeconds(3));
         // Do not let the manual layer mistake an unrestored dynamic cap for an
         // external change and discard the original session baseline.
-        using (var frequencyTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(6)))
+        if (performanceQuiet)
         {
+            using var frequencyTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(6));
             var recovered = false;
             var completed = BoundedShutdown.Run(async () => recovered = await LayeredFrequencyRecovery.RunAsync(
                 token => experiments?.ShutdownAsync(token) ?? Task.FromResult(true),
@@ -540,13 +612,16 @@ public partial class App : Application
         sessionCharge?.Dispose();
         holdCharge?.Dispose();
         experimentalCharge?.Dispose();
-        if (platformAwareCpuPolicyController is not null)
+        if (performanceQuiet && platformAwareCpuPolicyController is not null)
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-            BoundedShutdown.Run(() => platformAwareCpuPolicyController.RestoreActivePresetBaselineAsync(timeout.Token).AsTask(),
-                TimeSpan.FromSeconds(3));
+            ControlResult? plRestore = null;
+            var plCompleted = BoundedShutdown.Run(async () => plRestore = await platformAwareCpuPolicyController
+                .RestoreDirectOverrideAsync(timeout.Token).ConfigureAwait(false), TimeSpan.FromSeconds(3));
+            if (!plCompleted || plRestore is { Succeeded: false })
+                RuntimeDiagnosticLog.Write("pl-exit-restore", plRestore?.Reason ?? "Exit PL restore did not finish in time.");
         }
-        if (processorBoostController is not null)
+        if (performanceQuiet && processorBoostController is not null)
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
             BoundedShutdown.Run(() => processorBoostController.RecoverAsync(timeout.Token).AsTask(), TimeSpan.FromSeconds(3));

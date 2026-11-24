@@ -44,7 +44,7 @@ public static class DiagnosticReportFormatter
             new($"系统：Windows {Clip(Or(system.Machine?.Windows, "?"), 24)} · CPU {Clip(Tidy(Or(system.Machine?.Processor, "未知")), 48)}{Cores(app)}"),
             new("显卡：" + BriefGpu(app, system)),
             new($"状态：模式 {Clip(system.Mode, 20)} · {Power(system.PowerOnline)}{Battery(app)} · 限充 {app.ChargeLimit}"),
-            new($"官方：控制台{(app.OfficialConsoleRunning ? "运行中" : "未运行")} · {Clip(Trim(app.OemConnection), 40)}"),
+            new($"官方：控制台{app.OfficialConsoleStateText} · {Clip(Trim(app.OemConnection), 40)}"),
             new(features, 2, shortFeatures),
             new("读数：" + BriefReadings(app.Devices), 1),
             new(problems, 3, shortProblems)
@@ -80,7 +80,7 @@ public static class DiagnosticReportFormatter
         Line($"模式：{system.Mode}（固件回读）· 界面选中 {Or(app.SelectedProfile, "无")}");
         Line($"供电：{Power(system.PowerOnline)}{Battery(app)}");
         Line($"限充：{app.ChargeLimit} · {Or(app.ChargeLimitDetail, "无说明")}");
-        Line($"官方控制台：{(app.OfficialConsoleRunning ? "运行中" : "未运行")}");
+        Line($"官方控制台：{app.OfficialConsoleStateText}");
         Line($"GCU 控制通道：{Or(app.OemConnection, "未知")}");
 
         Section("功能检测");

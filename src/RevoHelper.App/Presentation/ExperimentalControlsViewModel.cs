@@ -25,10 +25,21 @@ public sealed class ExperimentalControlsViewModel : INotifyPropertyChanged, IDis
     private string? operationError;
     private BootWaterTaskStatus waterStatus = new(BootWaterTaskState.NotInstalled, "点击检查，读取登录前任务状态。");
 
+    // True once the dynamic layer's record has been read and nothing is owed: either the
+    // start-up check (dynamicStartupCheck) or a later restore through this view model.
+    private readonly Task<bool> dynamicStartupCheck;
+    private volatile bool dynamicRecordCheckedLater;
+
+    /// <param name="dynamicStartupCheck">
+    /// Completes with true when the start-up recovery read the dynamic record and restored it.
+    /// False or still running means the record has not been checked, so the dynamic layer may
+    /// still have its cap in Windows. Omitted: treated as checked.
+    /// </param>
     public ExperimentalControlsViewModel(IDynamicPowerController? dynamicPower = null,
         IBootWaterTaskManager? bootWater = null, Action<Action>? dispatch = null, TimeProvider? timeProvider = null,
-        IExperimentalChargeController? chargeController = null)
+        IExperimentalChargeController? chargeController = null, Task<bool>? dynamicStartupCheck = null)
     {
+        this.dynamicStartupCheck = dynamicStartupCheck ?? Task.FromResult(true);
         this.dynamicPower = dynamicPower; this.bootWater = bootWater;
         this.dispatch = dispatch ?? (action => action()); clock = timeProvider ?? TimeProvider.System;
         Charge = new ExperimentalChargeViewModel(chargeController, this.dispatch);
@@ -88,7 +99,41 @@ public sealed class ExperimentalControlsViewModel : INotifyPropertyChanged, IDis
         }
         catch (Exception ex) { operationError = $"频率恢复未完成：{ex.Message}"; }
         finally { Interlocked.Decrement(ref pausing); Notify(); }
+        if (!HasRecoveryPending && operationError is null) dynamicRecordCheckedLater = true;
         return !HasRecoveryPending && operationError is null && !Charge.IsBusy && !Charge.RecoveryPending;
+    }
+
+    /// <summary>
+    /// True when the dynamic layer may have its own cap in the Windows values, owes a
+    /// restore, or has not had its record checked yet (a start-up check that timed out never
+    /// read it), so a manual write must not read those values as a new baseline.
+    /// </summary>
+    public bool IsDynamicEngaged => dynamicPower?.Status is { } status &&
+        (status.Enabled || status.IsLimited || status.HasRecoveryPending || !IsDynamicRecordChecked);
+
+    private bool IsDynamicRecordChecked => dynamicRecordCheckedLater ||
+        dynamicStartupCheck is { IsCompletedSuccessfully: true, Result: true };
+
+    /// <summary>
+    /// Before an automatic frequency sync (a mode changed outside RevoHelper, start-up or
+    /// resume): restore only the dynamic cap and restart its observation. Unlike a user's
+    /// request this does not reconcile the charge limit. False while a restore is still owed.
+    /// </summary>
+    public async Task<bool> PrepareDynamicForManualWriteAsync(CancellationToken cancellationToken = default)
+    {
+        if (dynamicPower is null) return true;
+        Interlocked.Increment(ref pausing); operationError = null; Notify();
+        try
+        {
+            // Loads the dynamic record from disk if start-up never did, then restores it.
+            await Task.Run(() => dynamicPower.PrepareForExternalChangeAsync(
+                "整机档位已改变，动态节能保持开启并重新观察。", cancellationToken), cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) { operationError = $"频率恢复未完成：{ex.Message}"; }
+        finally { Interlocked.Decrement(ref pausing); Notify(); }
+        var clear = !HasRecoveryPending && operationError is null;
+        if (clear) dynamicRecordCheckedLater = true;
+        return clear;
     }
 
     public async Task PauseAsync(string reason, CancellationToken token)

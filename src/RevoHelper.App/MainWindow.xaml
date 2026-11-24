@@ -32,7 +32,7 @@
         <SolidColorBrush x:Key="GpuFrequencyBrush" Color="#F05A19" />
         <SolidColorBrush x:Key="PurpleBrush" Color="#8B3DDB" />
         <SolidColorBrush x:Key="SettingsAccentBrush" Color="#00A7D8" />
-        <SolidColorBrush x:Key="ProfileDescriptionBrush" Color="#9AA4B2" />
+        <SolidColorBrush x:Key="ProfileDescriptionBrush" Color="#8592A5" />
 
         <Style x:Key="GpuBranchPanelStyle" TargetType="StackPanel">
             <Style.Triggers>
@@ -545,6 +545,71 @@
             </Setter>
         </Style>
 
+        <!-- The question marks (HelpMark): hovering shows the explanation, and Tab stops on them so it opens
+             from the keyboard too; a screen reader reads the setting's name and the explanation. The mouse
+             never focuses them, so the round ring is for the keyboard only. -->
+        <Style x:Key="HelpIconFocusVisualStyle">
+            <Setter Property="Control.Template">
+                <Setter.Value>
+                    <ControlTemplate>
+                        <Ellipse Margin="-3" Stroke="{DynamicResource SettingsAccentBrush}" StrokeThickness="1.5" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="presentation:HelpMark">
+            <Setter Property="Cursor" Value="Help" />
+            <Setter Property="Focusable" Value="True" />
+            <Setter Property="FocusVisualStyle" Value="{StaticResource HelpIconFocusVisualStyle}" />
+            <Setter Property="ToolTipService.ShowsToolTipOnKeyboardFocus" Value="True" />
+        </Style>
+
+        <!-- A status that is also its action, such as "正在运行 · 退出". The button that uses it gives the
+             colors for its active state; the default is the grey "done" look, shown disabled. -->
+        <Style x:Key="StatusPillButtonStyle" TargetType="Button">
+            <Setter Property="Height" Value="22" />
+            <Setter Property="Padding" Value="12,0" />
+            <Setter Property="FontSize" Value="{presentation:UiFont 8.8}" />
+            <Setter Property="Foreground" Value="{DynamicResource MutedBrush}" />
+            <Setter Property="Background" Value="{DynamicResource NeutralEFF3F8Brush}" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Cursor" Value="Hand" />
+            <!-- No dotted box after a click. Tab draws its own ring instead: see KeyboardFocusCue. -->
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="presentation:KeyboardFocusCue.IsEnabled" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid>
+                            <Border x:Name="FocusRing" Margin="-3" CornerRadius="14" BorderThickness="1.5"
+                                    BorderBrush="{DynamicResource SettingsAccentBrush}" Visibility="Collapsed" />
+                            <Border x:Name="Pill" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="11" Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="presentation:KeyboardFocusCue.IsShown" Value="True">
+                                <Setter TargetName="FocusRing" Property="Visibility" Value="Visible" />
+                            </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsMouseOver" Value="True" />
+                                    <Condition Property="IsEnabled" Value="True" />
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="Pill" Property="BorderBrush" Value="{Binding Foreground, RelativeSource={RelativeSource TemplatedParent}}" />
+                            </MultiTrigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Pill" Property="Opacity" Value="0.7" />
+                                <Setter TargetName="Pill" Property="presentation:TextClarity.Enabled" Value="False" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- 发现新版本时显示在版本徽章旁，点击只打开固定的下载页。 -->
         <Style x:Key="UpdateBadgeStyle" TargetType="Button">
             <Setter Property="Cursor" Value="Hand" />
@@ -606,6 +671,35 @@
             <Setter Property="HorizontalAlignment" Value="Center" />
         </Style>
 
+        <!-- Each feature icon is drawn once here and shared by its entry button and its drawer
+             header, so the two can no longer drift apart. -->
+        <Geometry x:Key="GpuOutputIconGeometry">M1.5,2.5 H14.5 V11.5 H1.5 Z M5,14 H11 M8,11.5 V14</Geometry>
+        <Geometry x:Key="LightingIconGeometry">M8,1 L9.5,6.5 L15,8 L9.5,9.5 L8,15 L6.5,9.5 L1,8 L6.5,6.5 Z</Geometry>
+        <Geometry x:Key="LiquidCoolingIconGeometry">M8,1 C8,1 2.5,7.2 2.5,10.5 C2.5,13.6 4.9,16 8,16 C11.1,16 13.5,13.6 13.5,10.5 C13.5,7.2 8,1 8,1 Z</Geometry>
+        <Geometry x:Key="KeyboardIconGeometry">M1.5,2 H14.5 V11 H1.5 Z M4,5 H5 M7.5,5 H8.5 M11,5 H12 M4,8 H5 M7,8 H12</Geometry>
+        <!-- Power: a battery with a bolt. -->
+        <Geometry x:Key="PowerIconOutlineGeometry">M3,4.5 H11.5 A1.5,1.5 0 0 1 13,6 V10 A1.5,1.5 0 0 1 11.5,11.5 H3 A1.5,1.5 0 0 1 1.5,10 V6 A1.5,1.5 0 0 1 3,4.5 Z M14.6,6.9 V9.1</Geometry>
+        <Geometry x:Key="PowerIconBoltGeometry">M7.9,5.6 L5.3,8.5 H7.3 L6.6,10.5 L9.6,7.4 H7.5 Z</Geometry>
+        <!-- Display: brightness and contrast, so it does not repeat the GPU output monitor. -->
+        <Geometry x:Key="DisplayIconOutlineGeometry">M8,3.8 A4.2,4.2 0 1 1 7.99,3.8 Z M8,0.8 V2 M8,14 V15.2 M0.8,8 H2 M14,8 H15.2 M2.9,2.9 L3.75,3.75 M12.25,12.25 L13.1,13.1 M2.9,13.1 L3.75,12.25 M12.25,3.75 L13.1,2.9</Geometry>
+        <Geometry x:Key="DisplayIconHalfGeometry">M8,3.8 A4.2,4.2 0 0 0 8,12.2 Z</Geometry>
+        <GeometryGroup x:Key="OtherIconGeometry">
+            <EllipseGeometry Center="3,3" RadiusX="2" RadiusY="2" />
+            <EllipseGeometry Center="9,3" RadiusX="2" RadiusY="2" />
+            <EllipseGeometry Center="15,3" RadiusX="2" RadiusY="2" />
+        </GeometryGroup>
+        <Geometry x:Key="PerformanceIconGeometry">M9.6,1 L3.2,9.2 H7.6 L6.4,15 L12.8,6.8 H8.4 Z</Geometry>
+        <Geometry x:Key="MonitorIconGeometry">M4,4 H24 A2,2 0 0 1 26,6 V19 A2,2 0 0 1 24,21 H4 A2,2 0 0 1 2,19 V6 A2,2 0 0 1 4,4 Z M6,16 L10,11 L14,15 L20,8 M14,21 V25 M9,25 H19</Geometry>
+        <!-- A union, so the blades and the hub fill as one shape whatever their winding. -->
+        <CombinedGeometry x:Key="FanIconGeometry" GeometryCombineMode="Union">
+            <CombinedGeometry.Geometry1>
+                <PathGeometry Figures="M9,10 C5,8 5,3 8,1 C12,2 13,7 10,10 Z M8,13 C8,17 4,21 1,19 C0,15 4,12 8,11 Z M11,12 C15,10 20,12 20,16 C17,19 12,17 10,13 Z" />
+            </CombinedGeometry.Geometry1>
+            <CombinedGeometry.Geometry2>
+                <EllipseGeometry Center="9.5,12" RadiusX="2.5" RadiusY="2.5" />
+            </CombinedGeometry.Geometry2>
+        </CombinedGeometry>
+
         <!-- 微软雅黑没有半粗体，SemiBold 落到中文上就是粗体。Medium 让中文用常规体，英文仍显示半粗。 -->
         <Style x:Key="QuickActionTitleStyle" TargetType="TextBlock">
             <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
@@ -624,14 +718,24 @@
             <Setter Property="Width" Value="38" />
             <Setter Property="Height" Value="22" />
             <Setter Property="Cursor" Value="Hand" />
+            <!-- No dotted box after a click. Tab draws its own ring instead: see KeyboardFocusCue. -->
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="presentation:KeyboardFocusCue.IsEnabled" Value="True" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="CheckBox">
-                        <Border x:Name="Track" Width="38" Height="22" CornerRadius="11" Background="{DynamicResource NeutralD6DEE9Brush}">
-                            <Ellipse x:Name="Knob" Width="16" Height="16" Margin="3"
-                                     HorizontalAlignment="Left" Fill="White" />
-                        </Border>
+                        <Grid>
+                            <Border x:Name="FocusRing" Margin="-3" CornerRadius="14" BorderThickness="1.5"
+                                    BorderBrush="{DynamicResource SettingsAccentBrush}" Visibility="Collapsed" />
+                            <Border x:Name="Track" Width="38" Height="22" CornerRadius="11" Background="{DynamicResource NeutralD6DEE9Brush}">
+                                <Ellipse x:Name="Knob" Width="16" Height="16" Margin="3"
+                                         HorizontalAlignment="Left" Fill="White" />
+                            </Border>
+                        </Grid>
                         <ControlTemplate.Triggers>
+                            <Trigger Property="presentation:KeyboardFocusCue.IsShown" Value="True">
+                                <Setter TargetName="FocusRing" Property="Visibility" Value="Visible" />
+                            </Trigger>
                             <Trigger Property="IsChecked" Value="True">
                                 <Setter TargetName="Track" Property="Background" Value="{DynamicResource SettingsAccentBrush}" />
                                 <Setter TargetName="Knob" Property="HorizontalAlignment" Value="Right" />
@@ -883,9 +987,9 @@
                                 <TextBlock x:Name="RadarTitle" Text="{Binding UiCopy.ProfileTendencyTitle}"
                                            Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 10}"
                                            HorizontalAlignment="Left" VerticalAlignment="Center" />
-                                <Border x:Name="RadarHelp" Width="11" Height="11" Margin="5,0,0,0"
+                                <presentation:HelpMark x:Name="RadarHelp" Width="11" Height="11" Margin="5,0,0,0"
                                         CornerRadius="5.5" BorderBrush="{DynamicResource Neutral93A0B2Brush}" BorderThickness="0.8"
-                                        Background="{DynamicResource NeutralFFFFFFBrush}" Cursor="Help" VerticalAlignment="Center"
+                                        Background="{DynamicResource NeutralFFFFFFBrush}" AutomationProperties.Name="{Binding UiCopy.ProfileTendencyTitle}" VerticalAlignment="Center"
                                         ToolTipService.InitialShowDelay="180" ToolTipService.ShowDuration="20000">
                                     <Border.ToolTip>
                                         <ToolTip MaxWidth="330" Placement="Mouse">
@@ -894,9 +998,9 @@
                                                         Text="{presentation:UiText '仅供大致参考。用户可在风扇曲线上微调想要的噪音表现，改进温度控制。笔记本的低噪音、高性能与低温度几乎构成不可能三角。使用水冷（设备支持时）、空调冷气环境或风压式散热器等辅助散热手段，通常可以提升整机解热能力，并同时改善噪音控制、性能释放与温度表现。'}" />
                                         </ToolTip>
                                     </Border.ToolTip>
-                                    <TextBlock Text="?" Foreground="{DynamicResource Neutral718095Brush}" FontSize="{presentation:UiFont 7}" FontWeight="SemiBold"
-                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                </Border>
+                                    <TextBlock Text="?" presentation:InkCenter.IsEnabled="True" Foreground="{DynamicResource Neutral718095Brush}" FontSize="{presentation:UiFont 7}" FontWeight="SemiBold"
+                                               TextAlignment="Center" VerticalAlignment="Center" />
+                                </presentation:HelpMark>
                             </StackPanel>
                             <Button x:Name="MoreProfilesButton" Content="{Binding UiCopy.MoreProfilesTitle}" Width="63" Height="24"
                                     HorizontalAlignment="Left" VerticalAlignment="Top" Margin="9,32,0,0"
@@ -1063,7 +1167,7 @@
                                     <Grid.RowDefinitions><RowDefinition Height="30" /><RowDefinition Height="*" /></Grid.RowDefinitions>
                                     <Border presentation:ThemeScope.AccentSurface="True" x:Name="GpuOutputQuickIconTile" Style="{StaticResource QuickActionIconTileStyle}" Background="#EAF4FF">
                                         <Viewbox Width="15" Height="15"><Canvas Width="16" Height="16">
-                                            <Path Data="M1.5,2.5 H14.5 V11.5 H1.5 Z M5,14 H11 M8,11.5 V14"
+                                            <Path Data="{StaticResource GpuOutputIconGeometry}"
                                                   Stroke="#2185F4" StrokeThickness="1.5" StrokeLineJoin="Round" />
                                         </Canvas></Viewbox>
                                     </Border>
@@ -1079,7 +1183,7 @@
                                 <Grid>
                                     <Grid.RowDefinitions><RowDefinition Height="30" /><RowDefinition Height="*" /></Grid.RowDefinitions>
                                     <Border presentation:ThemeScope.AccentSurface="True" x:Name="LightingQuickIconTile" Style="{StaticResource QuickActionIconTileStyle}" Background="#F2ECFF">
-                                        <Viewbox Width="14" Height="14"><Path Data="M8,1 L9.5,6.5 L15,8 L9.5,9.5 L8,15 L6.5,9.5 L1,8 L6.5,6.5 Z"
+                                        <Viewbox Width="14" Height="14"><Path Data="{StaticResource LightingIconGeometry}"
                                                                                Fill="#9339DB" /></Viewbox>
                                     </Border>
                                     <StackPanel Grid.Row="1" VerticalAlignment="Center">
@@ -1095,7 +1199,7 @@
                                     <Grid.RowDefinitions><RowDefinition Height="30" /><RowDefinition Height="*" /></Grid.RowDefinitions>
                                     <Border presentation:ThemeScope.AccentSurface="True" x:Name="WaterCoolingQuickIconTile" Style="{StaticResource QuickActionIconTileStyle}" Background="#E8F5FF">
                                         <Viewbox Width="12" Height="15"><Path x:Name="WaterCoolingQuickIcon"
-                                            Data="M8,1 C8,1 2.5,7.2 2.5,10.5 C2.5,13.6 4.9,16 8,16 C11.1,16 13.5,13.6 13.5,10.5 C13.5,7.2 8,1 8,1 Z"
+                                            Data="{StaticResource LiquidCoolingIconGeometry}"
                                             Fill="#1687D4" /></Viewbox>
                                     </Border>
                                     <StackPanel Grid.Row="1" VerticalAlignment="Center">
@@ -1111,9 +1215,8 @@
                                     <Grid.RowDefinitions><RowDefinition Height="30" /><RowDefinition Height="*" /></Grid.RowDefinitions>
                                     <Border presentation:ThemeScope.AccentSurface="True" x:Name="KeyboardQuickIconTile" Style="{StaticResource QuickActionIconTileStyle}" Background="#EEF0FF">
                                         <Viewbox Width="15" Height="12"><Canvas Width="16" Height="13">
-                                            <Path Data="M1.5,2 H14.5 V11 H1.5 Z" Stroke="#485CD6" StrokeThickness="1.4" />
-                                            <Path Data="M4,5 H5 M7.5,5 H8.5 M11,5 H12 M4,8 H5 M7,8 H12"
-                                                  Stroke="#485CD6" StrokeThickness="1.4" StrokeStartLineCap="Round" />
+                                            <Path Data="{StaticResource KeyboardIconGeometry}" Stroke="#485CD6" StrokeThickness="1.4"
+                                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
                                         </Canvas></Viewbox>
                                     </Border>
                                     <StackPanel Grid.Row="1" VerticalAlignment="Center">
@@ -1128,9 +1231,10 @@
                                 <Grid>
                                     <Grid.RowDefinitions><RowDefinition Height="30" /><RowDefinition Height="*" /></Grid.RowDefinitions>
                                     <Border presentation:ThemeScope.AccentSurface="True" x:Name="BatteryQuickIconTile" Style="{StaticResource QuickActionIconTileStyle}" Background="#FFF2E5">
-                                        <Viewbox Width="14" Height="14"><Canvas Width="16" Height="16">
-                                            <Path Data="M3,4 H12 V14 H3 Z M6,2 H9 M12,7 H14 V11 H12"
-                                                  Stroke="#D97706" StrokeThickness="1.5" StrokeLineJoin="Round" />
+                                        <Viewbox Width="15" Height="15"><Canvas Width="16" Height="16">
+                                            <Path Data="{StaticResource PowerIconOutlineGeometry}" Stroke="#D97706" StrokeThickness="1.4"
+                                                  StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
+                                            <Path Data="{StaticResource PowerIconBoltGeometry}" Fill="#D97706" />
                                         </Canvas></Viewbox>
                                     </Border>
                                     <StackPanel Grid.Row="1" VerticalAlignment="Center">
@@ -1144,9 +1248,10 @@
                                 <Grid>
                                     <Grid.RowDefinitions><RowDefinition Height="30" /><RowDefinition Height="*" /></Grid.RowDefinitions>
                                     <Border presentation:ThemeScope.AccentSurface="True" x:Name="DisplayQuickIconTile" Style="{StaticResource QuickActionIconTileStyle}" Background="#F0EEFF">
-                                        <Viewbox Width="14" Height="14"><Canvas Width="16" Height="16">
-                                            <Path Data="M2,3 H14 V13 H2 Z M5,6 H11 M5,8 H11 M5,10 H9"
-                                                  Stroke="#6659E8" StrokeThickness="1.4" StrokeLineJoin="Round" StrokeStartLineCap="Round" />
+                                        <Viewbox Width="15" Height="15"><Canvas Width="16" Height="16">
+                                            <Path Data="{StaticResource DisplayIconOutlineGeometry}" Stroke="#6659E8" StrokeThickness="1.4"
+                                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
+                                            <Path Data="{StaticResource DisplayIconHalfGeometry}" Fill="#6659E8" />
                                         </Canvas></Viewbox>
                                     </Border>
                                     <StackPanel Grid.Row="1" VerticalAlignment="Center">
@@ -1161,9 +1266,7 @@
                                     <Grid.RowDefinitions><RowDefinition Height="30" /><RowDefinition Height="*" /></Grid.RowDefinitions>
                                     <Border presentation:ThemeScope.AccentSurface="True" x:Name="OtherQuickIconTile" Style="{StaticResource QuickActionIconTileStyle}" Background="#EAF4FF">
                                         <Viewbox Width="15" Height="5"><Canvas Width="18" Height="6">
-                                            <Ellipse Width="4" Height="4" Canvas.Left="1" Canvas.Top="1" Fill="#2185F4" />
-                                            <Ellipse Width="4" Height="4" Canvas.Left="7" Canvas.Top="1" Fill="#2185F4" />
-                                            <Ellipse Width="4" Height="4" Canvas.Left="13" Canvas.Top="1" Fill="#2185F4" />
+                                            <Path Data="{StaticResource OtherIconGeometry}" Fill="#2185F4" />
                                         </Canvas></Viewbox>
                                     </Border>
                                     <StackPanel Grid.Row="1" VerticalAlignment="Center">
@@ -1215,7 +1318,12 @@
                             ToolTip="{presentation:UiText '独立监控小窗 · 不注入游戏'}"
                             Background="{Binding FanAccentSurfaceColor}" BorderBrush="{Binding FanAccentColor}">
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-                            <TextBlock Text="▥" Foreground="{Binding FanAccentColor}" FontSize="{presentation:UiFont 17}" Margin="0,0,4,0" VerticalAlignment="Center" />
+                            <Viewbox x:Name="MonitorEntryIcon" Width="17" Height="17" Margin="0,0,4,0" VerticalAlignment="Center">
+                                <Canvas Width="28" Height="28">
+                                    <Path Data="{StaticResource MonitorIconGeometry}" Stroke="{Binding FanAccentColor}" StrokeThickness="2.2"
+                                          StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" />
+                                </Canvas>
+                            </Viewbox>
                             <TextBlock Text="|" Foreground="{DynamicResource Neutral9AA7B8Brush}" FontSize="{presentation:UiFont 12}" Margin="0,0,4,0" VerticalAlignment="Center" />
                             <TextBlock x:Name="MonitorEntryTitle" Text="{Binding UiCopy.MonitorEntryTitle}" Foreground="{Binding FanAccentColor}" FontSize="{presentation:UiFont 11}" FontWeight="SemiBold" VerticalAlignment="Center" />
                         </StackPanel>
@@ -1226,7 +1334,11 @@
                             IsEnabled="{Binding CanOpenPerformanceAdjustment}"
                             Background="{Binding FanAccentSurfaceColor}" BorderBrush="{Binding FanAccentColor}">
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-                            <TextBlock Text="⚡" Foreground="{Binding FanAccentColor}" FontSize="{presentation:UiFont 15}" Margin="0,0,4,0" />
+                            <Viewbox x:Name="PerformanceEntryIcon" Width="15" Height="15" Margin="0,0,4,0" VerticalAlignment="Center">
+                                <Canvas Width="16" Height="16">
+                                    <Path Data="{StaticResource PerformanceIconGeometry}" Fill="{Binding FanAccentColor}" />
+                                </Canvas>
+                            </Viewbox>
                             <TextBlock Text="|" Foreground="{DynamicResource Neutral9AA7B8Brush}" FontSize="{presentation:UiFont 12}" Margin="0,0,4,0" />
                             <TextBlock x:Name="PerformanceEntryTitle" Text="{Binding UiCopy.PerformanceEntryTitle}" Foreground="{Binding FanAccentColor}" FontSize="{presentation:UiFont 11}"
                                        FontWeight="SemiBold" VerticalAlignment="Center" />
@@ -1241,10 +1353,7 @@
                                     HorizontalAlignment="Center" VerticalAlignment="Center">
                             <Viewbox x:Name="FanEntryIcon" Width="20" Height="20" Margin="0,0,4,0">
                                 <Canvas Width="21" Height="22">
-                                    <Path Fill="{Binding FanAccentColor}" Data="M 9,10 C 5,8 5,3 8,1 C 12,2 13,7 10,10 Z" />
-                                    <Path Fill="{Binding FanAccentColor}" Data="M 8,13 C 8,17 4,21 1,19 C 0,15 4,12 8,11 Z" />
-                                    <Path Fill="{Binding FanAccentColor}" Data="M 11,12 C 15,10 20,12 20,16 C 17,19 12,17 10,13 Z" />
-                                    <Ellipse Width="5" Height="5" Canvas.Left="7" Canvas.Top="9.5" Fill="{Binding FanAccentColor}" />
+                                    <Path Fill="{Binding FanAccentColor}" Data="{StaticResource FanIconGeometry}" />
                                 </Canvas>
                             </Viewbox>
                             <TextBlock Text="|" Foreground="{DynamicResource Neutral9AA7B8Brush}" FontSize="{presentation:UiFont 12}"
@@ -1272,66 +1381,107 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <Viewbox x:Name="FanDrawerHeaderIcon" Width="40" Height="30"
+                        <!-- Drawer header icons: the same icon and pastel tile as the entry that opens the
+                             drawer, enlarged. The geometries are shared resources, so both stay in step. -->
+                        <Viewbox x:Name="FanDrawerHeaderIcon" Width="34" Height="34"
                                  HorizontalAlignment="Left" VerticalAlignment="Center">
-                            <Canvas Width="42" Height="30">
-                                <Path Fill="{Binding FanAccentColor}" Data="M 11,11 C 7,9 7,4 10,2 C 15,3 16,8 12,12 Z" />
-                                <Path Fill="{Binding FanAccentColor}" Data="M 9,14 C 9,19 5,23 1,20 C 1,15 5,12 10,12 Z" />
-                                <Path Fill="{Binding FanAccentColor}" Data="M 13,13 C 17,11 22,13 22,18 C 19,22 14,19 11,15 Z" />
-                                <Ellipse Width="6" Height="6" Canvas.Left="8.5" Canvas.Top="10.5" Fill="{Binding FanAccentColor}" />
-                                <Path Data="M 24,25 C 28,23 29,19 32,16 C 35,12 37,8 41,4"
-                                      Stroke="{Binding FanAccentColor}" StrokeThickness="2.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
-                            </Canvas>
+                            <Grid Width="26" Height="26">
+                                <Border presentation:ThemeScope.AccentSurface="True" CornerRadius="8" Background="{Binding FanAccentSurfaceColor}" />
+                                <Viewbox Width="16" Height="16"><Canvas Width="21" Height="22">
+                                    <Path Fill="{Binding FanAccentColor}" Data="{StaticResource FanIconGeometry}" />
+                                </Canvas></Viewbox>
+                            </Grid>
                         </Viewbox>
-                        <TextBlock x:Name="PerformanceDrawerHeaderIcon" Text="⚡" Visibility="Collapsed"
-                                   Foreground="{Binding PerformanceAccentColor}" FontSize="{presentation:UiFont 28}"
-                                   HorizontalAlignment="Left" VerticalAlignment="Center" />
-                        <Viewbox x:Name="PerformanceMonitorDrawerHeaderIcon" Width="31" Height="31"
-                                 Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Center">
-                            <Canvas Width="28" Height="28">
-                                <Rectangle Canvas.Left="2" Canvas.Top="4" Width="24" Height="17" RadiusX="2" RadiusY="2"
-                                           Stroke="{Binding FanAccentColor}" StrokeThickness="2" />
-                                <Path Data="M 6,16 L 10,11 L 14,15 L 20,8" Stroke="{Binding FanAccentColor}"
-                                      StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" />
-                                <Path Data="M 14,22 L 14,25 M 9,25 L 19,25" Stroke="{Binding FanAccentColor}"
-                                      StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
-                            </Canvas>
+                        <Viewbox x:Name="PerformanceDrawerHeaderIcon" Width="34" Height="34" Visibility="Collapsed"
+                                 HorizontalAlignment="Left" VerticalAlignment="Center">
+                            <Grid Width="26" Height="26">
+                                <Border presentation:ThemeScope.AccentSurface="True" CornerRadius="8" Background="{Binding PerformanceAccentSurfaceColor}" />
+                                <Viewbox Width="15" Height="15"><Canvas Width="16" Height="16">
+                                    <Path Fill="{Binding PerformanceAccentColor}" Data="{StaticResource PerformanceIconGeometry}" />
+                                </Canvas></Viewbox>
+                            </Grid>
                         </Viewbox>
-                        <TextBlock x:Name="SettingsDrawerHeaderIcon" Text="⚙" Visibility="Collapsed"
-                                   Foreground="{DynamicResource SettingsAccentBrush}" FontSize="{presentation:UiFont 28}"
-                                   HorizontalAlignment="Left" VerticalAlignment="Center" />
-                        <TextBlock x:Name="OtherDrawerHeaderIcon" Text="•••" Visibility="Collapsed"
-                                   Foreground="#2185F4" FontSize="{presentation:UiFont 22}" FontWeight="Bold"
-                                   HorizontalAlignment="Left" VerticalAlignment="Center" />
-                        <TextBlock x:Name="GpuOutputDrawerHeaderIcon" Text="▣" Visibility="Collapsed"
-                                   Foreground="#2185F4" FontSize="{presentation:UiFont 28}"
-                                   HorizontalAlignment="Left" VerticalAlignment="Center" />
-                        <TextBlock x:Name="LightingDrawerHeaderIcon" Text="✦" Visibility="Collapsed"
-                                   Foreground="#9339DB" FontSize="{presentation:UiFont 28}"
-                                   HorizontalAlignment="Left" VerticalAlignment="Center" />
-                        <TextBlock x:Name="KeyboardDrawerHeaderIcon" Text="▦" Visibility="Collapsed"
-                                   Foreground="#485CD6" FontSize="{presentation:UiFont 27}"
-                                   HorizontalAlignment="Left" VerticalAlignment="Center" />
-                        <TextBlock x:Name="BatteryDrawerHeaderIcon" Text="▣" Visibility="Collapsed"
-                                   Foreground="#D97706" FontSize="{presentation:UiFont 27}"
-                                   HorizontalAlignment="Left" VerticalAlignment="Center" />
-                        <Viewbox x:Name="LiquidCoolingDrawerHeaderIcon" Width="31" Height="31"
-                                 Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Center">
-                            <Canvas Width="24" Height="28">
-                                <Path Fill="#1687D4"
-                                      Data="M 12,1 C 10.2,5.1 4,11.2 4,17.1 C 4,22.2 7.6,26 12,26 C 16.4,26 20,22.2 20,17.1 C 20,11.2 13.8,5.1 12,1 Z" />
-                                <Path Stroke="{DynamicResource NeutralFFFFFFBrush}" StrokeThickness="1.6" StrokeStartLineCap="Round"
-                                      Data="M 8.2,17.2 C 8.3,20 9.8,21.7 12,22.4" Opacity="0.82" />
-                            </Canvas>
+                        <Viewbox x:Name="PerformanceMonitorDrawerHeaderIcon" Width="34" Height="34" Visibility="Collapsed"
+                                 HorizontalAlignment="Left" VerticalAlignment="Center">
+                            <Grid Width="26" Height="26">
+                                <Border presentation:ThemeScope.AccentSurface="True" CornerRadius="8" Background="{Binding FanAccentSurfaceColor}" />
+                                <Viewbox Width="16" Height="16"><Canvas Width="28" Height="28">
+                                    <Path Data="{StaticResource MonitorIconGeometry}" Stroke="{Binding FanAccentColor}" StrokeThickness="2.2"
+                                          StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" />
+                                </Canvas></Viewbox>
+                            </Grid>
                         </Viewbox>
-                        <Viewbox x:Name="DisplayDrawerHeaderIcon" Width="31" Height="31"
-                                 Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Center">
-                            <Canvas Width="28" Height="28">
-                                <Ellipse Width="24" Height="24" Canvas.Left="2" Canvas.Top="2"
-                                         Stroke="#6659E8" StrokeThickness="2.2" />
-                                <Ellipse Width="14" Height="14" Canvas.Left="7" Canvas.Top="7"
-                                         Stroke="#6659E8" StrokeThickness="2.2" />
-                            </Canvas>
+                        <Viewbox x:Name="SettingsDrawerHeaderIcon" Width="34" Height="34" Visibility="Collapsed"
+                                 HorizontalAlignment="Left" VerticalAlignment="Center">
+                            <Grid Width="26" Height="26">
+                                <Border presentation:ThemeScope.AccentSurface="True" CornerRadius="8" Background="#E3F6FB" />
+                                <TextBlock Text="⚙" Foreground="{DynamicResource SettingsAccentBrush}" FontSize="16"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Grid>
+                        </Viewbox>
+                        <Viewbox x:Name="OtherDrawerHeaderIcon" Width="34" Height="34" Visibility="Collapsed"
+                                 HorizontalAlignment="Left" VerticalAlignment="Center">
+                            <Grid Width="26" Height="26">
+                                <Border presentation:ThemeScope.AccentSurface="True" CornerRadius="8" Background="#EAF4FF" />
+                                <Viewbox Width="15" Height="5"><Canvas Width="18" Height="6">
+                                    <Path Data="{StaticResource OtherIconGeometry}" Fill="#2185F4" />
+                                </Canvas></Viewbox>
+                            </Grid>
+                        </Viewbox>
+                        <Viewbox x:Name="GpuOutputDrawerHeaderIcon" Width="34" Height="34" Visibility="Collapsed"
+                                 HorizontalAlignment="Left" VerticalAlignment="Center">
+                            <Grid Width="26" Height="26">
+                                <Border presentation:ThemeScope.AccentSurface="True" CornerRadius="8" Background="#EAF4FF" />
+                                <Viewbox Width="15" Height="15"><Canvas Width="16" Height="16">
+                                    <Path Data="{StaticResource GpuOutputIconGeometry}" Stroke="#2185F4" StrokeThickness="1.5" StrokeLineJoin="Round" />
+                                </Canvas></Viewbox>
+                            </Grid>
+                        </Viewbox>
+                        <Viewbox x:Name="LightingDrawerHeaderIcon" Width="34" Height="34" Visibility="Collapsed"
+                                 HorizontalAlignment="Left" VerticalAlignment="Center">
+                            <Grid Width="26" Height="26">
+                                <Border presentation:ThemeScope.AccentSurface="True" CornerRadius="8" Background="#F2ECFF" />
+                                <Viewbox Width="14" Height="14"><Path Data="{StaticResource LightingIconGeometry}" Fill="#9339DB" /></Viewbox>
+                            </Grid>
+                        </Viewbox>
+                        <Viewbox x:Name="KeyboardDrawerHeaderIcon" Width="34" Height="34" Visibility="Collapsed"
+                                 HorizontalAlignment="Left" VerticalAlignment="Center">
+                            <Grid Width="26" Height="26">
+                                <Border presentation:ThemeScope.AccentSurface="True" CornerRadius="8" Background="#EEF0FF" />
+                                <Viewbox Width="15" Height="12"><Canvas Width="16" Height="13">
+                                    <Path Data="{StaticResource KeyboardIconGeometry}" Stroke="#485CD6" StrokeThickness="1.4"
+                                          StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
+                                </Canvas></Viewbox>
+                            </Grid>
+                        </Viewbox>
+                        <Viewbox x:Name="BatteryDrawerHeaderIcon" Width="34" Height="34" Visibility="Collapsed"
+                                 HorizontalAlignment="Left" VerticalAlignment="Center">
+                            <Grid Width="26" Height="26">
+                                <Border presentation:ThemeScope.AccentSurface="True" CornerRadius="8" Background="#FFF2E5" />
+                                <Viewbox Width="15" Height="15"><Canvas Width="16" Height="16">
+                                    <Path Data="{StaticResource PowerIconOutlineGeometry}" Stroke="#D97706" StrokeThickness="1.4"
+                                          StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
+                                    <Path Data="{StaticResource PowerIconBoltGeometry}" Fill="#D97706" />
+                                </Canvas></Viewbox>
+                            </Grid>
+                        </Viewbox>
+                        <Viewbox x:Name="LiquidCoolingDrawerHeaderIcon" Width="34" Height="34" Visibility="Collapsed"
+                                 HorizontalAlignment="Left" VerticalAlignment="Center">
+                            <Grid Width="26" Height="26">
+                                <Border presentation:ThemeScope.AccentSurface="True" CornerRadius="8" Background="#E8F5FF" />
+                                <Viewbox Width="12" Height="15"><Path Data="{StaticResource LiquidCoolingIconGeometry}" Fill="#1687D4" /></Viewbox>
+                            </Grid>
+                        </Viewbox>
+                        <Viewbox x:Name="DisplayDrawerHeaderIcon" Width="34" Height="34" Visibility="Collapsed"
+                                 HorizontalAlignment="Left" VerticalAlignment="Center">
+                            <Grid Width="26" Height="26">
+                                <Border presentation:ThemeScope.AccentSurface="True" CornerRadius="8" Background="#F0EEFF" />
+                                <Viewbox Width="15" Height="15"><Canvas Width="16" Height="16">
+                                    <Path Data="{StaticResource DisplayIconOutlineGeometry}" Stroke="#6659E8" StrokeThickness="1.4"
+                                          StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
+                                    <Path Data="{StaticResource DisplayIconHalfGeometry}" Fill="#6659E8" />
+                                </Canvas></Viewbox>
+                            </Grid>
                         </Viewbox>
                         <Button x:Name="DrawerCloseButton" Grid.Column="1" Width="31" Height="31"
                                 Style="{StaticResource IconButtonStyle}" Click="CloseDrawer_Click" ToolTip="{presentation:UiText '收起'}">
@@ -1611,13 +1761,13 @@
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Text="{presentation:UiText 'Windows 处理器 Boost 策略'}" Foreground="{DynamicResource TextBrush}"
                                                    FontSize="{presentation:UiFont 11}" FontWeight="SemiBold" VerticalAlignment="Center" />
-                                        <Border Width="13" Height="13" Margin="5,0,0,0" CornerRadius="6.5"
+                                        <presentation:HelpMark Width="13" Height="13" Margin="5,0,0,0" CornerRadius="6.5"
                                                 BorderBrush="{DynamicResource Neutral93A0B2Brush}" BorderThickness="0.8" Background="{DynamicResource SurfaceBrush}"
-                                                Cursor="Help" VerticalAlignment="Center"
+                                                AutomationProperties.Name="{presentation:UiText 'Windows 处理器 Boost 策略'}" VerticalAlignment="Center"
                                                 ToolTip="{presentation:UiText 'Disabled 会关闭睿频；其余选项决定 Windows 请求睿频的积极程度。写入后 RevoHelper 会延迟复查，以识别被其他程序覆盖的情况。'}">
-                                            <TextBlock Text="?" Foreground="{DynamicResource Neutral718095Brush}" FontSize="{presentation:UiFont 8}" FontWeight="SemiBold"
-                                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                        </Border>
+                                            <TextBlock Text="?" presentation:InkCenter.IsEnabled="True" Foreground="{DynamicResource Neutral718095Brush}" FontSize="{presentation:UiFont 8}" FontWeight="SemiBold"
+                                                       TextAlignment="Center" VerticalAlignment="Center" />
+                                        </presentation:HelpMark>
                                     </StackPanel>
                                     <Border Margin="0,8,0,0" Height="34" CornerRadius="9"
                                             BorderBrush="{Binding PerformanceAccentColor}" BorderThickness="1.2"
@@ -1874,44 +2024,112 @@
                                                 <TextBlock Text="{presentation:UiText 'Windows 通用最高处理器频率'}"
                                                            Foreground="{DynamicResource TextBrush}"
                                                            FontSize="{presentation:UiFont 11}" FontWeight="SemiBold" VerticalAlignment="Center" />
-                                                <Border Width="13" Height="13" Margin="5,0,0,0" CornerRadius="6.5"
+                                                <presentation:HelpMark Width="13" Height="13" Margin="5,0,0,0" CornerRadius="6.5"
                                                         BorderBrush="{DynamicResource Neutral93A0B2Brush}" BorderThickness="0.8" Background="{DynamicResource SurfaceBrush}"
-                                                        Cursor="Help" VerticalAlignment="Center"
-                                                        ToolTip="{presentation:UiText '不区分 P / E 核；同时写入当前电源方案 AC / DC 的处理器 Class 0、Class 1 与 Class 2。仅在本次 RevoHelper 会话持有，退出或异常恢复时还原；部分固件仍可能忽略。'}">
-                                                    <TextBlock Text="?" Foreground="{DynamicResource Neutral718095Brush}" FontSize="{presentation:UiFont 8}" FontWeight="SemiBold"
-                                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                                </Border>
+                                                        AutomationProperties.Name="{presentation:UiText 'Windows 通用最高处理器频率'}" VerticalAlignment="Center"
+                                                        ToolTip="{presentation:UiText '默认对所有核心使用同一个上限，同时写入当前电源方案 AC / DC 的处理器 Class 0、Class 1 与 Class 2。处理器有大小核时，可以打开“分别限制 P 核与 E 核”分开设置。仅在本次 RevoHelper 会话持有，退出或异常恢复时还原；部分固件仍可能忽略。'}">
+                                                    <TextBlock Text="?" presentation:InkCenter.IsEnabled="True" Foreground="{DynamicResource Neutral718095Brush}" FontSize="{presentation:UiFont 8}" FontWeight="SemiBold"
+                                                               TextAlignment="Center" VerticalAlignment="Center" />
+                                                </presentation:HelpMark>
                                             </StackPanel>
+                                            <!-- Two fixed lines, so the delay note never runs up against the switch. -->
                                             <TextBlock x:Name="ProcessorFrequencyDelayWarning"
-                                                       Text="{presentation:UiText '仅本次会话持有；退出自动恢复。生效可能延迟约 5–10 秒'}"
                                                        Foreground="#D9363E" FontSize="{presentation:UiFont 8}"
-                                                       Margin="0,3,0,0" TextWrapping="Wrap" />
+                                                       Margin="0,3,0,0" TextWrapping="Wrap"><Run Text="{presentation:UiText '仅本次会话持有；退出自动恢复。'}" /><LineBreak /><Run Text="{presentation:UiText '生效可能延迟约 5–10 秒'}" /></TextBlock>
                                         </StackPanel>
                                         <CheckBox Grid.Column="1" Style="{StaticResource SettingsToggleStyle}"
                                                   IsChecked="{Binding IsProcessorFrequencyLimitEnabled, Mode=TwoWay}"
                                                   Click="PerformanceToggle_Click" />
                                     </Grid>
+                                    <!-- Only when Windows reports P-cores and E-cores; one cap stays the default. -->
+                                    <!-- Only the switch waits for the overall limit; the question mark stays reachable, so the
+                                         option can be read about before turning the limit on. The title greys meanwhile. -->
+                                    <Grid x:Name="SeparateCoreFrequencyLimitRow" Margin="0,9,0,0"
+                                          Visibility="{Binding CanSeparateCoreFrequencyLimits, Converter={StaticResource ModeVisibilityConverter}}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <TextBlock Text="{presentation:UiText '分别限制 P 核与 E 核'}"
+                                                       FontSize="{presentation:UiFont 9.5}" VerticalAlignment="Center">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsProcessorFrequencyLimitEnabled}" Value="False">
+                                                                <Setter Property="Foreground" Value="{DynamicResource MutedBrush}" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                            <presentation:HelpMark Width="13" Height="13" Margin="5,0,0,0" CornerRadius="6.5"
+                                                    BorderBrush="{DynamicResource Neutral93A0B2Brush}" BorderThickness="0.8" Background="{DynamicResource SurfaceBrush}"
+                                                    AutomationProperties.Name="{presentation:UiText '分别限制 P 核与 E 核'}" VerticalAlignment="Center"
+                                                    ToolTip="{presentation:UiText '仅在处理器同时有性能核（P 核）和能效核（E 核）时显示，核心类型以 Windows 报告为准。打开后两类核心各用一个上限，比如只压低 P 核来换取更低的温度和噪音；关闭后恢复为同一个上限。这个选择随当前档位保存。'}">
+                                                <TextBlock Text="?" presentation:InkCenter.IsEnabled="True" Foreground="{DynamicResource Neutral718095Brush}" FontSize="{presentation:UiFont 8}" FontWeight="SemiBold"
+                                                           TextAlignment="Center" VerticalAlignment="Center" />
+                                            </presentation:HelpMark>
+                                        </StackPanel>
+                                        <CheckBox x:Name="SeparateCoreFrequencyLimitToggle" Grid.Column="1" Style="{StaticResource SettingsToggleStyle}"
+                                                  IsChecked="{Binding IsSeparateCoreFrequencyLimitEnabled, Mode=TwoWay}"
+                                                  IsEnabled="{Binding IsProcessorFrequencyLimitEnabled}"
+                                                  Click="SeparateCoreFrequencyLimitToggle_Click" />
+                                    </Grid>
                                     <Grid Margin="0,9,0,0" IsEnabled="{Binding IsProcessorFrequencyLimitEnabled}">
                                         <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="54" />
                                             <ColumnDefinition Width="30" />
                                         </Grid.ColumnDefinitions>
-                                        <Slider x:Name="ProcessorFrequencyLimitSlider"
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <!-- One unlabeled cap for every core; with separate caps it becomes the P-core row. -->
+                                        <TextBlock Text="{presentation:UiText 'P 核'}" Margin="0,0,8,0" VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource TextBrush}" FontSize="{presentation:UiFont 9}" FontWeight="SemiBold"
+                                                   Visibility="{Binding IsSeparateCoreFrequencyLimitEnabled, Converter={StaticResource ModeVisibilityConverter}}" />
+                                        <Slider x:Name="ProcessorFrequencyLimitSlider" Grid.Column="1"
                                                 Minimum="1000" Maximum="6000" TickFrequency="100"
                                                 IsSnapToTickEnabled="True" Margin="0,0,9,0"
                                                 Value="{Binding SelectedMaximumProcessorFrequencyMhz, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                 ValueChanged="PerformanceSlider_ValueChanged" />
-                                        <TextBox x:Name="ProcessorFrequencyLimitEditor" Grid.Column="1" Height="27" Padding="4,0" TextAlignment="Right"
+                                        <TextBox x:Name="ProcessorFrequencyLimitEditor" Grid.Column="2" Height="27" Padding="4,0" TextAlignment="Right"
                                                  Style="{StaticResource ModernTextBoxStyle}"
                                                  VerticalContentAlignment="Center" FontSize="{presentation:UiFont 9.5}"
                                                  BorderBrush="{Binding PerformanceAccentColor}"
                                                  Text="{Binding SelectedMaximumProcessorFrequencyMhz, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
                                                  LostKeyboardFocus="PerformanceEditor_LostKeyboardFocus"
                                                  KeyDown="PerformanceEditor_KeyDown" />
-                                        <TextBlock Grid.Column="2" Text="MHz" Margin="4,0,0,0"
+                                        <TextBlock Grid.Column="3" Text="MHz" Margin="4,0,0,0"
                                                    VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"
                                                    FontSize="{presentation:UiFont 8.3}" />
+                                        <!-- E-core row, shown only with separate P/E caps. -->
+                                        <TextBlock Grid.Row="1" Text="{presentation:UiText 'E 核'}" Margin="0,8,8,0" VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource TextBrush}" FontSize="{presentation:UiFont 9}" FontWeight="SemiBold"
+                                                   Visibility="{Binding IsSeparateCoreFrequencyLimitEnabled, Converter={StaticResource ModeVisibilityConverter}}" />
+                                        <Slider x:Name="EfficiencyCoreFrequencyLimitSlider" Grid.Row="1" Grid.Column="1"
+                                                Minimum="1000" Maximum="6000" TickFrequency="100"
+                                                IsSnapToTickEnabled="True" Margin="0,8,9,0"
+                                                Visibility="{Binding IsSeparateCoreFrequencyLimitEnabled, Converter={StaticResource ModeVisibilityConverter}}"
+                                                Value="{Binding SelectedMaximumEfficiencyCoreFrequencyMhz, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                ValueChanged="PerformanceSlider_ValueChanged" />
+                                        <TextBox x:Name="EfficiencyCoreFrequencyLimitEditor" Grid.Row="1" Grid.Column="2" Height="27" Padding="4,0" Margin="0,8,0,0"
+                                                 TextAlignment="Right"
+                                                 Style="{StaticResource ModernTextBoxStyle}"
+                                                 VerticalContentAlignment="Center" FontSize="{presentation:UiFont 9.5}"
+                                                 BorderBrush="{Binding PerformanceAccentColor}"
+                                                 Visibility="{Binding IsSeparateCoreFrequencyLimitEnabled, Converter={StaticResource ModeVisibilityConverter}}"
+                                                 Text="{Binding SelectedMaximumEfficiencyCoreFrequencyMhz, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+                                                 LostKeyboardFocus="PerformanceEditor_LostKeyboardFocus"
+                                                 KeyDown="PerformanceEditor_KeyDown" />
+                                        <TextBlock Grid.Row="1" Grid.Column="3" Text="MHz" Margin="4,8,0,0"
+                                                   VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"
+                                                   FontSize="{presentation:UiFont 8.3}"
+                                                   Visibility="{Binding IsSeparateCoreFrequencyLimitEnabled, Converter={StaticResource ModeVisibilityConverter}}" />
                                     </Grid>
                                     <TextBlock Text="{presentation:UiText Value={Binding ProcessorFrequencyLimitStatusText}}"
                                                Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 8.2}"
@@ -2522,16 +2740,16 @@
                                         <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="50" /></Grid.ColumnDefinitions>
                                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                             <TextBlock x:Name="HighPerformanceSettingLabel" Text="{presentation:UiText 'Windows 电源模式跟随'}" Foreground="{DynamicResource TextBrush}" FontSize="{presentation:UiFont 10.5}" FontWeight="SemiBold" VerticalAlignment="Center" />
-                                            <Border x:Name="PowerModeFollowHelpIcon" Width="14" Height="14" CornerRadius="7" Margin="6,0,0,0"
-                                                    Background="Transparent" BorderBrush="#718095" BorderThickness="0.8" Cursor="Help" VerticalAlignment="Center"
+                                            <presentation:HelpMark x:Name="PowerModeFollowHelpIcon" Width="14" Height="14" CornerRadius="7" Margin="6,0,0,0"
+                                                    Background="Transparent" BorderBrush="#718095" BorderThickness="0.8" AutomationProperties.Name="{presentation:UiText 'Windows 电源模式跟随'}" AutomationProperties.HelpText="{Binding UiCopy.PowerModeFollowHint}" VerticalAlignment="Center"
                                                     ToolTipService.InitialShowDelay="180" ToolTipService.ShowDuration="20000">
                                                 <Border.ToolTip><ToolTip x:Name="PowerModeFollowHelpTooltip" presentation:ThemeScope.AccentSurface="True"
                                                     Background="#F1F7FF" BorderBrush="#90BFF2" Foreground="{DynamicResource TextBrush}"
                                                     DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
                                                     <TextBlock Text="{Binding UiCopy.PowerModeFollowHint}" MaxWidth="280" FontSize="{presentation:UiFont 8.5}" TextWrapping="Wrap" />
                                                 </ToolTip></Border.ToolTip>
-                                                <TextBlock Text="?" Foreground="#718095" FontSize="{presentation:UiFont 8}" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                            </Border>
+                                                <TextBlock Text="?" presentation:InkCenter.IsEnabled="True" Foreground="#718095" FontSize="{presentation:UiFont 8}" FontWeight="SemiBold" TextAlignment="Center" VerticalAlignment="Center" />
+                                            </presentation:HelpMark>
                                         </StackPanel>
                                         <CheckBox Grid.Column="1" Tag="HighPerformancePowerMode" IsChecked="{Binding IsHighPerformancePowerModeEnabled, Mode=OneWay}" Click="PowerToggle_Click" Style="{StaticResource SettingsToggleStyle}" HorizontalAlignment="Right" VerticalAlignment="Center" />
                                     </Grid>
@@ -2566,9 +2784,15 @@
                                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                             <TextBlock Text="{Binding UiCopy.ExperimentalChargeTitle}" Foreground="{DynamicResource TextBrush}"
                                                        FontSize="{presentation:UiFont 10.5}" FontWeight="SemiBold" VerticalAlignment="Center" />
-                                            <Border x:Name="ExperimentalChargeHelpIcon" Width="14" Height="14" CornerRadius="7" Margin="6,0,0,0"
-                                                    Background="Transparent" BorderBrush="#718095" BorderThickness="0.8" Cursor="Help" VerticalAlignment="Center"
+                                            <presentation:HelpMark x:Name="ExperimentalChargeHelpIcon" Width="14" Height="14" CornerRadius="7" Margin="6,0,0,0"
+                                                    Background="Transparent" BorderBrush="#718095" BorderThickness="0.8" AutomationProperties.Name="{Binding UiCopy.ExperimentalChargeTitle}" VerticalAlignment="Center"
                                                     ToolTipService.InitialShowDelay="180" ToolTipService.ShowDuration="20000">
+                                                <AutomationProperties.HelpText>
+                                                    <MultiBinding StringFormat="{}{0}&#10;{1}">
+                                                        <Binding Path="UiCopy.ExperimentalChargeRisk" />
+                                                        <Binding Path="UiCopy.ExperimentalChargeNativeNotice" />
+                                                    </MultiBinding>
+                                                </AutomationProperties.HelpText>
                                                 <Border.ToolTip>
                                                     <ToolTip x:Name="ExperimentalChargeHelpTooltip" presentation:ThemeScope.AccentSurface="True"
                                                              Background="#F1F7FF" BorderBrush="#90BFF2" Foreground="{DynamicResource TextBrush}"
@@ -2581,8 +2805,8 @@
                                                         </StackPanel>
                                                     </ToolTip>
                                                 </Border.ToolTip>
-                                                <TextBlock Text="?" Foreground="#718095" FontSize="{presentation:UiFont 8}" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                            </Border>
+                                                <TextBlock Text="?" presentation:InkCenter.IsEnabled="True" Foreground="#718095" FontSize="{presentation:UiFont 8}" FontWeight="SemiBold" TextAlignment="Center" VerticalAlignment="Center" />
+                                            </presentation:HelpMark>
                                         </StackPanel>
                                         <CheckBox x:Name="ExperimentalChargeToggle" Grid.Column="1"
                                                   IsChecked="{Binding Experiments.Charge.IsEnabled, Mode=OneWay}" IsEnabled="{Binding Experiments.Charge.CanToggle}"
@@ -3045,9 +3269,8 @@
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="48" /></Grid.ColumnDefinitions>
                                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                             <TextBlock Text="{presentation:UiText '动态节能'}" FontSize="{presentation:UiFont 12}" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" />
-                                            <Border x:Name="DynamicPowerHelpIcon" Width="14" Height="14" CornerRadius="7" Margin="6,0,0,0"
-                                                    Background="Transparent" BorderBrush="#718095" BorderThickness="0.8" Cursor="Help" VerticalAlignment="Center"
-                                                    AutomationProperties.Name="{presentation:UiText '动态节能说明'}">
+                                            <presentation:HelpMark x:Name="DynamicPowerHelpIcon" Width="14" Height="14" CornerRadius="7" Margin="6,0,0,0"
+                                                    Background="Transparent" BorderBrush="#718095" BorderThickness="0.8" AutomationProperties.Name="{presentation:UiText '动态节能'}" VerticalAlignment="Center">
                                                 <Border.ToolTip>
                                                     <ToolTip x:Name="DynamicPowerHelpTooltip" presentation:ThemeScope.AccentSurface="True"
                                                              Background="#F1F7FF" BorderBrush="#90BFF2" Foreground="{DynamicResource TextBrush}"
@@ -3064,8 +3287,8 @@
                                                         </StackPanel>
                                                     </ToolTip>
                                                 </Border.ToolTip>
-                                                <TextBlock Text="?" Foreground="#718095" FontSize="9" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                            </Border>
+                                                <TextBlock Text="?" presentation:InkCenter.IsEnabled="True" Foreground="#718095" FontSize="{presentation:UiFont 8}" FontWeight="SemiBold" TextAlignment="Center" VerticalAlignment="Center" />
+                                            </presentation:HelpMark>
                                         </StackPanel>
                                         <CheckBox x:Name="DynamicPowerToggle" Grid.Column="1" IsChecked="{Binding Experiments.IsDynamicEnabled, Mode=OneWay}"
                                                   IsEnabled="{Binding Experiments.CanToggleDynamic}" Click="DynamicPower_Click" Style="{StaticResource SettingsToggleStyle}"
@@ -3102,12 +3325,80 @@
                                     <Border Height="1" Background="{DynamicResource NeutralE3E8F0Brush}" />
                                     <Grid Margin="0,9">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                        <StackPanel>
-                                            <TextBlock Text="{Binding UiCopy.AutomaticUpdateCheckTitle}" Foreground="{DynamicResource TextBrush}" FontSize="{presentation:UiFont 11.5}" FontWeight="SemiBold" />
-                                            <TextBlock Text="{Binding UiCopy.AutomaticUpdateCheckDescription}" Foreground="{DynamicResource MutedBrush}"
-                                                       FontSize="{presentation:UiFont 8.8}" Margin="0,3,8,0" TextWrapping="Wrap" />
+                                        <!-- The details show on hovering the question mark, so the row stays one line. -->
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding UiCopy.AutomaticUpdateCheckTitle}" Foreground="{DynamicResource TextBrush}" FontSize="{presentation:UiFont 11.5}" FontWeight="SemiBold"
+                                                       VerticalAlignment="Center" />
+                                            <presentation:HelpMark x:Name="AutomaticUpdateCheckHelpIcon" Width="14" Height="14" CornerRadius="7" Margin="6,0,0,0"
+                                                    Background="Transparent" BorderBrush="#718095" BorderThickness="0.8" AutomationProperties.Name="{Binding UiCopy.AutomaticUpdateCheckTitle}" AutomationProperties.HelpText="{Binding UiCopy.AutomaticUpdateCheckDescription}" VerticalAlignment="Center"
+                                                    ToolTipService.InitialShowDelay="180" ToolTipService.ShowDuration="20000">
+                                                <Border.ToolTip>
+                                                    <ToolTip DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                                        <TextBlock Text="{Binding UiCopy.AutomaticUpdateCheckDescription}" MaxWidth="280" FontSize="{presentation:UiFont 8.5}" TextWrapping="Wrap" />
+                                                    </ToolTip>
+                                                </Border.ToolTip>
+                                                <TextBlock Text="?" presentation:InkCenter.IsEnabled="True" Foreground="#718095" FontSize="{presentation:UiFont 8}" FontWeight="SemiBold" TextAlignment="Center" VerticalAlignment="Center" />
+                                            </presentation:HelpMark>
                                         </StackPanel>
                                         <CheckBox x:Name="AutomaticUpdateCheckToggle" Grid.Column="1" IsChecked="{Binding CheckForUpdatesAutomatically, Mode=TwoWay}"
+                                                  Style="{StaticResource SettingsToggleStyle}" VerticalAlignment="Center" />
+                                    </Grid>
+                                    <Border Height="1" Background="{DynamicResource NeutralE3E8F0Brush}" />
+                                    <!-- Option B, chosen by the user: the pill is both the status and the action. Red "正在运行 · 退出"
+                                         exits once; grey "已退出" when nothing is left to exit, grey "状态未知 · 重查" reads again
+                                         when Windows did not tell. The long-term switch is its own row. -->
+                                    <Grid x:Name="OfficialConsoleExitRow" Margin="0,9,0,3">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <TextBlock Text="{presentation:UiText '退出官方控制台'}" Foreground="{DynamicResource TextBrush}" FontSize="{presentation:UiFont 11.5}" FontWeight="SemiBold"
+                                                       VerticalAlignment="Center" />
+                                            <presentation:HelpMark x:Name="OfficialConsoleExitHelpIcon" Width="14" Height="14" CornerRadius="7" Margin="6,0,0,0"
+                                                    Background="Transparent" BorderBrush="#718095" BorderThickness="0.8" AutomationProperties.Name="{presentation:UiText '退出官方控制台'}" VerticalAlignment="Center"
+                                                    ToolTipService.InitialShowDelay="180" ToolTipService.ShowDuration="20000">
+                                                <Border.ToolTip>
+                                                    <ToolTip>
+                                                        <TextBlock Text="{presentation:UiText '只退出官方控制中心的窗口和托盘这一次；手动打开或重新登录后会恢复。后台服务和 OSD 热键保留，整机模式、风扇、灯光照常可用。'}"
+                                                                   MaxWidth="280" FontSize="{presentation:UiFont 8.5}" TextWrapping="Wrap" />
+                                                    </ToolTip>
+                                                </Border.ToolTip>
+                                                <TextBlock Text="?" presentation:InkCenter.IsEnabled="True" Foreground="#718095" FontSize="{presentation:UiFont 8}" FontWeight="SemiBold" TextAlignment="Center" VerticalAlignment="Center" />
+                                            </presentation:HelpMark>
+                                        </StackPanel>
+                                        <Button x:Name="ExitOfficialConsoleButton" Grid.Column="1" Content="{presentation:UiText Value={Binding OfficialConsoleExitButtonText}}"
+                                                IsEnabled="{Binding CanExitOfficialConsoleNow}" Click="ExitOfficialConsole_Click" VerticalAlignment="Center">
+                                            <Button.Style>
+                                                <Style TargetType="Button" BasedOn="{StaticResource StatusPillButtonStyle}">
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsOfficialFrontendRunning}" Value="True">
+                                                            <Setter Property="Foreground" Value="{DynamicResource DangerTextBrush}" />
+                                                            <Setter Property="Background" Value="{DynamicResource DangerSurfaceBrush}" />
+                                                            <Setter Property="BorderBrush" Value="{DynamicResource DangerBorderBrush}" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Button.Style>
+                                        </Button>
+                                    </Grid>
+                                    <!-- No line between: long-term exit belongs to the row above, so its title is grey. -->
+                                    <Grid x:Name="LongTermOfficialConsoleExitRow" Margin="0,3,0,9">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <TextBlock Text="{presentation:UiText '长期退出'}" Foreground="{DynamicResource MutedBrush}" FontSize="{presentation:UiFont 10.5}"
+                                                       VerticalAlignment="Center" />
+                                            <presentation:HelpMark x:Name="LongTermOfficialConsoleExitHelpIcon" Width="14" Height="14" CornerRadius="7" Margin="6,0,0,0"
+                                                    Background="Transparent" BorderBrush="#718095" BorderThickness="0.8" AutomationProperties.Name="{presentation:UiText '长期退出'}" VerticalAlignment="Center"
+                                                    ToolTipService.InitialShowDelay="180" ToolTipService.ShowDuration="20000">
+                                                <Border.ToolTip>
+                                                    <ToolTip>
+                                                        <TextBlock Text="{presentation:UiText '打开后，每次 RevoHelper 启动时都会退出官方控制中心的窗口和托盘，打开时也会马上退出一次。随 Windows 启动时官方托盘会稍后出现，所以会在 3 分钟内每 10 秒检查一次。'}"
+                                                                   MaxWidth="280" FontSize="{presentation:UiFont 8.5}" TextWrapping="Wrap" />
+                                                    </ToolTip>
+                                                </Border.ToolTip>
+                                                <TextBlock Text="?" presentation:InkCenter.IsEnabled="True" Foreground="#718095" FontSize="{presentation:UiFont 8}" FontWeight="SemiBold" TextAlignment="Center" VerticalAlignment="Center" />
+                                            </presentation:HelpMark>
+                                        </StackPanel>
+                                        <CheckBox x:Name="ExitOfficialConsoleToggle" Grid.Column="1" IsChecked="{Binding ExitOfficialConsole, Mode=TwoWay}"
+                                                  AutomationProperties.Name="{presentation:UiText '长期退出'}"
                                                   Style="{StaticResource SettingsToggleStyle}" VerticalAlignment="Center" />
                                     </Grid>
                                 </StackPanel>

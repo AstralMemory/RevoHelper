@@ -4,14 +4,16 @@ namespace RevoHelper.Core.Control;
 /// Keeps OEM profile editing for Custom slots, while preset modes use a verified
 /// direct CPU backend so firmware-fixed Office/Balanced/Turbo limits can be overridden.
 /// </summary>
+/// <remarks>
+/// What a direct write replaced is tracked by the backend for the register as a whole, not per
+/// mode: an OEM mode change does not necessarily reprogram the register, so a value read in a
+/// later mode can be this session's own earlier write (see <see cref="DirectPowerLimitOwnership{T}"/>).
+/// </remarks>
 public sealed class PlatformAwareCpuPolicyController(
     IPlatformModeController platformController,
     ICpuPolicyController customProfileController,
     ICpuPolicyController? directController) : ICpuPolicyController, ICpuPolicyRestorePointProvider
 {
-    private readonly Dictionary<PlatformMode, CpuPolicyRestorePoint> presetBaselines = [];
-    private readonly SemaphoreSlim presetOperationLock = new(1, 1);
-
     public bool CanControlPresetPowerLimits => directController switch
     {
         SwitchableCpuPolicyController switchable => switchable.IsAvailable,
@@ -47,63 +49,19 @@ public sealed class PlatformAwareCpuPolicyController(
             return ControlResult.Rejected("当前设备没有通过验证的 CPU 功耗直连后端，预设档位保持 OEM 固件限制。");
         }
 
-        await presetOperationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            if (!presetBaselines.ContainsKey(mode.Mode))
-            {
-                var baseline = await CpuPolicyRestorePoint.CaptureAsync(directController, cancellationToken).ConfigureAwait(false);
-                if (baseline is null)
-                {
-                    return ControlResult.Rejected("无法保存当前 OEM 档位的原始 CPU 功耗限制，未执行直连覆盖。");
-                }
-
-                presetBaselines[mode.Mode] = baseline;
-            }
-
-            return await directController.ApplyCpuPolicyAsync(policy, cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            presetOperationLock.Release();
-        }
+        // The backend reads the register before writing and refuses when it cannot.
+        return await directController.ApplyCpuPolicyAsync(policy, cancellationToken).ConfigureAwait(false);
     }
 
-    public async ValueTask<ControlResult> RestoreActivePresetBaselineAsync(
-        CancellationToken cancellationToken)
-    {
-        if (directController is null)
-        {
-            return new(true, "没有已启用的 CPU 功耗直连后端，无需恢复。");
-        }
-
-        var mode = await platformController.ReadPlatformModeAsync(cancellationToken).ConfigureAwait(false);
-        if (mode is null || mode.Mode == PlatformMode.Custom)
-        {
-            return new(true, "当前不是由直连后端覆盖的 OEM 预设档位，无需恢复。");
-        }
-
-        await presetOperationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            if (!presetBaselines.TryGetValue(mode.Mode, out var baseline))
-            {
-                return new(true, "当前 OEM 预设档位未被本次会话覆盖，无需恢复。");
-            }
-
-            var result = await baseline.RestoreAsync(cancellationToken).ConfigureAwait(false);
-            if (result.Succeeded)
-            {
-                presetBaselines.Remove(mode.Mode);
-            }
-
-            return result;
-        }
-        finally
-        {
-            presetOperationLock.Release();
-        }
-    }
+    /// <summary>
+    /// Undoes this session's direct PL override at exit, in whatever mode is current. Custom
+    /// included: the backend reads the register itself and restores only the fields it wrote,
+    /// and only while they still hold its last confirmed write.
+    /// </summary>
+    public ValueTask<ControlResult> RestoreDirectOverrideAsync(CancellationToken cancellationToken) =>
+        directController is ICpuPolicySessionRoot session
+            ? session.RestoreSessionRootAsync(cancellationToken)
+            : ValueTask.FromResult(new ControlResult(true, "没有可撤回的 CPU 功耗直连覆盖。"));
 
     public async ValueTask<CpuPolicyRestorePoint?> CaptureRestorePointAsync(CancellationToken cancellationToken)
     {

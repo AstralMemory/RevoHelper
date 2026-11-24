@@ -128,7 +128,7 @@ public sealed class Snapshot4CopyTests
                 host.Resources.MergedDictionaries.Add(window.Resources);
                 host.Measure(new Size(940, 550));
                 host.Arrange(new Rect(0, 0, 940, 550));
-                var help = Assert.IsType<Border>(window.FindName("DynamicPowerHelpIcon"));
+                var help = Assert.IsType<HelpMark>(window.FindName("DynamicPowerHelpIcon"));
                 var tooltip = Assert.IsType<ToolTip>(help.ToolTip);
                 // Simulate the popup owner without opening a native window or starting the app.
                 tooltip.PlacementTarget = help;

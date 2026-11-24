@@ -36,7 +36,6 @@ public sealed class ReleasePresentationTests
 
     [Theory]
     [InlineData("OemPresetPowerLimitWarning", "可能无法调节超过机械革命官方预设的功耗 PL 值。例如平衡模式默认最高 85 W，该限制无法被突破，但可以向下调整。若想尝试自定义调整，请使用狂暴模式，或在自定义模式方案中细调。")]
-    [InlineData("ProcessorFrequencyDelayWarning", "仅本次会话持有；退出自动恢复。生效可能延迟约 5–10 秒")]
     public void ImportantWarnings_KeepExactRedCopyOutsideDetails(string name, string expected)
     {
         var warning = Named(LoadWindow(), name);
@@ -46,6 +45,22 @@ public sealed class ReleasePresentationTests
         Assert.DoesNotContain(warning.Ancestors(), e => e.Name.LocalName == "Expander");
         if (name == "OemPresetPowerLimitWarning")
             Assert.Contains(warning.Ancestors(), e => (string?)e.Attribute(Xaml + "Name") == "CustomPowerLimitEditorPanel");
+    }
+
+    [Fact]
+    public void FrequencyDelayWarning_KeepsExactRedCopyWithTheDelayOnItsOwnLine()
+    {
+        var warning = Named(LoadWindow(), "ProcessorFrequencyDelayWarning");
+        Assert.Equal(
+            new[] { "Run", "LineBreak", "Run" },
+            warning.Elements().Select(element => element.Name.LocalName).ToArray());
+        Assert.Equal(
+            new[] { "仅本次会话持有；退出自动恢复。", "生效可能延迟约 5–10 秒" },
+            warning.Elements().Where(element => element.Name.LocalName == "Run")
+                .Select(element => (string?)element.Attribute("Text")).ToArray());
+        Assert.Equal("#D9363E", (string?)warning.Attribute("Foreground"));
+        Assert.Null(warning.Attribute("Visibility"));
+        Assert.DoesNotContain(warning.Ancestors(), element => element.Name.LocalName == "Expander");
     }
 
     [Fact]
@@ -104,8 +119,8 @@ public sealed class ReleasePresentationTests
         Assert.Equal("{Binding AppVersionText}", (string?)Named(window, "HomeVersionFooter").Attribute("Text"));
         Assert.Equal("Collapsed", (string?)Named(window, "HomeVersionFooter").Attribute("Visibility"));
         var source = File.ReadAllText(Locate("src", "RevoHelper.App", "Presentation", "MainWindowViewModel.cs"));
-        Assert.Contains("public string ReleaseVersionText => \"V1.0.7\";", source, StringComparison.Ordinal);
-        Assert.Contains("public string ReleaseBadgeText => \"V1.0.7\";", source, StringComparison.Ordinal);
+        Assert.Contains("public string ReleaseVersionText => \"V1.0.8\";", source, StringComparison.Ordinal);
+        Assert.Contains("public string ReleaseBadgeText => \"V1.0.8\";", source, StringComparison.Ordinal);
         Assert.Contains("public string AppVersionText => $\"RevoHelper {ReleaseVersionText} · {UiCopy.OpenSourceAndFree}\";", source, StringComparison.Ordinal);
         foreach (var old in new[] { "BETA · V1", "Beta v1 ·", "Beta v0.0.1", "界面预览 v23" })
         {
@@ -159,13 +174,13 @@ public sealed class ReleasePresentationTests
     }
 
     [Fact]
-    public void ReleaseMetadata_UsesV107Snapshot1()
+    public void ReleaseMetadata_UsesV108()
     {
         var project = XDocument.Load(Locate("src", "RevoHelper.App", "RevoHelper.App.csproj"));
-        Assert.Equal("1.0.7", project.Descendants("Version").Single().Value);
-        Assert.Equal("1.0.7.0", project.Descendants("AssemblyVersion").Single().Value);
-        Assert.Equal("1.0.7.9", project.Descendants("FileVersion").Single().Value);
-        Assert.Equal("1.0.7+20261120", project.Descendants("InformationalVersion").Single().Value);
+        Assert.Equal("1.0.8", project.Descendants("Version").Single().Value);
+        Assert.Equal("1.0.8.0", project.Descendants("AssemblyVersion").Single().Value);
+        Assert.Equal("1.0.8.10", project.Descendants("FileVersion").Single().Value);
+        Assert.Equal("1.0.8+20261124", project.Descendants("InformationalVersion").Single().Value);
         Assert.Empty(project.Descendants("Content"));
     }
 
@@ -173,8 +188,8 @@ public sealed class ReleasePresentationTests
     public void SharedBuildMetadata_UsesTheSameReleaseForCurrentAssemblies()
     {
         var defaults = XDocument.Load(Locate("Directory.Build.props"));
-        Assert.Equal("1.0.7", defaults.Descendants("Version").Single().Value);
-        Assert.Equal("1.0.7+20261120", defaults.Descendants("InformationalVersion").Single().Value);
+        Assert.Equal("1.0.8", defaults.Descendants("Version").Single().Value);
+        Assert.Equal("1.0.8+20261124", defaults.Descendants("InformationalVersion").Single().Value);
         Assert.Equal("Astral Memory", defaults.Descendants("Authors").Single().Value);
     }
 

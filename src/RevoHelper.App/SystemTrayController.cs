@@ -2,6 +2,7 @@ using System.Drawing;
 using System.ComponentModel;
 using System.Windows;
 using Forms = System.Windows.Forms;
+using RevoHelper.App.Lifecycle;
 using RevoHelper.App.Presentation;
 
 namespace RevoHelper.App;
@@ -18,6 +19,10 @@ public sealed class SystemTrayController : IDisposable
     private readonly Dictionary<TrayProfileAction, Forms.ToolStripMenuItem> profileItems = [];
     private readonly List<Image> profileImages = [];
     private bool disposed;
+    private bool exitRequested;
+    private bool exitWaitingLong;
+    private bool forcedExitAsked;
+    private bool exitClosing;
 
     public SystemTrayController(MainWindow window, MainWindowViewModel viewModel)
     {
@@ -121,12 +126,86 @@ public sealed class SystemTrayController : IDisposable
         window.Activate();
     });
 
-    private void ExitApplication() => window.Dispatcher.Invoke(() =>
+    // Stop new performance changes and let the one under way (switch, apply or rollback) end
+    // first, however long it takes, so App.OnExit can restore frequency, PL and Boost without
+    // racing it; the preset PL baseline lives only in memory, so skipping its restore would
+    // lose it. This waits on the UI thread without blocking it: the change's holder needs that
+    // thread to finish. A note appears if the wait runs past a few seconds; from then on,
+    // choosing Exit again offers a forced exit, for a change that never ends because a
+    // hardware call hangs.
+    private void ExitApplication() => window.Dispatcher.BeginInvoke(new Action(async () =>
     {
+        if (exitClosing) return;
+        if (exitRequested)
+        {
+            if (exitWaitingLong && !forcedExitAsked) OfferForcedExit();
+            return;
+        }
+        exitRequested = true;
+        try
+        {
+            var settled = viewModel.PrepareForExitAsync(Timeout.InfiniteTimeSpan);
+            if (await Task.WhenAny(settled, Task.Delay(TimeSpan.FromSeconds(3))) != settled)
+            {
+                exitWaitingLong = true;
+                var english = viewModel.SelectedUiLanguageCode == "en-US";
+                notifyIcon.ShowBalloonTip(5000,
+                    english ? "RevoHelper is finishing a change" : "RevoHelper 正在完成调整",
+                    english
+                        ? "It exits once the current performance change has ended. If it stays stuck, choose Exit again to force it."
+                        : "正在等待当前的性能调整完成，完成后自动退出。如果一直没有反应，可以再次点击“退出”强制退出。",
+                    Forms.ToolTipIcon.Info);
+            }
+            await settled;
+        }
+        catch (Exception exception)
+        {
+            RuntimeDiagnosticLog.Write("exit-recovery", $"{exception.GetType().Name}: {exception.Message}");
+        }
+        CloseApplication();
+    }));
+
+    // The change still holds the performance gate, so App.OnExit cannot claim it and skips the
+    // restores that would race the change: the frequency records (the dynamic layer too) and the
+    // temporary processor-state record stay for the next start to try, and the preset PL
+    // baseline, kept only in memory, is lost.
+    private void OfferForcedExit()
+    {
+        forcedExitAsked = true;
+        var english = viewModel.SelectedUiLanguageCode == "en-US";
+        var choice = MessageBox.Show(
+            english
+                ? "The current performance change has not finished. The hardware may not be responding.\n\n" +
+                  "If RevoHelper exits now:\n" +
+                  "• The change may be left half done.\n" +
+                  "• The next time RevoHelper starts, it tries to restore the frequency cap and temporary processor limits.\n" +
+                  "• The PL power limits set in this session may stay until Windows restarts.\n\n" +
+                  "Force RevoHelper to exit? Choose No to keep waiting."
+                : "当前的性能调整还没有完成，可能是硬件没有响应。\n\n" +
+                  "如果现在强制退出：\n" +
+                  "• 这次调整可能只完成了一部分；\n" +
+                  "• 下次打开 RevoHelper 时，会尝试恢复频率上限和临时的处理器限制；\n" +
+                  "• 本会话的 PL 功耗设置可能会保留到重启电脑。\n\n" +
+                  "要强制退出吗？选择“否”会继续等待。",
+            english ? "Force RevoHelper to exit?" : "强制退出 RevoHelper？",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No);
+        forcedExitAsked = false;
+        // The change may have ended while the question was open, and the normal exit run.
+        if (choice != MessageBoxResult.Yes || exitClosing) return;
+        RuntimeDiagnosticLog.Write("exit-recovery", "Forced exit chosen while a performance change was still running.");
+        CloseApplication();
+    }
+
+    private void CloseApplication()
+    {
+        if (exitClosing) return;
+        exitClosing = true;
         window.AllowApplicationClose = true;
         window.Close();
         Application.Current.Shutdown();
-    });
+    }
 
     private static Icon ExtractIcon()
     {

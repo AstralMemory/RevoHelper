@@ -213,6 +213,7 @@ public sealed partial class MainWindowViewModel
                 }
                 ConfirmPlatformSelection(selection);
                 modeOnlyPlatformSelection = selection;
+                modeOnlyFrequencySyncOwed = null;
                 if (IsLatestRequest()) StatusMessage = modeResult.Reason;
                 // Runs even when superseded: the next request only compares against this
                 // mode, so a cap left by the previous profile has to be removed here.
@@ -220,6 +221,13 @@ public sealed partial class MainWindowViewModel
                 var modeOnlySettlement = await TrySettleFrequencyAsync(
                     CreateFrequencyPolicy(selection), requestRevision, cancellationToken);
                 TraceControl("performance-request", $"request={requestRevision} mode-only-frequency={modeOnlySettlement.Succeeded} reason={modeOnlySettlement.Reason}");
+                if (!modeOnlySettlement.Succeeded && IsLatestRequest() &&
+                    FrequencyWriteGate.IsStartupRecoveryDeferral(modeOnlySettlement.Reason))
+                {
+                    // Reports of this mode are echoes of a verified mode-only switch and change
+                    // nothing, so without this the sync would wait for the next manual switch.
+                    modeOnlyFrequencySyncOwed = selection;
+                }
                 if (!IsLatestRequest()) return true;
                 if (!modeOnlySettlement.Succeeded)
                     StatusMessage = $"{modeResult.Reason} · {modeOnlySettlement.Reason}";
@@ -238,6 +246,7 @@ public sealed partial class MainWindowViewModel
                 return false;
             }
             modeOnlyPlatformSelection = null;
+            modeOnlyFrequencySyncOwed = null;
             ConfirmPlatformSelection(result.Readback?.Platform ?? selection);
             if (!IsLatestRequest()) return true;
             UpdatePerformanceReadback(result.Readback);
@@ -353,19 +362,26 @@ public sealed partial class MainWindowViewModel
         if (!readSucceeded) StatusMessage = $"{StatusMessage} · 实际档位暂时无法回读，已恢复上次显示。";
     }
 
+    /// <param name="resynchronize">
+    /// Start-up or resume: the frequency must be brought in line even though the mode itself
+    /// may not have changed. Without it, a report of the mode already shown is only an echo.
+    /// </param>
     public async Task<bool> ObservePlatformModeAsync(
         PlatformModeSelection selection,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool resynchronize = false)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (isApplyingPlatformMode || isApplyingPerformancePolicy)
+        if (isShuttingDown || isApplyingPlatformMode || isApplyingPerformancePolicy)
         {
             return false;
         }
+        var modeChanged = confirmedPlatformSelection != selection;
+        var owedSync = modeOnlyFrequencySyncOwed == selection;
 
         if (modeOnlyPlatformSelection is { } modeOnly)
         {
-            if (modeOnly == selection)
+            if (modeOnly == selection && !owedSync)
             {
                 // Status echoes/reconnects must not turn a verified mode-only
                 // request into an unsolicited application of old/default limits.
@@ -373,13 +389,26 @@ public sealed partial class MainWindowViewModel
                 ApplyLivePlatformSelection(selection);
                 return true;
             }
-            // A genuinely different externally selected mode follows the existing
-            // per-profile frequency reconciliation path.
-            modeOnlyPlatformSelection = null;
+            if (modeOnly != selection)
+            {
+                // A genuinely different externally selected mode follows the existing
+                // per-profile frequency reconciliation path.
+                modeOnlyPlatformSelection = null;
+                modeOnlyFrequencySyncOwed = null;
+            }
+            // Otherwise the switch's own sync was deferred by the start-up recovery: do it now,
+            // like the switch would have, and treat it as the mode change it was.
         }
 
         // Repeated notifications for the same mode share the existing settle window.
-        if (pendingFrequencyObservation == selection) return true;
+        if (pendingFrequencyObservation == selection)
+        {
+            if (!resynchronize) return true;
+            // The pending one does the work and must then also do what a resync needs. A resync
+            // waits for its real outcome, so a start-up retry is not ended by a sync that fails.
+            pendingFrequencyObservationResync = true;
+            return pendingFrequencyObservationResult is { } pending ? await pending.Task : true;
+        }
 
         var observationRevision = Interlocked.Increment(ref platformObservationRevision);
         ConfirmPlatformSelection(selection);
@@ -392,17 +421,65 @@ public sealed partial class MainWindowViewModel
 
         pendingFrequencyObservation = selection;
         pendingFrequencyObservationRevision = observationRevision;
-        var gateHeld = false;
+        pendingFrequencyObservationResync = resynchronize;
+        var result = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        pendingFrequencyObservationResult = result;
+        var outcome = false;
+        try
+        {
+            outcome = await ObserveFrequencyAsync(selection, observationRevision, modeChanged || owedSync, resynchronize, cancellationToken);
+            return outcome;
+        }
+        finally
+        {
+            result.TrySetResult(outcome);
+            if (pendingFrequencyObservationRevision == observationRevision)
+            {
+                pendingFrequencyObservation = null;
+                pendingFrequencyObservationResult = null;
+            }
+        }
+    }
 
+    private async Task<bool> ObserveFrequencyAsync(
+        PlatformModeSelection selection,
+        long observationRevision,
+        bool modeChanged,
+        bool resynchronize,
+        CancellationToken cancellationToken)
+    {
+        var gateHeld = false;
         try
         {
             StatusMessage = "已同步当前 OEM 档位，正在核对对应的 Windows 频率策略…";
             await verificationDelay(TimeSpan.FromSeconds(2), cancellationToken);
             await performanceTransitionGate.WaitAsync(cancellationToken);
             gateHeld = true;
-            if (observationRevision != Volatile.Read(ref platformObservationRevision))
+            if (isShuttingDown || observationRevision != Volatile.Read(ref platformObservationRevision))
             {
                 return true;
+            }
+
+            if (Experiments.IsDynamicEngaged)
+            {
+                // Its cap or an owed restore would otherwise look like a value to overwrite, and
+                // the manual layer would keep that cap as the original to restore at exit.
+                if (!modeChanged && !resynchronize && !pendingFrequencyObservationResync)
+                {
+                    // An echo of the mode already shown: leave the dynamic cap and its
+                    // observation window alone.
+                    StatusMessage = "已同步当前 OEM 档位；动态节能正在管理频率，未追加写入。";
+                    return true;
+                }
+                if (!await Experiments.PrepareDynamicForManualWriteAsync(cancellationToken))
+                {
+                    StatusMessage = "动态频率恢复未完成，暂不同步 Windows 频率策略。";
+                    return false;
+                }
+                if (isShuttingDown || observationRevision != Volatile.Read(ref platformObservationRevision))
+                {
+                    return true;
+                }
             }
 
             var check = await RecheckFrequencyAsync(
@@ -410,6 +487,11 @@ public sealed partial class MainWindowViewModel
                 () => observationRevision != Volatile.Read(ref platformObservationRevision),
                 delay => verificationDelay(delay, cancellationToken),
                 cancellationToken);
+            if (check.Outcome is FrequencyRecheckOutcome.Matched or FrequencyRecheckOutcome.Reapplied &&
+                modeOnlyFrequencySyncOwed == selection)
+            {
+                modeOnlyFrequencySyncOwed = null;
+            }
             switch (check.Outcome)
             {
                 case FrequencyRecheckOutcome.Matched:
@@ -433,8 +515,6 @@ public sealed partial class MainWindowViewModel
         finally
         {
             if (gateHeld) performanceTransitionGate.Release();
-            if (pendingFrequencyObservationRevision == observationRevision)
-                pendingFrequencyObservation = null;
         }
     }
 
@@ -447,7 +527,7 @@ public sealed partial class MainWindowViewModel
             var live = await platformModeController.ReadPlatformModeAsync(cancellationToken);
             if (live is null || isApplyingPlatformMode ||
                 requestRevision != Volatile.Read(ref platformRequestRevision)) return false;
-            return await ObservePlatformModeAsync(live, cancellationToken);
+            return await ObservePlatformModeAsync(live, cancellationToken, resynchronize: true);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -520,11 +600,25 @@ public sealed partial class MainWindowViewModel
         _ => throw new ArgumentOutOfRangeException(nameof(selection))
     };
 
-    private ProcessorFrequencyLimitPolicy CreateFrequencyPolicy(string key) =>
-        ProcessorFrequencyLimitPolicy.Uniform((uint)(
-            frequencyConfiguredByProfile.GetValueOrDefault(key)
-                ? Math.Max(0, frequencyDraftsByProfile.GetValueOrDefault(key))
-                : 0));
+    private ProcessorFrequencyLimitPolicy CreateFrequencyPolicy(string key)
+    {
+        var performance = frequencyConfiguredByProfile.GetValueOrDefault(key)
+            ? Math.Max(0, frequencyDraftsByProfile.GetValueOrDefault(key))
+            : 0;
+        // An E-core value exists only while the profile uses separate P/E caps.
+        var efficiency = efficiencyFrequencyDraftsByProfile.GetValueOrDefault(key);
+        if (performance == 0 ||
+            efficiency is not (>= 1000 and <= 6000) ||
+            processorCoreClasses is not { CanLimitSeparately: true } classes)
+        {
+            return ProcessorFrequencyLimitPolicy.Uniform((uint)performance);
+        }
+
+        return ProcessorFrequencyLimitPolicy.ForCoreTypes(
+            (uint)performance,
+            (uint)efficiency,
+            classes.PerformanceClass);
+    }
 
     private PlatformModeSelection CurrentPlatformSelection() => SelectedProfileId switch
     {

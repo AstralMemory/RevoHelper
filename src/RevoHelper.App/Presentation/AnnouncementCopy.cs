@@ -14,7 +14,7 @@ public sealed record AnnouncementCopy(
     string FeedbackTitle, string Feedback, string OfflineNote,
     string MirrorButton, string MirrorBackupButton, string MirrorNote)
 {
-    public const string UpdateDate = "2026-11-20";
+    public const string UpdateDate = "2026-11-24";
     public const string ProjectUrl = "https://github.com/AstralMemory/RevoHelper";
     public const string DownloadsUrl = ProjectUrl + "/releases";
     public const string FeedbackUrl = ProjectUrl + "/issues";

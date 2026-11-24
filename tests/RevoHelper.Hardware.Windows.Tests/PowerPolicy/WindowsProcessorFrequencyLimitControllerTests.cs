@@ -251,6 +251,30 @@ public sealed class WindowsProcessorFrequencyLimitControllerTests
     }
 
     [Fact]
+    public async Task SeparateCapsThenOneCap_RecoveryRestoresAllSixOriginalValues()
+    {
+        var api = new FakePowerProfileApi();
+        api.Values[WindowsProcessorFrequencyLimitController.MaximumFrequencySetting] = (0, 2100);
+        api.Values[WindowsProcessorFrequencyLimitController.MaximumFrequencyClass1Setting] = (0, 2200);
+        api.Values[WindowsProcessorFrequencyLimitController.MaximumFrequencyClass2Setting] = (0, 2300);
+        var store = new FakeLeaseStore();
+        var original = new ProcessorFrequencyLimitPolicy(0, 2100, 0, 2200, 0, 2300);
+        var controller = new WindowsProcessorFrequencyLimitController(api, store);
+
+        Assert.True((await controller.ApplyAsync(
+            ProcessorFrequencyLimitPolicy.ForCoreTypes(3500, 2200, performanceClass: 1), CancellationToken.None)).Succeeded);
+        Assert.True((await controller.ApplyAsync(
+            ProcessorFrequencyLimitPolicy.Uniform(3500), CancellationToken.None)).Succeeded);
+
+        Assert.Equal(original, store.Lease?.Original);
+        Assert.Equal(ProcessorFrequencyLimitPolicy.Uniform(3500), store.Lease?.Expected);
+        var recovered = await new WindowsProcessorFrequencyLimitController(api, store).RecoverAsync(CancellationToken.None);
+        Assert.True(recovered.Succeeded, recovered.Reason);
+        Assert.Null(store.Lease);
+        Assert.Equal(original, await controller.ReadAsync(CancellationToken.None));
+    }
+
+    [Fact]
     public async Task RecoverAsync_AfterNewController_RestoresAllSixValuesAndClearsLease()
     {
         var api = new FakePowerProfileApi();
