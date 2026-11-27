@@ -19,8 +19,41 @@ public static class HoldChargeHost
     public const string StopName = @"Local\RevoHelper.HoldCharge.Stop";
     // Set when Windows is shutting down: a limit that is holding is left applied for three days.
     public const string ShutdownName = @"Local\RevoHelper.HoldCharge.Shutdown";
+    // The answer to the shutdown signal when the charge is below the limit, written before the
+    // restore that follows: nothing stays applied, so Windows need not wait for it.
+    public const string ReleasingPhase = "Releasing";
+    // No time is promised when the restore is not confirmed: a hold left for a shutdown, or one
+    // partly written then, keeps the battery from charging for up to three days.
+    public const string StoppedUnconfirmed = "限充已停止，恢复未确认；固件计时到期后会自行恢复正常充电（通常约 30 分钟，最长 3 天）。";
     public static string StatusPath => Path.Combine(ChargeSessionFiles.Root, "hold-status.json");
     public static bool IsHelper(string[] args) => args.Length > 0 && args[0] == Mode;
+
+    /// <summary>The worker process's charge limit, on a thread of its own (see <see cref="HoldChargeWorkerThread"/>).</summary>
+    public static HoldChargeWorkerThread StartThread(string[] args, Action<int> finished)
+    {
+        var worker = new HoldChargeWorkerThread(() => Run(args), finished, () =>
+        {
+            using var stop = EventWaitHandle.OpenExisting(StopName);
+            using var shutdown = new EventWaitHandle(false, EventResetMode.ManualReset, ShutdownName);
+            return SignalShutdownUnlessStopped(stop, shutdown);
+        });
+        worker.Start();
+        return worker;
+    }
+
+    /// <summary>
+    /// The worker's own answer to Windows: the limit is told to hold for the shutdown, unless a
+    /// stop came first. A stop that was asked for goes ahead and puts the original values back.
+    /// The other order still holds: a stop after this signal (the program exiting for the
+    /// shutdown) does not undo it, since the limit keeps the hold whenever this signal is set.
+    /// </summary>
+    /// <returns>False when a stop came first and nothing was set.</returns>
+    public static bool SignalShutdownUnlessStopped(WaitHandle stop, EventWaitHandle shutdown)
+    {
+        if (stop.WaitOne(0)) return false;
+        shutdown.Set();
+        return true;
+    }
 
     public static int Run(string[] args)
     {
@@ -66,6 +99,13 @@ public static class HoldChargeHost
                         sinceLogged = 0;
                     }
                     previous = observation;
+                    if (observation.Note == HoldChargeEngine.ShutdownBelowLimitNote)
+                    {
+                        // If this cannot be written, the window waits until this process ends.
+                        try { Save(new(ReleasingPhase, "关机：低于上限，正在恢复原值。", selectedLimit, DateTimeOffset.Now, observation)); }
+                        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
+                        return;
+                    }
                     if (observation.Soc < 0) return;
                     var message = !observation.Holding ? "限充运行中：低于上限，正在充电。"
                         : !observation.Charging && observation.ChargeRateMw == 0 ? "限充运行中：已达上限，当前未充电。"
@@ -85,7 +125,7 @@ public static class HoldChargeHost
             }
             var reason = engine.StopReason is { } text ? text : "";
             Save(new(restored ? "Stopped" : "Unconfirmed",
-                restored ? "限充已停止，已恢复原值。" + reason : "限充已停止，恢复未确认；固件会在约 30 分钟内自行恢复正常充电。" + reason,
+                (restored ? "限充已停止，已恢复原值。" : StoppedUnconfirmed) + reason,
                 limit, DateTimeOffset.Now, previous));
             return restored ? 0 : 1;
         }

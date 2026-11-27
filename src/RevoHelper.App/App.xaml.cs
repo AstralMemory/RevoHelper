@@ -58,12 +58,17 @@ public partial class App : Application
     private SessionChargeController? sessionCharge;
     private HoldChargeController? holdCharge;
     private volatile bool chargeResumeWaitingForPower;
+    private System.Windows.Threading.DispatcherTimer? executableMoveCheck;
     private WindowsProcessorFrequencyLimitController? processorFrequencyLimitController;
     // The view model's only way to write the manual frequency limit.
     private FrequencyWriteGate? frequencyWriteGate;
     private WindowsProcessorBoostController? processorBoostController;
     private PerformanceMonitorController? performanceMonitor;
     private bool previewOnly;
+    // Set in the charge-limit worker process only: the limit runs on a thread of its own.
+    private HoldChargeWorkerThread? holdWorkerThread;
+    // A new process of the official service opens its tray again; a reconnect of the channel alone does not.
+    private readonly OfficialServiceInstance officialService = new();
     private System.Windows.Forms.PowerLineStatus lastPowerLineStatus;
     private readonly WindowsDisplayController displayController = new();
 
@@ -104,7 +109,8 @@ public partial class App : Application
         {
             previewOnly = true;
             ShutdownMode = ShutdownMode.OnExplicitShutdown;
-            Shutdown(HoldChargeHost.Run(e.Args));
+            // The limit runs on a thread of its own: this one keeps answering Windows (OnSessionEnding).
+            holdWorkerThread = HoldChargeHost.StartThread(e.Args, code => Dispatcher.BeginInvoke(() => Shutdown(code)));
             return;
         }
         if (ExperimentalChargeHelperHost.IsHelper(e.Args))
@@ -154,6 +160,8 @@ public partial class App : Application
             if (launchedFromWindowsStartup) startupFrontendWatch = officialFrontendExit.StartStartupWatch();
             else officialFrontendExit.CloseNow();
         }
+        // What later looks are compared with: the official service's process as RevoHelper starts.
+        officialService.LookAgain();
         var controlConflictDetector = new ControlConflictDetector();
         var controlConflicts = controlConflictDetector.Detect();
         if (controlConflicts.Count > 0 && !launchedFromWindowsStartup && manualChargeLimit is null)
@@ -176,8 +184,8 @@ public partial class App : Application
                 "正在识别处理器",
                 string.Empty),
             []);
-        var startupRegistration = new WindowsStartupRegistration(
-            Environment.ProcessPath ?? "RevoHelper.exe");
+        // The file is found again for every operation: it may be moved while RevoHelper runs.
+        var startupRegistration = new WindowsStartupRegistration(RunningExecutable.Locate);
 
         try
         {
@@ -334,6 +342,8 @@ public partial class App : Application
         // After sign-in the official service starts its tray later than RevoHelper. A manual start
         // only closes what ran before the conflict check, to keep RevoHelper light.
         if (startupFrontendWatch is not null) viewModel.StartOfficialConsoleWatch(startupFrontendWatch);
+        // Started by hand before the official service is up: that service opens its tray once it starts.
+        else if (officialService.Missing) WatchOfficialTrayAgain(viewModel, "a start before the official service");
 
         MainWindow = window;
         performanceMonitor = new PerformanceMonitorController(Path.Combine(settingsDirectory, "performance-monitor.json"), viewModel.Monitor);
@@ -353,6 +363,7 @@ public partial class App : Application
         performanceMonitor.Initialize();
         _ = ApplyAutomaticRefreshRateForCurrentPowerSourceAsync(viewModel);
         StartConflictServiceDetection(viewModel);
+        StartFollowingMovedExecutable(startupRegistration);
         StartDeferredHardwareDiscovery(viewModel);
         systemTrayController = new(window, viewModel);
         if (launchedFromWindowsStartup)
@@ -405,12 +416,44 @@ public partial class App : Application
     }
 
     // Windows is shutting down or signing out. A limit that is holding stays applied for up to
-    // three days, so a plugged-in laptop does not charge to full while it is off.
+    // three days, so a plugged-in laptop does not charge to full while it is off. Windows may end
+    // every program soon after they have all answered this, so the answer waits until the worker
+    // has written the long countdown, for at most four seconds: Windows shows a program that takes
+    // five as blocking the shutdown.
     protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
     {
         base.OnSessionEnding(e);
-        if (previewOnly || e.Cancel || holdCharge?.HoldForShutdown() != true) return;
-        RuntimeDiagnosticLog.Write("charge-hold", $"held for {e.ReasonSessionEnding}");
+        // The charge-limit worker is asked too, and ended as soon as it has answered: its answer
+        // waits the same way, for the limit to finish.
+        if (holdWorkerThread is { } worker)
+        {
+            if (e.Cancel) return;
+            // Logged on arrival and with the answer: Windows may end this process right after it.
+            RuntimeDiagnosticLog.Write("charge-hold-worker", $"asked about {e.ReasonSessionEnding}");
+            var waited = System.Diagnostics.Stopwatch.StartNew();
+            var answer = worker.AnswerSessionEnd(TimeSpan.FromSeconds(4));
+            RuntimeDiagnosticLog.Write("charge-hold-worker", (answer.Told switch
+            {
+                true => "hold asked",
+                false => "hold not asked: a stop came first",
+                null => "hold signal failed",
+            }) + (answer.Finished ? ", limit finished" : ", limit still running") + $" after {waited.ElapsedMilliseconds} ms");
+            return;
+        }
+        if (previewOnly || e.Cancel || holdCharge is null) return;
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        // Null when no limit runs or a stop was asked for. When Windows asked the worker first,
+        // that is reported as held earlier: no line from here is no failure either.
+        if (holdCharge.HoldForShutdown(TimeSpan.FromSeconds(4)) is not { } result) return;
+        var reason = e.ReasonSessionEnding;
+        var elapsed = clock.ElapsedMilliseconds;
+        RuntimeDiagnosticLog.Write("charge-hold", result switch
+        {
+            ShutdownHoldResult.Held => $"held for {reason} after {elapsed} ms",
+            ShutdownHoldResult.HeldEarlier => $"already held for {reason}: the worker was asked first",
+            ShutdownHoldResult.BelowLimit => $"not held for {reason}: below the limit ({elapsed} ms)",
+            _ => $"hold not confirmed for {reason}: {result} after {elapsed} ms",
+        });
         // If the shutdown is cancelled and the app keeps running, take the limit back in hand.
         if (mainViewModel is { } viewModel)
             _ = ResumeChargeLimitAsync(viewModel, TimeSpan.FromSeconds(90));
@@ -419,6 +462,27 @@ public partial class App : Application
     private void StartConflictServiceDetection(MainWindowViewModel viewModel)
     {
         _ = viewModel.RefreshConflictServicesAsync(CancellationToken.None);
+    }
+
+    // The running program file can be moved, for example from the download folder to the
+    // desktop. The logon task would still name the old place and nothing would start at the next
+    // logon. A task that names a place this copy has been at, now empty, follows it; anything
+    // else is left alone. Best effort: half a minute after start, then every five minutes. Only a
+    // move costs more than finding the file: then the task is read once.
+    private void StartFollowingMovedExecutable(WindowsStartupRegistration registration)
+    {
+        var follower = new ExecutableMoveFollower(Environment.ProcessPath, RunningExecutable.TryLocate,
+            (places, now) => registration.FollowMove(places, now));
+        var timer = new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Background)
+        { Interval = TimeSpan.FromSeconds(30) };
+        timer.Tick += (_, _) =>
+        {
+            timer.Interval = TimeSpan.FromMinutes(5);
+            if (!isExiting && follower.Check() is { } line)
+                RuntimeDiagnosticLog.Write("startup-registration", line);
+        };
+        executableMoveCheck = timer;
+        timer.Start();
     }
 
     // One start-up recovery layer with its own three-second budget. False if it failed or ran
@@ -570,6 +634,7 @@ public partial class App : Application
     {
         if (previewOnly) { base.OnExit(e); return; }
         isExiting = true;
+        executableMoveCheck?.Stop();
         sessionCharge?.RequestStop("程序退出，独立监护继续恢复原值。");
         applicationLifetime.Cancel();
         hardwareDiscovery?.Dispose();
@@ -738,6 +803,9 @@ public partial class App : Application
                             viewModel.ApplyLightingZoneState(lighting.Zone, lighting.State);
                             break;
                         case OemControlSessionUpdate:
+                            // The channel connects again after any drop; only a new service process opens the tray.
+                            if (officialService.LookAgain())
+                                WatchOfficialTrayAgain(viewModel, "a new process of the official service");
                             StartDeferredHardwareDiscovery(viewModel);
                             if (oemStatusSource is GcuMqttStatusSource source && capabilityGpuOutputController is { } gpu)
                                 StartRuntimeCapabilityProbe(source, gpu, viewModel);
@@ -863,6 +931,7 @@ public partial class App : Application
         lastPowerLineStatus = powerLineStatus;
         if (e.Mode is PowerModes.Resume)
         {
+            Dispatcher.BeginInvoke(() => WatchOfficialTrayAgain(mainViewModel, "a wake"));
             Dispatcher.BeginInvoke(() =>
                 _ = mainViewModel.SynchronizeControlSessionAsync(CancellationToken.None));
             Dispatcher.BeginInvoke(() =>
@@ -882,6 +951,16 @@ public partial class App : Application
             Dispatcher.BeginInvoke(() =>
                 _ = ApplyAutomaticRefreshRateForCurrentPowerSourceAsync(mainViewModel));
         }
+    }
+
+    // After a wake or with a new process the official service opens its tray again, about half a
+    // minute later (seen on 2026-11-26: GCUService started again 31 s after the wake, its tray 16 s
+    // after that). With long-term exit on, the tray is looked for then as after sign-in; a watch
+    // already running gets that time for the tray.
+    private static void WatchOfficialTrayAgain(MainWindowViewModel viewModel, string after)
+    {
+        if (viewModel.WatchOfficialTrayAgain())
+            RuntimeDiagnosticLog.Write("official-exit", "looking for the tray after " + after);
     }
 
     private async Task UpdateChargePowerAvailabilityAsync(bool available)

@@ -2,7 +2,7 @@
 
 轻量、免费且开源的机械革命笔记本第三方控制台。在官方控制台的功能基础上拓展更多功能，且性能开销更低、启动更快。
 
-**当前最新版本：V1.0.8 正式版**
+**当前最新版本：V1.0.9 正式版**
 
 ## 产品预览
 
@@ -19,7 +19,7 @@
 
 - **性能调度与功耗调整**：切换办公、平衡、狂暴和自定义模式；在机型允许的范围内，基于官方性能预设调整 CPU 功耗上限、限制 CPU 频率（处理器有大小核时可分别限制 P 核与 E 核），以及修改 CPU 睿频（Boost）策略。
 - **性能监控横条**：通过可置顶的外置小横条显示 FPS，以及 CPU / GPU 的温度、使用率、功耗和频率；不向游戏或程序注入代码，也不限于在游戏中使用。
-- **显卡输出与屏幕设置**：优化显卡输出模式切换后的重启交互，并提供更多刷新率档位；具体选项取决于机型与屏幕支持情况。
+- **显卡输出与屏幕设置**：优化显卡输出模式切换后的重启交互，并提供更多刷新率档位；可在“显示 → 刷新率”打开“自动刷新率”，用电池时切到最低刷新率，接电后恢复所选刷新率（默认关闭）。具体选项取决于机型与屏幕支持情况。
 - **灯光与常用设置**：集中调整支持的键盘、灯带、LOGO 和水冷灯光，已开始制作面向自定义的设计（灯光这项还在开发）
 - **充电上限**：在“电源”页底部手动开启，提供 60% / 80% / 100% 三档；100% 不设置限充，按笔记本原生策略充电，关闭开关则退出本功能。开启后会记住，下次打开 RevoHelper 自动开启。不按型号预先拒绝，可手动尝试；不保证每台实际生效。
 - **水冷控制智能重连**：已连接设备意外断开后，最多保留 10 分钟的同设备重连机会，尝试间隔至少 3 秒。主动断开、更换设备或注水／重置会取消对应重连。
@@ -46,7 +46,7 @@
 
 ## 快速开始：下载与运行
 
-1. 前往 [最新正式版](https://github.com/AstralMemory/RevoHelper/releases/latest)，下载运行包 `RevoHelper.v1.0.8.zip`，不要将 `Source Code` 源码包当作运行包。无法打开 GitHub 时，可在第三方加速站查看版本并下载：`https://gh-proxy.com/https://github.com/AstralMemory/RevoHelper`。
+1. 前往 [最新正式版](https://github.com/AstralMemory/RevoHelper/releases/latest)，下载运行包 `RevoHelper.v1.0.9.zip`，不要将 `Source Code` 源码包当作运行包。无法打开 GitHub 时，可在第三方加速站查看版本并下载：`https://gh-proxy.com/https://github.com/AstralMemory/RevoHelper`。
 2. 解压后运行 `RevoHelper.exe`，建议以管理员身份运行。**RevoHelper是绿色免安装的。**
 3. 系统需要 **Windows 11 64 位**和 [.NET 10 Desktop Runtime（桌面运行时）](https://dotnet.microsoft.com/zh-cn/download/dotnet/10.0)。若提示缺少运行库，请选择 **Desktop Runtime**，而不是普通 Runtime。
 
@@ -58,7 +58,7 @@
 
 本项目采用 **Vibe Coding** 开发方式：仅代码主要由Agent（ChatGPT/Claude）辅助编写，开发者则完全负责产品逻辑、方案与改动审批、UI 设计、实际测试和迭代维护。
 
-程序承诺永久免费使用。V1.0.8 应用源码已在本仓库公开，自有代码采用 [MIT 许可证](./LICENSE)，第三方组件遵循各自许可证，详见 [第三方声明](./THIRD_PARTY_NOTICES.md)。
+程序承诺永久免费使用。V1.0.9 应用源码已在本仓库公开，自有代码采用 [MIT 许可证](./LICENSE)，第三方组件遵循各自许可证，详见 [第三方声明](./THIRD_PARTY_NOTICES.md)。
 
 开发者可直接浏览 [应用源码](./src)，构建、测试与目录说明见 [BUILDING.md](./BUILDING.md)。
 
@@ -86,7 +86,7 @@
 
 RevoHelper is a lightweight, free and open-source third-party control panel for MECHREVO laptops. It extends the functionality of the official control panel, with lower overhead and faster startup.
 
-**Latest version: V1.0.8 — Stable Release**
+**Latest version: V1.0.9 — Stable Release**
 
 ### Product preview
 
@@ -103,7 +103,7 @@ The following images preview the application interface (The UI text in the image
 
 - **Performance scheduling and power adjustments:** Switch between Office, Balanced, Turbo and Custom modes. Within the limits supported by the laptop, adjust CPU power limits, limit CPU frequency (separately for P-cores and E-cores on processors that have both) and change processor Boost policies based on the official performance presets.
 - **Performance monitoring bar:** Display FPS and CPU / GPU temperatures, utilization, power and clock speeds in an external bar that can stay on top. It does not inject code into games or applications and is not limited to use in games.
-- **GPU output and display settings:** Improved restart handling after switching GPU output modes, with more refresh-rate options. Available options depend on the laptop and display.
+- **GPU output and display settings:** Improved restart handling after switching GPU output modes, with more refresh-rate options. Turn on "Automatic refresh rate" under Display → Refresh rate to use the lowest rate on battery and return to your chosen rate on AC (off by default). Available options depend on the laptop and display.
 - **Lighting and common settings:** Adjust supported keyboard, light-bar, logo and liquid-cooler lighting in one place, without being limited to the official default presets.
 - **Charge limit:** Enable it manually at the bottom of the Power page and choose 60%, 80% or 100%. 100% sets no limit and follows the laptop's native charging policy; turning the switch off exits the feature. Once enabled it is remembered and resumes when RevoHelper starts. Models are not rejected in advance; you can try it manually, but effectiveness is not guaranteed on every laptop.
 - **Liquid-cooling control and reconnection:** A Smart Control switch and four manual strategies—Quieter, Quiet, Balanced and Maximum—are available. After an unexpected disconnect, reconnection to the same previously connected device is attempted for up to 10 minutes, at intervals of at least 3 seconds. Manual disconnection, changing devices, priming or resetting cancels the corresponding reconnection attempt.
@@ -130,7 +130,7 @@ The following images preview the application interface (The UI text in the image
 
 ### Quick start: download and run
 
-1. Go to the [latest stable release](https://github.com/AstralMemory/RevoHelper/releases/latest) and download the application package, `RevoHelper.v1.0.8.zip`. Do not use the `Source Code` archive as the application package. If GitHub is unreachable, releases can also be viewed and downloaded through a third-party mirror: `https://gh-proxy.com/https://github.com/AstralMemory/RevoHelper`.
+1. Go to the [latest stable release](https://github.com/AstralMemory/RevoHelper/releases/latest) and download the application package, `RevoHelper.v1.0.9.zip`. Do not use the `Source Code` archive as the application package. If GitHub is unreachable, releases can also be viewed and downloaded through a third-party mirror: `https://gh-proxy.com/https://github.com/AstralMemory/RevoHelper`.
 2. Extract the archive and run `RevoHelper.exe`. Running as administrator is recommended. **RevoHelper is portable and requires no installation.**
 3. You need **64-bit Windows 11** and the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/en-us/download/dotnet/10.0). If prompted to install a missing runtime, choose **Desktop Runtime**, not the standard Runtime.
 
@@ -142,7 +142,7 @@ Developed and maintained by [Astral Memory](https://github.com/AstralMemory).
 
 The project uses a **Vibe Coding** development workflow: code is primarily written with assistance from agents (ChatGPT/Claude), while the developer takes full responsibility for product logic, proposals and change approval, UI design, hands-on testing and ongoing maintenance.
 
-The program is committed to remaining free permanently. The V1.0.8 application source code is available in this repository. The project's own code uses the [MIT License](./LICENSE); third-party components retain their respective licenses. See the [third-party notices](./THIRD_PARTY_NOTICES.md).
+The program is committed to remaining free permanently. The V1.0.9 application source code is available in this repository. The project's own code uses the [MIT License](./LICENSE); third-party components retain their respective licenses. See the [third-party notices](./THIRD_PARTY_NOTICES.md).
 
 Developers can browse the [application source](./src). See [BUILDING.md](./BUILDING.md) for build and test instructions and a guide to the directory structure.
 

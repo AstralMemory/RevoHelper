@@ -1,12 +1,13 @@
 using System.Diagnostics;
 using System.IO;
 using System.Xml.Linq;
+using RevoHelper.App.Lifecycle;
 
 namespace RevoHelper.App.Settings;
 
 public sealed class WindowsStartupRegistration : IStartupRegistration
 {
-    private readonly string executablePath;
+    private readonly Func<string> locateExecutable;
     private readonly IStartupTaskPlatform platform;
     private readonly Func<string, Version?> readFileVersion;
     private readonly object gate = new();
@@ -17,19 +18,82 @@ public sealed class WindowsStartupRegistration : IStartupRegistration
         string executablePath,
         IStartupTaskPlatform? platform = null,
         Func<string, Version?>? readFileVersion = null)
+        : this(FixedPath(executablePath), platform, readFileVersion)
     {
-        this.executablePath = Path.GetFullPath(executablePath);
+    }
+
+    /// <param name="locateExecutable">
+    /// This program's file as it is now. Asked for every operation: the running file may have
+    /// been moved since the process started.
+    /// </param>
+    public WindowsStartupRegistration(
+        Func<string> locateExecutable,
+        IStartupTaskPlatform? platform = null,
+        Func<string, Version?>? readFileVersion = null)
+    {
+        this.locateExecutable = locateExecutable ?? throw new ArgumentNullException(nameof(locateExecutable));
         this.platform = platform ?? new WindowsStartupTaskPlatform();
         this.readFileVersion = readFileVersion ?? ReadFileVersion;
+    }
+
+    private static Func<string> FixedPath(string executablePath)
+    {
+        var fullPath = Path.GetFullPath(executablePath);
+        return () => fullPath;
+    }
+
+    private string ExecutablePath => Path.GetFullPath(locateExecutable());
+
+    // Null when this program's file cannot be confirmed: then no task can be said to start it.
+    private string? TryExecutablePath()
+    {
+        try { return ExecutablePath; }
+        catch (Exception exception) when (exception is InvalidOperationException or ArgumentException) { return null; }
     }
 
     public bool RegisteredExecutableIsNewer()
     {
         var registered = RegisteredExecutablePath();
-        if (registered is null) return false;
+        if (registered is null || TryExecutablePath() is not { } current) return false;
         var registeredVersion = readFileVersion(registered);
-        var currentVersion = readFileVersion(executablePath);
+        var currentVersion = readFileVersion(current);
         return registeredVersion is not null && currentVersion is not null && registeredVersion > currentVersion;
+    }
+
+    /// <summary>
+    /// The running program file was moved after the logon task was pointed at it. Only an enabled
+    /// task of this user that names one of <paramref name="formerPlaces"/> (where this file has
+    /// been), now empty, is changed, and only its program path and working folder; the rest stays
+    /// as the user may have set it. The task is updated, never created, so one removed in the
+    /// meantime stays removed. A disabled or re-pointed task, another file at the old place, and
+    /// the legacy Run entry are left alone.
+    /// </summary>
+    /// <returns>True when the task now names the new place; false when there was nothing to do.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// Windows did not confirm the change. Nothing is written back then: whatever the task is now
+    /// may be someone else's doing.
+    /// </exception>
+    public bool FollowMove(IReadOnlyCollection<string> formerPlaces, string to, Func<string, bool>? exists = null)
+    {
+        exists ??= File.Exists;
+        lock (gate)
+        {
+            if (!Path.IsPathFullyQualified(to)) return false;
+            to = Path.GetFullPath(to);
+            if (RunningExecutable.InRecycleBin(to) || !exists(to)) return false;
+            var sid = platform.CurrentUserSid;
+            // Read just before the change, so what is changed is the task as it is now.
+            var before = platform.ReadTaskXml();
+            if (before is null || StartupTaskDefinition.ReadCommand(before) is not { } from ||
+                !Path.IsPathFullyQualified(from) || RunningExecutable.SamePath(from, to) ||
+                !formerPlaces.Any(place => Path.IsPathFullyQualified(place) && RunningExecutable.SamePath(place, from)) ||
+                exists(from) || !StartupTaskDefinition.IsEnabledFor(before, from, sid)) return false;
+            // A snapshot taken before this change no longer describes the task.
+            lastMutation = null;
+            platform.UpdateTask(StartupTaskDefinition.WithExecutable(before, to));
+            if (platform.ReadTaskXml() is { } after && StartupTaskDefinition.IsEnabledFor(after, to, sid)) return true;
+            throw new InvalidOperationException("Windows 未确认 RevoHelper 登录任务已指向新位置。");
+        }
     }
 
     private string? RegisteredExecutablePath()
@@ -57,8 +121,8 @@ public sealed class WindowsStartupRegistration : IStartupRegistration
     public bool IsEnabled()
     {
         var xml = platform.ReadTaskXml();
-        return xml is not null &&
-               StartupTaskDefinition.IsEnabledFor(xml, executablePath, platform.CurrentUserSid);
+        return xml is not null && TryExecutablePath() is { } executable &&
+               StartupTaskDefinition.IsEnabledFor(xml, executable, platform.CurrentUserSid);
     }
 
     public bool HasEnabledRegistration()
@@ -75,14 +139,16 @@ public sealed class WindowsStartupRegistration : IStartupRegistration
         lock (gate)
         {
             lastMutation = null;
+            // Only switching on needs this program's file; if it cannot be confirmed, nothing changes.
+            var executable = enabled ? ExecutablePath : null;
             var before = CaptureWindowsState();
             var mutation = new Mutation(before, enabled);
             lastMutation = mutation;
             try
             {
                 mutation.TaskAttempted = true;
-                if (enabled)
-                    platform.RegisterTask(StartupTaskDefinition.Create(executablePath, before.UserSid));
+                if (executable is not null)
+                    platform.RegisterTask(StartupTaskDefinition.Create(executable, before.UserSid));
                 else if (before.TaskXml is not null)
                     platform.RemoveTask();
 
@@ -169,8 +235,8 @@ public sealed class WindowsStartupRegistration : IStartupRegistration
             throw new InvalidOperationException("启动项原状态恢复后回读不一致。");
     }
 
-    private bool TaskEnabled(string? task, string sid) => task is not null &&
-        StartupTaskDefinition.IsEnabledFor(task, executablePath, sid);
+    private bool TaskEnabled(string? task, string sid) => task is not null && TryExecutablePath() is { } executable &&
+        StartupTaskDefinition.IsEnabledFor(task, executable, sid);
 
     private static void EnsureOwned(string? task, string sid)
     {

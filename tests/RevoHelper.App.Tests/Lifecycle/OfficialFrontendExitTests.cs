@@ -84,6 +84,123 @@ public sealed class OfficialFrontendExitTests
         Assert.Equal(19, frontends.Finds);
     }
 
+    // 2026-11-26: after a wake the official service started again and opened its tray 47 s later.
+    [Fact]
+    public async Task TrayOnlyWatch_ClosesATrayThatStartsLater_AndLeavesTheWindow()
+    {
+        var window = new OfficialFrontendProcess(1, "CCUWinUI");
+        var tray = new OfficialFrontendProcess(34040, "SystrayComponent");
+        var frontends = new FakeFrontends { Running = round => round >= 5 ? [window, tray] : [window] };
+        var reports = new List<OfficialFrontendExitResult>();
+
+        var exit = new OfficialFrontendExit(frontends, NoDelay);
+        var result = await exit.WatchAsync(reports.Add, CancellationToken.None, exit.CreateWatch(trayOnly: true));
+
+        Assert.Equal(new[] { tray }, frontends.Closed.Distinct());
+        Assert.DoesNotContain(window, frontends.Closed);
+        Assert.Equal(OfficialFrontendExitResult.None, reports[0]);
+        Assert.Equal(19, frontends.Finds);
+        Assert.Equal(3, result.Closed);
+    }
+
+    // A wake ten seconds before a watch ends: the tray gets three more minutes from the wake, while
+    // the window keeps the watch's own time, since after that a window is open because someone opened it.
+    [Fact]
+    public async Task AWakeNearTheEnd_GivesTheTrayThreeMoreMinutes_ButNotTheWindow()
+    {
+        var clock = new ManualClock();
+        var start = clock.GetUtcNow();
+        var window = new OfficialFrontendProcess(1, "CCUWinUI");
+        var tray = new OfficialFrontendProcess(2, "SystrayComponent");
+        var frontends = new FakeFrontends
+        {
+            Running = _ => clock.GetUtcNow() - start > OfficialFrontendExit.WatchDuration ? [window, tray] : []
+        };
+        OfficialFrontendStartupWatch? watch = null;
+        OfficialFrontendExit? exit = null;
+        var woke = false;
+        exit = new OfficialFrontendExit(frontends, (interval, _) =>
+        {
+            clock.Advance(interval);
+            if (!woke && clock.GetUtcNow() - start >= OfficialFrontendExit.WatchDuration - TimeSpan.FromSeconds(10))
+            {
+                woke = true;
+                Assert.True(exit!.ExtendTray(watch!));
+            }
+            return Task.CompletedTask;
+        }, timeProvider: clock);
+
+        watch = exit.StartStartupWatch();
+        await exit.WatchAsync(_ => { }, CancellationToken.None, watch);
+
+        Assert.Contains(tray, frontends.Closed);
+        Assert.DoesNotContain(window, frontends.Closed);
+        Assert.True(clock.GetUtcNow() - start > OfficialFrontendExit.WatchDuration + TimeSpan.FromMinutes(2));
+    }
+
+    // The computer sleeps through a watch's wait and wakes an hour later. The wake comes before the
+    // watch notices that its time is up: the tray is still looked for, the window is not.
+    [Fact]
+    public async Task AWakeAfterSleepingThroughTheWatch_StillClosesTheTray()
+    {
+        var clock = new ManualClock();
+        var window = new OfficialFrontendProcess(1, "CCUWinUI");
+        var tray = new OfficialFrontendProcess(2, "SystrayComponent");
+        var slept = false;
+        var frontends = new FakeFrontends { Running = _ => slept ? [window, tray] : [] };
+        OfficialFrontendStartupWatch? watch = null;
+        OfficialFrontendExit? exit = null;
+        exit = new OfficialFrontendExit(frontends, (interval, _) =>
+        {
+            if (slept) clock.Advance(interval);
+            else
+            {
+                clock.Advance(TimeSpan.FromHours(1));
+                slept = true;
+                Assert.True(exit!.ExtendTray(watch!));
+            }
+            return Task.CompletedTask;
+        }, timeProvider: clock);
+
+        watch = exit.StartStartupWatch();
+        await exit.WatchAsync(_ => { }, CancellationToken.None, watch);
+
+        Assert.Equal(new[] { tray }, frontends.Closed.Distinct());
+    }
+
+    // Once a watch has ended, a wake starts a new one instead.
+    [Fact]
+    public async Task AWatchThatIsOver_IsNotExtended()
+    {
+        var exit = new OfficialFrontendExit(new FakeFrontends(), NoDelay);
+        var watch = exit.StartStartupWatch();
+        await exit.WatchAsync(_ => { }, CancellationToken.None, watch);
+
+        Assert.False(exit.ExtendTray(watch));
+    }
+
+    // A tray that keeps coming back is given up on after a few closes; a wake, or a new process of
+    // the official service, gives it a few more, and no more than that.
+    [Fact]
+    public async Task EachWakeGivesTheTrayAFewClosesOfItsOwn()
+    {
+        var frontends = new FakeFrontends { Running = round => [new(100 + round, "SystrayComponent")] };
+        OfficialFrontendStartupWatch? watch = null;
+        OfficialFrontendExit? exit = null;
+        var waits = 0;
+        exit = new OfficialFrontendExit(frontends, (_, _) =>
+        {
+            if (++waits == 10) Assert.True(exit!.ExtendTray(watch!));
+            return Task.CompletedTask;
+        });
+        watch = exit.CreateWatch(trayOnly: true);
+
+        var result = await exit.WatchAsync(_ => { }, CancellationToken.None, watch);
+
+        Assert.Equal(2 * OfficialFrontendExit.MaximumClosesPerName, frontends.Closed.Count);
+        Assert.True(result.GaveUp);
+    }
+
     [Fact]
     public async Task Watch_CountsAWindowThatWillNotCloseAndStopsRetryingIt()
     {

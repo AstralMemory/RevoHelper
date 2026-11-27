@@ -21,7 +21,7 @@ public sealed class WindowsDiagnosticReportSource(
     public const int ChargeLogLines = 30;
     private static readonly TimeSpan ModeTimeout = TimeSpan.FromSeconds(5);
     private static readonly HashSet<string> PlainNotes = new(StringComparer.Ordinal)
-        { "hold", "hold-start", "release", "charge", "restored", "shutdown-hold" };
+        { "hold", "hold-start", "release", "charge", "restored", "shutdown-hold", "leftover", "shutdown-below-limit" };
     private static readonly string[] NotePrefixes = ["retry", "restore-retry", "shutdown-hold failed", "status-write"];
 
     public async Task<DiagnosticSystemFacts> ReadAsync(DiagnosticReportDetail detail, CancellationToken cancellationToken)

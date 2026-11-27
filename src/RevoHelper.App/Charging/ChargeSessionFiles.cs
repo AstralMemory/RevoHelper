@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Text.Json;
+using RevoHelper.App.Lifecycle;
 using RevoHelper.Hardware.Windows.BatteryCharge;
 
 namespace RevoHelper.App.Charging;
@@ -100,10 +101,10 @@ public sealed class ChargeSessionFiles
     }
     public static Process Launch(string mode, string session, int limit, int owner, long ticks)
     {
-        var info = new ProcessStartInfo(Environment.ProcessPath ?? throw new InvalidOperationException("Executable path unavailable."))
-        { UseShellExecute = false, CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden };
-        foreach (var value in new[] { mode, session, limit.ToString(System.Globalization.CultureInfo.InvariantCulture), owner.ToString(System.Globalization.CultureInfo.InvariantCulture), ticks.ToString(System.Globalization.CultureInfo.InvariantCulture) })
-            info.ArgumentList.Add(value);
+        // Found again for every start: the program file may have been moved since this process started.
+        var culture = System.Globalization.CultureInfo.InvariantCulture;
+        var info = RunningExecutable.StartInfo(RunningExecutable.Locate(),
+            [mode, session, limit.ToString(culture), owner.ToString(culture), ticks.ToString(culture)]);
         return Process.Start(info) ?? throw new InvalidOperationException("Cannot start independent charge monitor.");
     }
 }

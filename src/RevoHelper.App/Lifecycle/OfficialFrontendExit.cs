@@ -30,21 +30,95 @@ public sealed record OfficialFrontendExitResult(int Closed, int Failed, bool Gav
     public static OfficialFrontendExitResult None { get; } = new(0, 0, false);
 }
 
-/// <summary>The pre-conflict check and the later sign-in checks share one time and attempt budget.</summary>
+/// <summary>
+/// One run of checks. The pre-conflict check and the later sign-in checks share its time and
+/// attempt budget. A wake, or a new process of the official service, gives the tray three more
+/// minutes and a few closes of its own (<see cref="OfficialFrontendExit.ExtendTray"/>); the
+/// window's time is never moved, since after sign-in a window is open because someone opened it.
+/// </summary>
 public sealed class OfficialFrontendStartupWatch
 {
-    internal OfficialFrontendStartupWatch(DateTimeOffset deadline) => Deadline = deadline;
-    internal DateTimeOffset Deadline { get; }
-    internal Dictionary<string, int> Attempts { get; } = new(StringComparer.OrdinalIgnoreCase);
-    internal OfficialFrontendExitResult FirstRound { get; set; } = OfficialFrontendExitResult.None;
+    private readonly object sync = new();
+    private readonly Dictionary<string, int> attempts = new(StringComparer.OrdinalIgnoreCase);
+    private DateTimeOffset trayDeadline;
+    private int roundsLeft = Rounds;
+    private bool ended;
+
+    internal OfficialFrontendStartupWatch(DateTimeOffset deadline, bool trayOnly = false)
+    {
+        // A watch for a wake or a new service process closes only the tray: the service opens that
+        // by itself, while a window is open because someone opened it.
+        WindowDeadline = trayOnly ? DateTimeOffset.MinValue : deadline;
+        trayDeadline = deadline;
+    }
+
+    private static int Rounds => (int)(OfficialFrontendExit.WatchDuration / OfficialFrontendExit.PollInterval);
+
+    internal DateTimeOffset WindowDeadline { get; }
+
+    /// <summary>Null until the first check has run.</summary>
+    internal OfficialFrontendExitResult? FirstRound { get; set; }
+
+    private DateTimeOffset Deadline => trayDeadline > WindowDeadline ? trayDeadline : WindowDeadline;
+
+    internal bool InTime(DateTimeOffset now) { lock (sync) return now <= Deadline; }
+
+    internal bool MayClose(string name, DateTimeOffset now)
+    {
+        lock (sync)
+            return now <= (string.Equals(name, OfficialFrontendExit.TrayName, StringComparison.OrdinalIgnoreCase)
+                ? trayDeadline : WindowDeadline);
+    }
+
+    internal int AttemptsOf(string name) { lock (sync) return attempts.GetValueOrDefault(name); }
+
+    internal int CountAttempt(string name) { lock (sync) return attempts[name] = attempts.GetValueOrDefault(name) + 1; }
+
+    /// <summary>
+    /// The wait before the next check, or null when the watch is over. Over is final: a later wake
+    /// or new service process starts a new watch instead.
+    /// </summary>
+    internal TimeSpan? NextRound(DateTimeOffset now)
+    {
+        lock (sync)
+        {
+            var remaining = Deadline - now;
+            if (remaining <= TimeSpan.Zero || roundsLeft <= 0)
+            {
+                ended = true;
+                return null;
+            }
+            roundsLeft--;
+            return remaining < OfficialFrontendExit.PollInterval ? remaining : OfficialFrontendExit.PollInterval;
+        }
+    }
+
+    /// <summary>
+    /// Three more minutes for the tray from <paramref name="now"/>, with a fresh close budget. Its
+    /// time may have run out already (the computer slept through it) as long as the watch has not
+    /// noticed. False when the watch is over.
+    /// </summary>
+    internal bool ExtendTray(DateTimeOffset now)
+    {
+        lock (sync)
+        {
+            if (ended) return false;
+            var until = now + OfficialFrontendExit.WatchDuration;
+            if (until > trayDeadline) trayDeadline = until;
+            roundsLeft = Math.Max(roundsLeft, Rounds);
+            attempts.Remove(OfficialFrontendExit.TrayName);
+            return true;
+        }
+    }
 }
 
 /// <summary>
 /// Closes the official window and tray once: for the exit button, and at every start while long-term
 /// exit is on. When RevoHelper starts with Windows it also keeps checking for a few minutes, since the
-/// official service starts its tray after sign-in, later than RevoHelper. Opening the official control
-/// center after that is left alone. A process that keeps coming back is given up on after a few closes
-/// instead of being fought.
+/// official service starts its tray after sign-in, later than RevoHelper. The service opens its tray
+/// again after the computer wakes or the service starts a new process; then only the tray is looked
+/// for, the same way. Opening the official control center is left alone. A process that keeps coming
+/// back is given up on after a few closes instead of being fought.
 /// </summary>
 public sealed class OfficialFrontendExit(
     IOfficialFrontendProcesses processes,
@@ -53,9 +127,10 @@ public sealed class OfficialFrontendExit(
     TimeProvider? timeProvider = null)
 {
     public static readonly TimeSpan WatchDuration = TimeSpan.FromMinutes(3);
-    // At most 19 checks including the one before startup conflict detection.
+    // At most 19 checks including the one before startup conflict detection, unless extended.
     public static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(10);
     public const int MaximumClosesPerName = 3;
+    public const string TrayName = "SystrayComponent";
 
     private readonly Func<TimeSpan, CancellationToken, Task> delay = delay ?? Task.Delay;
     private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
@@ -74,12 +149,22 @@ public sealed class OfficialFrontendExit(
     public OfficialFrontendExitResult CloseNow(CancellationToken cancellationToken = default) =>
         CloseRound(null, cancellationToken);
 
+    /// <summary>A watch with its first check done here, before startup conflict detection.</summary>
     public OfficialFrontendStartupWatch StartStartupWatch(CancellationToken cancellationToken = default)
     {
-        var startup = new OfficialFrontendStartupWatch(clock.GetUtcNow() + WatchDuration);
+        var startup = CreateWatch(trayOnly: false);
         startup.FirstRound = CloseRound(startup, cancellationToken);
         return startup;
     }
+
+    /// <summary>A watch whose first check runs in <see cref="WatchAsync"/>.</summary>
+    public OfficialFrontendStartupWatch CreateWatch(bool trayOnly) => new(clock.GetUtcNow() + WatchDuration, trayOnly);
+
+    /// <summary>
+    /// For a wake or a new process of the official service: the tray gets three more minutes and a
+    /// few closes of its own. False when <paramref name="watch"/> is already over; then start another.
+    /// </summary>
+    public bool ExtendTray(OfficialFrontendStartupWatch watch) => watch.ExtendTray(clock.GetUtcNow());
 
     /// <summary>
     /// Reports the first check and then every check that closed, or failed to close, something.
@@ -89,18 +174,17 @@ public sealed class OfficialFrontendExit(
         Action<OfficialFrontendExitResult> changed, CancellationToken cancellationToken,
         OfficialFrontendStartupWatch? startup = null)
     {
-        startup ??= await Task.Run(() => StartStartupWatch(cancellationToken), cancellationToken);
+        startup ??= CreateWatch(trayOnly: false);
+        startup.FirstRound ??= await Task.Run(() => CloseRound(startup, cancellationToken), cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         var total = startup.FirstRound;
         changed(total);
-        var lastRound = (int)(WatchDuration / PollInterval);
-        for (var round = 1; round <= lastRound; round++)
+        while (startup.NextRound(clock.GetUtcNow()) is { } wait)
         {
-            var remaining = startup.Deadline - clock.GetUtcNow();
-            if (remaining <= TimeSpan.Zero) break;
-            await delay(remaining < PollInterval ? remaining : PollInterval, cancellationToken);
+            await delay(wait, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
-            if (clock.GetUtcNow() > startup.Deadline) break;
+            // Woken beyond its time: no check, unless a wake gave the tray more time meanwhile.
+            if (!startup.InTime(clock.GetUtcNow())) continue;
 
             var result = await Task.Run(() => CloseRound(startup, cancellationToken), cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
@@ -119,17 +203,19 @@ public sealed class OfficialFrontendExit(
         closeGate.Wait(token);
         try
         {
-            bool MayClose() => !token.IsCancellationRequested && (startup is null || clock.GetUtcNow() <= startup.Deadline);
+            bool MayClose(string name) => !token.IsCancellationRequested &&
+                (startup is null || startup.MayClose(name, clock.GetUtcNow()));
             token.ThrowIfCancellationRequested();
-            if (!MayClose()) return OfficialFrontendExitResult.None;
+            if (startup is not null && !startup.InTime(clock.GetUtcNow())) return OfficialFrontendExitResult.None;
             var snapshot = Inspect();
             int closed = 0, failed = 0;
             bool gaveUp = false;
             foreach (var process in snapshot.Targets)
             {
                 token.ThrowIfCancellationRequested();
-                if (!MayClose()) break;
-                var attempts = startup?.Attempts.GetValueOrDefault(process.Name) ?? 0;
+                // Past its time, or a window in a watch for the tray alone.
+                if (!MayClose(process.Name)) continue;
+                var attempts = startup?.AttemptsOf(process.Name) ?? 0;
                 if (attempts >= MaximumClosesPerName)
                 {
                     gaveUp = true;
@@ -137,16 +223,11 @@ public sealed class OfficialFrontendExit(
                 }
 
                 OfficialFrontendCloseOutcome outcome;
-                try { outcome = processes.Close(process, MayClose); }
+                try { outcome = processes.Close(process, () => MayClose(process.Name)); }
                 catch (Exception) { outcome = OfficialFrontendCloseOutcome.Failed; }
-                if (outcome == OfficialFrontendCloseOutcome.Skipped) break;
-                if (outcome == OfficialFrontendCloseOutcome.Gone) continue;
-                if (startup is not null)
-                {
-                    startup.Attempts[process.Name] = attempts + 1;
-                    if (attempts + 1 == MaximumClosesPerName)
-                        log?.Invoke($"startup limit reached for {process.Name} after {MaximumClosesPerName} attempts");
-                }
+                if (outcome is OfficialFrontendCloseOutcome.Skipped or OfficialFrontendCloseOutcome.Gone) continue;
+                if (startup is not null && startup.CountAttempt(process.Name) == MaximumClosesPerName)
+                    log?.Invoke($"startup limit reached for {process.Name} after {MaximumClosesPerName} attempts");
                 if (outcome == OfficialFrontendCloseOutcome.Closed) closed++;
                 else failed++;
                 log?.Invoke($"{(outcome == OfficialFrontendCloseOutcome.Closed ? "closed" : "could not close")} {process.Name}#{process.Id}");

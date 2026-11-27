@@ -271,6 +271,8 @@ public sealed class DiagnosticReportTests : IDisposable
 
     [Theory]
     [InlineData(@"{""Note"":""hold""}", "hold")]
+    [InlineData(@"{""Note"":""leftover""}", "leftover")]
+    [InlineData(@"{""Note"":""shutdown-below-limit""}", "shutdown-below-limit")]
     [InlineData(@"{""Note"":""retry: EC method returned the full failure sentinel.""}", "retry(ec-busy)")]
     [InlineData(@"{""Note"":""restore-retry: The EC byte changed externally; the owned write was not issued.""}", "restore-retry(ec-race)")]
     [InlineData(@"{""Note"":""status-write: something new""}", "status-write(other)")]

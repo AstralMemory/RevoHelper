@@ -4,18 +4,23 @@ namespace RevoHelper.App.Presentation;
 
 /// <summary>
 /// The settings rows that exit the official control center's window and tray: once with the status
-/// pill, or at every start while long-term exit is on. Its background service stays, since modes,
-/// fans and lighting go through it.
+/// pill, or at every start while long-term exit is on, and the tray again after a wake or a new
+/// process of the official service. Its background service stays, since modes, fans and lighting go
+/// through it.
 /// </summary>
 public sealed partial class MainWindowViewModel
 {
     private readonly OfficialFrontendExit? officialFrontendExit;
     private CancellationTokenSource? officialConsoleWatchCancellation;
+    private OfficialFrontendStartupWatch? officialConsoleWatch;
     private CancellationTokenSource? officialConsoleCloseCancellation;
     private bool closeStartedByLongTerm;
     private bool? officialFrontendRunning = false;
 
-    /// <summary>Long-term exit: the official window and tray are closed at every RevoHelper start.</summary>
+    /// <summary>
+    /// Long-term exit: the official window and tray are closed at every RevoHelper start, and the
+    /// tray again when the official service opens it after a wake or with a new process.
+    /// </summary>
     public bool ExitOfficialConsole
     {
         get => applicationSettings.ExitOfficialConsole;
@@ -87,11 +92,33 @@ public sealed partial class MainWindowViewModel
     /// </summary>
     public void StartOfficialConsoleWatch(OfficialFrontendStartupWatch? startup = null)
     {
-        if (isShuttingDown || officialFrontendExit is null || !ExitOfficialConsole) return;
+        if (isShuttingDown || officialFrontendExit is not { } exit || !ExitOfficialConsole) return;
+        StartOfficialConsoleWatch(exit, startup ?? exit.CreateWatch(trayOnly: false));
+    }
+
+    /// <summary>
+    /// For the computer waking, a new process of the official service, or RevoHelper starting before
+    /// that service: the service opens its tray by itself a little later. While long-term exit is on,
+    /// the tray is looked for for three minutes, with a few closes of its own, the same way as after
+    /// sign-in. A watch already running gets that time for the tray, even one whose time ran out
+    /// while the computer slept; its window keeps its own time, since someone opened that. True when
+    /// a watch now looks for the tray.
+    /// </summary>
+    public bool WatchOfficialTrayAgain()
+    {
+        if (isShuttingDown || officialFrontendExit is not { } exit || !ExitOfficialConsole) return false;
+        if (officialConsoleWatch is not { } running || !exit.ExtendTray(running))
+            StartOfficialConsoleWatch(exit, exit.CreateWatch(trayOnly: true));
+        return true;
+    }
+
+    private void StartOfficialConsoleWatch(OfficialFrontendExit exit, OfficialFrontendStartupWatch watch)
+    {
         StopOfficialConsoleWatch();
         var cancellation = new CancellationTokenSource();
         officialConsoleWatchCancellation = cancellation;
-        _ = WatchOfficialConsoleAsync(officialFrontendExit, cancellation, startup);
+        officialConsoleWatch = watch;
+        _ = WatchOfficialConsoleAsync(exit, cancellation, watch);
     }
 
     private async Task ExitOfficialConsoleAsync(bool longTerm)
@@ -133,7 +160,7 @@ public sealed partial class MainWindowViewModel
     }
 
     private async Task WatchOfficialConsoleAsync(OfficialFrontendExit exit, CancellationTokenSource cancellation,
-        OfficialFrontendStartupWatch? startup)
+        OfficialFrontendStartupWatch watch)
     {
         try
         {
@@ -142,12 +169,16 @@ public sealed partial class MainWindowViewModel
                 // Settings read the status when they open; only a close or a failure changes it meanwhile.
                 if (cancellation.IsCancellationRequested || result == OfficialFrontendExitResult.None) return;
                 RefreshOfficialConsoleStatus();
-            }, cancellation.Token, startup);
+            }, cancellation.Token, watch);
         }
         catch (OperationCanceledException) { }
         finally
         {
-            if (ReferenceEquals(officialConsoleWatchCancellation, cancellation)) officialConsoleWatchCancellation = null;
+            if (ReferenceEquals(officialConsoleWatchCancellation, cancellation))
+            {
+                officialConsoleWatchCancellation = null;
+                officialConsoleWatch = null;
+            }
             cancellation.Dispose();
         }
     }
@@ -156,6 +187,7 @@ public sealed partial class MainWindowViewModel
     {
         officialConsoleWatchCancellation?.Cancel();
         officialConsoleWatchCancellation = null;
+        officialConsoleWatch = null;
     }
 
     private void OnOfficialConsoleExitButtonChanged()

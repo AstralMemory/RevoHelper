@@ -71,7 +71,7 @@ public static class UiTextCatalog
         PrefixedRule("实验已停止，监护正在复核恢复：", @"(.+)$", m => "The experiment stopped; the guardian is checking restoration: " + Translate(m.Groups[1].Value, "en-US")),
         PrefixedRule("限充未启用：", @"(.+)$", m => "Charge limit not enabled: " + TranslateKnown(m.Groups[1].Value)),
         PrefixedRule("限充已停止，已恢复原值。", @"(.*)$", m => "Charge limit stopped; original values restored. " + TranslateKnown(m.Groups[1].Value)),
-        PrefixedRule("限充已停止，恢复未确认；固件会在约 30 分钟内自行恢复正常充电。", @"(.*)$", m => "Charge limit stopped; restoration unconfirmed. The firmware returns to normal charging by itself within about 30 minutes. " + TranslateKnown(m.Groups[1].Value)),
+        PrefixedRule("限充已停止，恢复未确认；固件计时到期后会自行恢复正常充电（通常约 30 分钟，最长 3 天）。", @"(.*)$", m => "Charge limit stopped; restoration unconfirmed. The firmware returns to normal charging by itself when its countdown runs out (usually about 30 minutes, at most 3 days). " + TranslateKnown(m.Groups[1].Value)),
         PrefixedRule("固件的保持计时已在使用（0x", @"([0-9A-F]{4})）；不接管。$", m => "The firmware hold countdown is already in use (0x" + m.Groups[1].Value + "); it will not be taken over."),
         PrefixedRule("固件当前不执行保持功能（", @"(.+)）。$", m => "The firmware is not running its hold feature right now (" + m.Groups[1].Value + ")."),
         PrefixedRule("原始状态0x", @"([0-9A-F]{4})已改变（当前0x([0-9A-F]{2})）；不接管已有设置。$", m => "Original state 0x" + m.Groups[1].Value + " changed (now 0x" + m.Groups[2].Value + "); existing settings will not be taken over."),
@@ -423,13 +423,16 @@ public static class UiTextCatalog
 限充运行中：已请求停充，等待固件响应。	Charge limit running: hold requested, waiting for the firmware.
 已开启：100% 不限制，按原生策略充电。	On: 100% sets no limit; charging follows the native policy.
 限充已关闭；按原生策略充电。	Charge limit off; charging follows the native policy.
-限充已关闭；恢复未确认，固件会在约 30 分钟内自行恢复正常充电。	Charge limit off; restoration unconfirmed. The firmware returns to normal charging by itself within about 30 minutes.
+限充已关闭；恢复未确认，固件计时到期后会自行恢复正常充电（通常约 30 分钟，最长 3 天）。	Charge limit off; restoration unconfirmed. The firmware returns to normal charging by itself when its countdown runs out (usually about 30 minutes, at most 3 days).
+关机：低于上限，正在恢复原值。	Shutting down below the limit; putting the original values back.
 旧版限充仍在生效，请先恢复原值。	The earlier limit method is still applied; restore the original values first.
 另一个限充会话或恢复仍在运行。	Another charge-limit session or restoration is still running.
 无法启动限充进程。	Could not start the charge-limit process.
 限充进程未能启动。	The charge-limit process did not start.
 限充进程已退出。	The charge-limit process has exited.
 限充启动超时。	Starting the charge limit timed out.
+找不到 RevoHelper 程序文件现在的位置，它可能已被移动或删除。请退出 RevoHelper，再从程序文件所在的位置重新打开。	Cannot find where the RevoHelper program file is now; it may have been moved or deleted. Exit RevoHelper and open it again from where the file is.
+RevoHelper 程序文件已被移到回收站。请退出 RevoHelper，再从保留的程序文件重新打开。	The RevoHelper program file was moved to the Recycle Bin. Exit RevoHelper and open it again from a copy you keep.
 已断开电源或电池状态无效，停止并恢复。	Power was disconnected or the battery state is invalid; stopping and restoring.
 平台状态被改变，停止并恢复。	The platform state changed; stopping and restoring.
 固件计时出现意外数值，停止并恢复。	The firmware countdown shows an unexpected value; stopping and restoring.
@@ -1083,7 +1086,7 @@ Windows 显示控制器未接入。	Windows display control is not connected.
 未能确认官方控制台状态	Console status unknown
 官方控制台仍在运行	Console still running
 长期退出	Always exit
-打开后，每次 RevoHelper 启动时都会退出官方控制中心的窗口和托盘，打开时也会马上退出一次。随 Windows 启动时官方托盘会稍后出现，所以会在 3 分钟内每 10 秒检查一次。	When on, RevoHelper closes the official window and tray every time it starts, and once right away. When it starts with Windows, the official tray appears later, so it checks every 10 seconds for 3 minutes.
+打开后，每次 RevoHelper 启动时都会退出官方控制中心的窗口和托盘，打开时也会马上退出一次。官方托盘有时会稍后才出现：随 Windows 启动后会在 3 分钟内每 10 秒检查一次；睡眠唤醒或发现官方服务刚启动后也会这样检查，但只退出托盘。	When on, RevoHelper closes the official window and tray every time it starts, and once right away. The official tray can appear later: after starting with Windows it checks every 10 seconds for 3 minutes; after a wake from sleep, or when it finds that the official service has just started, it checks the same way but closes only the tray.
 长期退出已关闭	Always exit is off
 没能退出官方控制台，可以再试一次	Exit failed. Try again.
 已退出官方控制台，后台服务保留	Exited. Services kept.

@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using System.Security.Principal;
 using Microsoft.Win32;
 
@@ -24,23 +23,7 @@ public sealed class WindowsStartupTaskPlatform : IStartupTaskPlatform
         }
     }
 
-    public string? ReadTaskXml() => WithFolder<string?>(folder =>
-    {
-        object? task = null;
-        try
-        {
-            task = folder.GetTask(TaskName);
-            return (string)((dynamic)task).Xml;
-        }
-        catch (COMException exception) when (exception.HResult == unchecked((int)0x80070002))
-        {
-            return null;
-        }
-        finally
-        {
-            Release(task);
-        }
-    });
+    public string? ReadTaskXml() => ScheduledTaskFolder.ReadTaskXml(TaskName);
 
     public void RegisterTask(string xml)
     {
@@ -60,14 +43,29 @@ public sealed class WindowsStartupTaskPlatform : IStartupTaskPlatform
         });
     }
 
-    public void RemoveTask()
+    // TASK_UPDATE only (TASK_CREATE_OR_UPDATE is 6): a task removed in the meantime stays removed.
+    public void UpdateTask(string xml)
     {
         RequireAdministrator();
         WithFolder<object?>(folder =>
         {
-            folder.DeleteTask(TaskName, 0);
-            return null;
+            object? registered = null;
+            try
+            {
+                registered = folder.RegisterTask(TaskName, xml, 4, CurrentUserSid, null, 3, null);
+                return null;
+            }
+            finally
+            {
+                Release(registered);
+            }
         });
+    }
+
+    public void RemoveTask()
+    {
+        RequireAdministrator();
+        ScheduledTaskFolder.DeleteTask(TaskName);
     }
 
     public string? ReadLegacyRunCommand()
@@ -137,26 +135,7 @@ public sealed class WindowsStartupTaskPlatform : IStartupTaskPlatform
             throw new UnauthorizedAccessException("请以管理员身份运行 RevoHelper 后重试。");
     }
 
-    private static T WithFolder<T>(Func<dynamic, T> action)
-    {
-        object? service = null;
-        object? folder = null;
-        try
-        {
-            service = Activator.CreateInstance(Type.GetTypeFromProgID("Schedule.Service", true)!);
-            ((dynamic)service!).Connect();
-            folder = ((dynamic)service).GetFolder("\\");
-            return action(folder);
-        }
-        finally
-        {
-            Release(folder);
-            Release(service);
-        }
-    }
+    private static T WithFolder<T>(Func<dynamic, T> action) => ScheduledTaskFolder.With(action);
 
-    private static void Release(object? value)
-    {
-        if (value is not null && Marshal.IsComObject(value)) Marshal.FinalReleaseComObject(value);
-    }
+    private static void Release(object? value) => ScheduledTaskFolder.Release(value);
 }

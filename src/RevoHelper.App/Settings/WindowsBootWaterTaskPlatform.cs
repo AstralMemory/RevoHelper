@@ -4,6 +4,7 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
+using RevoHelper.App.Lifecycle;
 
 namespace RevoHelper.App.Settings;
 
@@ -17,19 +18,16 @@ public sealed class WindowsBootWaterTaskPlatform : IBootWaterTaskPlatform
     public static string InstalledPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
         "RevoHelper", "BootWater", "RevoHelper.BootWater.exe");
 
-    private readonly string sourcePath;
+    private readonly Func<string> locateSource;
 
-    /// <param name="sourcePath">The executable to deploy; defaults to the running RevoHelper.</param>
+    /// <param name="sourcePath">
+    /// The executable to deploy; defaults to the running RevoHelper, found when it is deployed
+    /// because the file may have been moved since this process started.
+    /// </param>
     public WindowsBootWaterTaskPlatform(string? sourcePath = null) =>
-        this.sourcePath = sourcePath ?? Environment.ProcessPath ?? throw new IOException("无法确定 RevoHelper 的位置，未安装任务。");
+        locateSource = sourcePath is null ? RunningExecutable.Locate : () => sourcePath;
 
-    public string? ReadTaskXml() => WithFolder<string?>(folder =>
-    {
-        object? task = null;
-        try { task = folder.GetTask(TaskName); return (string)((dynamic)task).Xml; }
-        catch (COMException ex) when (ex.HResult == unchecked((int)0x80070002)) { return null; }
-        finally { Release(task); }
-    });
+    public string? ReadTaskXml() => ScheduledTaskFolder.ReadTaskXml(TaskName);
 
     public void RegisterTask(string xml)
     {
@@ -45,7 +43,7 @@ public sealed class WindowsBootWaterTaskPlatform : IBootWaterTaskPlatform
     public void RemoveTask()
     {
         RequireAdministrator();
-        WithFolder<object?>(folder => { folder.DeleteTask(TaskName, 0); return null; });
+        ScheduledTaskFolder.DeleteTask(TaskName);
     }
 
     public bool IsInstalledHelperValid()
@@ -70,7 +68,7 @@ public sealed class WindowsBootWaterTaskPlatform : IBootWaterTaskPlatform
     public void DeployVerifiedHelper()
     {
         RequireAdministrator();
-        using var source = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var source = new FileStream(locateSource(), FileMode.Open, FileAccess.Read, FileShare.Read);
         var directory = Path.GetDirectoryName(InstalledPath)!;
         RejectReparsePoints(directory);
         foreach (var protectedDirectory in new[] { Path.GetDirectoryName(directory)!, directory })
@@ -194,20 +192,7 @@ public sealed class WindowsBootWaterTaskPlatform : IBootWaterTaskPlatform
             throw new UnauthorizedAccessException("请以管理员身份运行 RevoHelper 后重试。");
     }
 
-    private static T WithFolder<T>(Func<dynamic, T> action)
-    {
-        object? service = null;
-        object? folder = null;
-        try
-        {
-            service = Activator.CreateInstance(Type.GetTypeFromProgID("Schedule.Service", true)!);
-            ((dynamic)service!).Connect();
-            folder = ((dynamic)service).GetFolder("\\");
-            return action(folder);
-        }
-        finally { Release(folder); Release(service); }
-    }
+    private static T WithFolder<T>(Func<dynamic, T> action) => ScheduledTaskFolder.With(action);
 
-    private static void Release(object? value)
-    { if (value is not null && Marshal.IsComObject(value)) Marshal.FinalReleaseComObject(value); }
+    private static void Release(object? value) => ScheduledTaskFolder.Release(value);
 }

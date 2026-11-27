@@ -7,6 +7,8 @@ public interface IStartupTaskPlatform
     string CurrentUserSid { get; }
     string? ReadTaskXml();
     void RegisterTask(string xml);
+    /// <summary>Changes the task that is there; fails rather than create one when it is gone.</summary>
+    void UpdateTask(string xml);
     void RemoveTask();
     string? ReadLegacyRunCommand();
     bool IsLegacyRunDisabled();

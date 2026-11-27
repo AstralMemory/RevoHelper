@@ -203,10 +203,22 @@ public sealed class ExperimentalChargeClient : IExperimentalChargeController, ID
             if (ChargeSessionFiles.IsProcess(lease.GuardianId, lease.GuardianStartTicks)
                 || ChargeSessionFiles.IsProcess(lease.WorkerId, lease.WorkerStartTicks))
                 throw new InvalidOperationException("原监护或工作进程仍在恢复，不并行写入。");
-            using var self = Process.GetCurrentProcess();
-            using var helper = ChargeSessionFiles.Launch("--experimental-charge-recover", files.SessionId,
-                lease.LimitPercent, self.Id, self.StartTime.ToUniversalTime().Ticks);
-            await helper.WaitForExitAsync(cancellationToken).WaitAsync(TimeSpan.FromSeconds(45), cancellationToken).ConfigureAwait(false);
+            Process helper;
+            try
+            {
+                using var self = Process.GetCurrentProcess();
+                helper = ChargeSessionFiles.Launch("--experimental-charge-recover", files.SessionId,
+                    lease.LimitPercent, self.Id, self.StartTime.ToUniversalTime().Ticks);
+            }
+            catch (Exception exception)
+            {
+                // The helper did not start, so nothing was written: the record stays pending and the
+                // restore button can be pressed again.
+                SetStatus(new(RecoveryPending: true, LimitPercent: lease.LimitPercent, Message: exception.Message, SessionId: files.SessionId));
+                throw;
+            }
+            using (helper)
+                await helper.WaitForExitAsync(cancellationToken).WaitAsync(TimeSpan.FromSeconds(45), cancellationToken).ConfigureAwait(false);
             await WaitForRestorationAsync(files, cancellationToken).ConfigureAwait(false);
         }
         finally { operations.Release(); }

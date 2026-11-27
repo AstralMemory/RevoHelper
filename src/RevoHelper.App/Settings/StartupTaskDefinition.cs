@@ -50,6 +50,23 @@ public static class StartupTaskDefinition
         return document.ToString(SaveOptions.DisableFormatting);
     }
 
+    /// <summary>
+    /// The same task, starting the program file at <paramref name="executablePath"/>. Only the
+    /// program path and its working folder change; the delay, triggers and settings stay as the
+    /// user may have set them.
+    /// </summary>
+    public static string WithExecutable(string xml, string executablePath)
+    {
+        if (!Path.IsPathFullyQualified(executablePath))
+            throw new ArgumentException("启动程序必须为绝对路径。", nameof(executablePath));
+        var executable = Path.GetFullPath(executablePath);
+        var root = Parse(xml);
+        var action = root.Descendants(Ns + "Exec").Single();
+        action.SetElementValue(Ns + "Command", executable);
+        action.SetElementValue(Ns + "WorkingDirectory", Path.GetDirectoryName(executable));
+        return root.ToString(SaveOptions.DisableFormatting);
+    }
+
     public static bool IsOwned(string xml)
     {
         try

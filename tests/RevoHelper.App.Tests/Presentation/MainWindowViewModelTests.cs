@@ -810,6 +810,74 @@ public sealed class MainWindowViewModelTests
         Assert.Empty(frontends.Closed);
     }
 
+    // After a wake or a restart the official service opens its tray again by itself.
+    [Fact]
+    public void WatchOfficialTrayAgain_ClosesTheTrayTheServiceOpens_AndLeavesTheWindow()
+    {
+        var window = new OfficialFrontendProcess(3, "CCUWinUI");
+        var frontends = new FakeOfficialFrontends(window);
+        var delays = 0;
+        var exit = new OfficialFrontendExit(frontends, (_, _) =>
+        {
+            if (Interlocked.Increment(ref delays) == 2) frontends.Start(new OfficialFrontendProcess(7, "SystrayComponent"));
+            return Task.CompletedTask;
+        });
+        var viewModel = CreateViewModel(settings: new ApplicationSettings(ExitOfficialConsole: true), officialFrontendExit: exit);
+
+        Assert.True(viewModel.WatchOfficialTrayAgain());
+
+        Assert.True(SpinWait.SpinUntil(() => frontends.Closed.Count == 1, TimeSpan.FromSeconds(10)));
+        Assert.Equal("SystrayComponent", frontends.Closed[0].Name);
+        Assert.Contains(window, frontends.Find().Targets);
+    }
+
+    // A wake while a watch runs gives that watch more time for the tray; no second watch starts.
+    [Fact]
+    public async Task WatchOfficialTrayAgain_GivesAWatchAlreadyRunningMoreTime_AndNeedsLongTermExit()
+    {
+        var frontends = new FakeOfficialFrontends(new OfficialFrontendProcess(1, "SystrayComponent"));
+        var off = CreateViewModel(officialFrontendExit: new OfficialFrontendExit(frontends, (_, _) => Task.CompletedTask));
+        Assert.False(off.WatchOfficialTrayAgain());
+        Assert.Empty(frontends.Closed);
+
+        var waits = 0;
+        var waiting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var watched = new FakeOfficialFrontends();
+        var exit = new OfficialFrontendExit(watched, async (_, token) =>
+        {
+            Interlocked.Increment(ref waits);
+            waiting.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+        });
+        var on = CreateViewModel(settings: new ApplicationSettings(ExitOfficialConsole: true), officialFrontendExit: exit);
+        on.StartOfficialConsoleWatch();
+        await waiting.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.True(on.WatchOfficialTrayAgain());
+        Assert.True(on.WatchOfficialTrayAgain());
+        await Task.Delay(200);
+        Assert.Equal(1, Volatile.Read(ref waits));
+        Assert.Equal(1, watched.Finds);
+        on.BeginShutdown();
+        Assert.False(on.WatchOfficialTrayAgain());
+    }
+
+    // A watch that has ended is not given more time: a new one looks for the tray.
+    [Fact]
+    public void WatchOfficialTrayAgain_AfterAWatchHasEnded_StartsANewOne()
+    {
+        var frontends = new FakeOfficialFrontends();
+        var viewModel = CreateViewModel(settings: new ApplicationSettings(ExitOfficialConsole: true),
+            officialFrontendExit: new OfficialFrontendExit(frontends, (_, _) => Task.CompletedTask));
+        viewModel.StartOfficialConsoleWatch();
+        Assert.True(SpinWait.SpinUntil(() => frontends.Finds == 19, TimeSpan.FromSeconds(10)));
+
+        frontends.Start(new OfficialFrontendProcess(7, "SystrayComponent"));
+        Assert.True(viewModel.WatchOfficialTrayAgain());
+
+        Assert.True(SpinWait.SpinUntil(() => frontends.Closed.Count == 1, TimeSpan.FromSeconds(10)));
+    }
+
     [Fact]
     public void StartOfficialConsoleWatch_LeavesTheOfficialConsoleAloneWhileLongTermExitIsOff()
     {
@@ -1100,9 +1168,9 @@ public sealed class MainWindowViewModelTests
     {
         var viewModel = new MainWindowViewModel(CreateDashboard());
 
-        Assert.Equal("V1.0.8", viewModel.ReleaseVersionText);
-        Assert.Equal("V1.0.8", viewModel.ReleaseBadgeText);
-        Assert.Equal("RevoHelper V1.0.8 · 免费使用", viewModel.AppVersionText);
+        Assert.Equal("V1.0.9", viewModel.ReleaseVersionText);
+        Assert.Equal("V1.0.9", viewModel.ReleaseBadgeText);
+        Assert.Equal("RevoHelper V1.0.9 · 免费使用", viewModel.AppVersionText);
     }
 
     [Fact]
@@ -1120,7 +1188,7 @@ public sealed class MainWindowViewModelTests
         Assert.Equal("Laptop performance profiles", viewModel.UiCopy.HomeTitle);
         Assert.Equal("Performance", viewModel.DrawerTitle);
         Assert.Equal("Tuning", viewModel.UiCopy.PerformanceEntryTitle);   // the home button is too narrow for "Performance"
-        Assert.Equal("RevoHelper V1.0.8 · Free to use", viewModel.AppVersionText);
+        Assert.Equal("RevoHelper V1.0.9 · Free to use", viewModel.AppVersionText);
     }
 
     [Fact]

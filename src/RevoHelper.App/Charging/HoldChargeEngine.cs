@@ -21,6 +21,9 @@ public sealed class HoldChargeEngine(Func<IReviewedChargeTransport> createTransp
     // 0x10E0 minutes = 3 days: how long a limit that was holding stays applied after Windows shuts down.
     public const byte ShutdownHigh = 0x10, ShutdownLow = 0xE0;
     public const int ResumeBelowLimitBy = 3;
+    // Logged when Windows shuts down while the charge is below the limit: the answer to the
+    // shutdown signal, given before the restore.
+    public const string ShutdownBelowLimitNote = "shutdown-below-limit";
 
     public static void ValidateInitial(ChargeEcSnapshot s, byte timerHigh, byte timerLow, byte gate073F, byte gate0727, byte gate097C)
     {
@@ -42,82 +45,102 @@ public sealed class HoldChargeEngine(Func<IReviewedChargeTransport> createTransp
     {
         if (limit is not (60 or 80)) throw new ArgumentOutOfRangeException(nameof(limit));
         var transport = createTransport();
-        byte originalThreshold = 0;
+        byte originalThreshold = 0, lastThreshold = 0, lastFlags = 0;
         var touched = false;
         var holding = false;
         StopReason = null;
         HeldForShutdown = false;
         try
         {
-            var first = transport.ReadSnapshot();
-            var leftoverHigh = Read(transport, TimerHigh);
-            var leftoverLow = Read(transport, TimerLow);
-            var leftover = leftoverHigh != 0 || leftoverLow != 0;
-            // After an earlier run the threshold still holds our last value; the firmware's own is 0.
-            originalThreshold = leftover ? (byte)0 : Read(transport, Threshold);
-            ValidateInitial(first, leftoverHigh, leftoverLow,
-                Read(transport, 0x073F), Read(transport, 0x0727), Read(transport, 0x097C));
-            // Only after the checks: a refusal must not write anything, not even a restore.
-            touched = leftover;
-            var failures = 0;
-            while (!shouldStop())
+            try
             {
-                string note;
-                try
+                var first = transport.ReadSnapshot();
+                var leftoverHigh = Read(transport, TimerHigh);
+                var leftoverLow = Read(transport, TimerLow);
+                var leftover = leftoverHigh != 0 || leftoverLow != 0;
+                // Logged before anything changes. After a shutdown it shows how much of the long
+                // countdown is left, and so whether the limit stayed applied while the laptop was off.
+                // Only what was read anyway: one more read that failed here would end the takeover and
+                // leave that countdown running. The threshold and flags are not known yet (0).
+                if (leftover)
+                    observe(new(DateTimeOffset.Now, -1, false, 0, leftoverHigh, leftoverLow, 0,
+                        first.PowerOnline, first.Charging, first.ChargeRateMw, "leftover"));
+                // After an earlier run the threshold still holds our last value; the firmware's own is 0.
+                originalThreshold = leftover ? (byte)0 : Read(transport, Threshold);
+                ValidateInitial(first, leftoverHigh, leftoverLow,
+                    Read(transport, 0x073F), Read(transport, 0x0727), Read(transport, 0x097C));
+                // Only after the checks: a refusal must not write anything, not even a restore.
+                touched = leftover;
+                var failures = 0;
+                while (!shouldStop())
                 {
-                    var s = transport.ReadSnapshot();
-                    if (!s.PowerOnline || (s.Byte(0x0490) & 5) != 5)
-                        throw new HoldStopException("已断开电源或电池状态无效，停止并恢复。");
-                    if (s.Byte(0x07C3) != 7) throw new HoldStopException("平台状态被改变，停止并恢复。");
-                    var soc = s.Byte(0x04AB);
-                    var high = Read(transport, TimerHigh);
-                    var low = Read(transport, TimerLow);
-                    var threshold = Read(transport, Threshold);
-                    // A long countdown is the one left for a shutdown: back to the short, renewed one.
-                    if (high != 0) { touched = true; transport.WriteOwnedByte(TimerHigh, high, 0); high = 0; }
-                    var want = holding ? soc > limit - ResumeBelowLimitBy : soc >= limit;
-                    if (want)
+                    string note;
+                    try
                     {
-                        // Never below the current charge: above the threshold the firmware discharges.
-                        // One point of headroom covers a gauge reading that ticks up between polls.
-                        var target = (byte)Math.Min(100, Math.Max(limit, soc + 1));
-                        if (threshold != target) { touched = true; transport.WriteOwnedByte(Threshold, threshold, target); threshold = target; }
-                        if (low < RefreshBelow || low > KeepAlive) { touched = true; transport.WriteOwnedByte(TimerLow, low, KeepAlive); low = KeepAlive; }
-                        note = holding ? "hold" : "hold-start";
-                        holding = true;
+                        var s = transport.ReadSnapshot();
+                        if (!s.PowerOnline || (s.Byte(0x0490) & 5) != 5)
+                            throw new HoldStopException("已断开电源或电池状态无效，停止并恢复。");
+                        if (s.Byte(0x07C3) != 7) throw new HoldStopException("平台状态被改变，停止并恢复。");
+                        var soc = s.Byte(0x04AB);
+                        var high = Read(transport, TimerHigh);
+                        var low = Read(transport, TimerLow);
+                        var threshold = Read(transport, Threshold);
+                        // A long countdown is the one left for a shutdown: back to the short, renewed one.
+                        if (high != 0) { touched = true; transport.WriteOwnedByte(TimerHigh, high, 0); high = 0; }
+                        var want = holding ? soc > limit - ResumeBelowLimitBy : soc >= limit;
+                        if (want)
+                        {
+                            // Never below the current charge: above the threshold the firmware discharges.
+                            // One point of headroom covers a gauge reading that ticks up between polls.
+                            var target = (byte)Math.Min(100, Math.Max(limit, soc + 1));
+                            if (threshold != target) { touched = true; transport.WriteOwnedByte(Threshold, threshold, target); threshold = target; }
+                            if (low < RefreshBelow || low > KeepAlive) { touched = true; transport.WriteOwnedByte(TimerLow, low, KeepAlive); low = KeepAlive; }
+                            note = holding ? "hold" : "hold-start";
+                            holding = true;
+                        }
+                        else
+                        {
+                            if (low != 0) { transport.WriteOwnedByte(TimerLow, low, 0); low = 0; }
+                            note = holding ? "release" : "charge";
+                            holding = false;
+                        }
+                        var flags = Read(transport, Flags);
+                        observe(new(DateTimeOffset.Now, soc, holding, threshold, high, low, flags,
+                            s.PowerOnline, s.Charging, s.ChargeRateMw, note));
+                        (lastThreshold, lastFlags) = (threshold, flags);
+                        failures = 0;
                     }
-                    else
+                    catch (HoldStopException) { throw; }
+                    catch (Exception exception) when (++failures < 5)
                     {
-                        if (low != 0) { transport.WriteOwnedByte(TimerLow, low, 0); low = 0; }
-                        note = holding ? "release" : "charge";
-                        holding = false;
+                        // The countdown ticks under us, so an owned write can lose a race. A failed
+                        // write may leave the channel unusable: start a fresh one and look again.
+                        observe(new(DateTimeOffset.Now, -1, holding, 0, 0, 0, 0, true, false, 0, "retry: " + exception.Message));
+                        transport.Dispose();
+                        transport = createTransport();
                     }
-                    observe(new(DateTimeOffset.Now, soc, holding, threshold, high, low, Read(transport, Flags),
-                        s.PowerOnline, s.Charging, s.ChargeRateMw, note));
-                    failures = 0;
+                    wait();
                 }
-                catch (HoldStopException) { throw; }
-                catch (Exception exception) when (++failures < 5)
+            }
+            catch (HoldStopException exception) { StopReason = exception.Message; }
+            catch (Exception exception) when (touched) { StopReason = exception.Message; }
+            if (StopReason is null && keepForShutdown?.Invoke() == true)
+            {
+                if (holding && ExtendForShutdown(transport, lastThreshold, lastFlags, observe))
                 {
-                    // The countdown ticks under us, so an owned write can lose a race. A failed
-                    // write may leave the channel unusable: start a fresh one and look again.
-                    observe(new(DateTimeOffset.Now, -1, holding, 0, 0, 0, 0, true, false, 0, "retry: " + exception.Message));
-                    transport.Dispose();
-                    transport = createTransport();
+                    HeldForShutdown = true;
+                    return true;
                 }
-                wait();
+                // Below the limit the last round cleared the countdown, so nothing stays applied and
+                // Windows need not wait for the restore below. Said before it: the main window waits
+                // for an answer to its signal, not for an earlier status.
+                if (!holding)
+                    observe(new(DateTimeOffset.Now, -1, false, lastThreshold, 0, 0, lastFlags, true, false, 0, ShutdownBelowLimitNote));
             }
         }
-        catch (HoldStopException exception) { StopReason = exception.Message; }
-        catch (Exception exception) when (touched) { StopReason = exception.Message; }
         finally
         {
             transport.Dispose();
-        }
-        if (StopReason is null && holding && keepForShutdown?.Invoke() == true && ExtendForShutdown(observe))
-        {
-            HeldForShutdown = true;
-            return true;
         }
         return !touched || Release(originalThreshold, observe);
     }
@@ -127,23 +150,35 @@ public sealed class HoldChargeEngine(Func<IReviewedChargeTransport> createTransp
 
     // Windows is shutting down while the limit is holding. Without this the countdown runs out
     // half an hour later and the battery, which was never full, starts charging to 100%.
-    private bool ExtendForShutdown(Action<HoldChargeObservation> observe)
+    // Windows may end this process within seconds, so the channel that is already open is used
+    // (a fresh one takes longer to set up) and only the countdown is touched. The high byte goes
+    // first: on its own it already makes the countdown last almost three days. If the open
+    // channel fails, a fresh one gets one more try.
+    private bool ExtendForShutdown(IReviewedChargeTransport open, byte threshold, byte flags,
+        Action<HoldChargeObservation> observe)
     {
-        try
+        for (var attempt = 0; attempt < 2; attempt++)
         {
-            using var transport = createTransport();
-            transport.ReadSnapshot();
-            transport.WriteOwnedByte(TimerLow, Read(transport, TimerLow), ShutdownLow);
-            transport.WriteOwnedByte(TimerHigh, Read(transport, TimerHigh), ShutdownHigh);
-            observe(new(DateTimeOffset.Now, -1, true, Read(transport, Threshold), ShutdownHigh, ShutdownLow,
-                Read(transport, Flags), true, false, 0, "shutdown-hold"));
-            return true;
+            IReviewedChargeTransport? fresh = null;
+            try
+            {
+                if (attempt > 0) fresh = createTransport();
+                var transport = fresh ?? open;
+                var high = Read(transport, TimerHigh);
+                if (high != ShutdownHigh) transport.WriteOwnedByte(TimerHigh, high, ShutdownHigh);
+                var low = Read(transport, TimerLow);
+                if (low != ShutdownLow) transport.WriteOwnedByte(TimerLow, low, ShutdownLow);
+                // The threshold and flags are from the last round, a few seconds ago; not read again.
+                observe(new(DateTimeOffset.Now, -1, true, threshold, ShutdownHigh, ShutdownLow, flags, true, false, 0, "shutdown-hold"));
+                return true;
+            }
+            catch (Exception exception)
+            {
+                observe(new(DateTimeOffset.Now, -1, true, 0, 0, 0, 0, true, false, 0, "shutdown-hold failed: " + exception.Message));
+            }
+            finally { fresh?.Dispose(); }
         }
-        catch (Exception exception)
-        {
-            observe(new(DateTimeOffset.Now, -1, true, 0, 0, 0, 0, true, false, 0, "shutdown-hold failed: " + exception.Message));
-            return false;
-        }
+        return false;
     }
 
     /// <summary>Why the last run ended on its own; null after an ordinary stop request.</summary>
